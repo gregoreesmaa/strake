@@ -1119,8 +1119,12 @@ const RENDERER_BOOTSTRAP_JS: &str = r#"
             return this.__strakeOnclick;
         }
         set onclick(handler) {
-            this.__strakeOnclick = handler || null;
-            globalThis.__strake_notification_onclick(this.__strakeNotificationId, handler);
+            // WebIDL EventHandler conversion: only callables are kept, anything
+            // else normalizes to null without throwing. The native is called
+            // first so the getter and the native map can never disagree.
+            const normalized = (typeof handler === "function") ? handler : null;
+            globalThis.__strake_notification_onclick(this.__strakeNotificationId, normalized);
+            this.__strakeOnclick = normalized;
         }
         close() {
         }
@@ -1597,6 +1601,7 @@ impl crate::runtime::ScriptRuntime {
         if let Err(error) = handler.call(&JsValue::undefined(), &[event], &mut self.context) {
             record_callback_error(&mut self.context, "Notification.onclick", &error);
         }
+        self.run_jobs("notification click microtasks");
         true
     }
 

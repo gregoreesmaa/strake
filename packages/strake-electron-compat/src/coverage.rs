@@ -330,7 +330,7 @@ const MVP_MUST: &[&str] = &[
 ];
 
 #[test]
-fn coverage_freeze_has_fifty_sorted_unique_apis() {
+fn coverage_freeze_is_sorted_unique_apis() {
     // Seeded at 50 for the Day-1 shim; issues #92–#95 add four entries
     // (Notification, powerMonitor, powerSaveBlocker, safeStorage) and
     // promote clipboard.readText/writeText to Shimmed.
