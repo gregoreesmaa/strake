@@ -1,0 +1,16 @@
+[package]
+name = "strake"
+version = "0.0.1"
+edition = "2021"
+authors = ["Gregor Eesmaa"]
+description = "Strake: Ultra-fast, lightweight native application runtime and Electron alternative in Rust."
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/gregoreesmaa/strake"
+homepage = "https://github.com/gregoreesmaa/strake"
+readme = "README.md"
+keywords = ["gui", "electron", "runtime", "desktop", "native"]
+categories = ["gui", "development-tools"]
+
+[dependencies]
+
+[workspace]

@@ -1,0 +1,24 @@
+{
+  "name": "strake",
+  "version": "0.0.1",
+  "description": "Strake: Ultra-fast, lightweight native application runtime and Electron alternative in Rust.",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gregoreesmaa/strake.git"
+  },
+  "keywords": [
+    "strake",
+    "electron-alternative",
+    "rust",
+    "native",
+    "desktop",
+    "gui"
+  ],
+  "author": "Gregor Eesmaa",
+  "license": "MIT OR Apache-2.0",
+  "bugs": {
+    "url": "https://github.com/gregoreesmaa/strake/issues"
+  },
+  "homepage": "https://github.com/gregoreesmaa/strake#readme"
+}
