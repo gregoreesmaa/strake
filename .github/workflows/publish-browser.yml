@@ -114,6 +114,14 @@ jobs:
       - name: Setup Android signing keys
         if: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/ci-test')) && matrix.platform.target == 'aarch64-linux-android' }}
         run: |
+          # The `secrets` context is unavailable in `if` expressions, so an
+          # absent keystore is detected here: forks without the 'Signed Builds'
+          # secrets bundle unsigned (dx falls back to a debug APK, handled in
+          # Post process). Repos with the secret sign exactly as before.
+          if [ -z "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" ]; then
+            echo "No Android signing secrets; bundling unsigned."
+            exit 0
+          fi
           cd apps/browser
           base64 -d <<< "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" > keystore.jks
           echo '' >> Dioxus.toml
@@ -158,7 +166,15 @@ jobs:
           version: 1.0
 
       - name: Bundle browser
-        run: dx bundle --package browser --release --profile production --target ${{ matrix.platform.target }} --locked --verbose --trace ${{ matrix.platform.args }}
+        run: |
+          # dx attempts `security import` / notarization whenever the Apple
+          # signing env vars are present — even when empty (the fork case) —
+          # and fails. Drop empties so unsigned forks bundle; repos with the
+          # 'Signed Builds' environment keep every var and sign as before.
+          for var in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_API_ISSUER APPLE_API_KEY APPLE_API_KEY_PATH; do
+            if [ -z "${!var}" ]; then unset "$var"; fi
+          done
+          dx bundle --package browser --release --profile production --target ${{ matrix.platform.target }} --locked --verbose --trace ${{ matrix.platform.args }}
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -167,9 +183,16 @@ jobs:
           APPLE_API_KEY_PATH: ${{ vars.APPLE_API_KEY_PATH }}
 
       - name: Post process
-        if: ${{ matrix.platform.job_name == 'Android (aarch64)' }} 
+        if: ${{ matrix.platform.job_name == 'Android (aarch64)' }}
         run: |
-          mv ./target/dx/strake/release/android/app/app/build/outputs/apk/release/app-release.apk ./target/dx/strake/release/android/app/app/build/outputs/apk/release/Strake_0.0.0_aarch64.apk
+          # Signed builds emit release/app-release.apk; unsigned fork builds
+          # fall back to a debug (or unsigned release) APK. Publish whichever
+          # dx produced under the release artifact name.
+          APK_DIR=./target/dx/strake/release/android/app/app/build/outputs/apk
+          SRC="$APK_DIR/release/app-release.apk"
+          [ -f "$SRC" ] || SRC="$APK_DIR/release/app-release-unsigned.apk"
+          [ -f "$SRC" ] || SRC="$APK_DIR/debug/app-debug.apk"
+          mv "$SRC" "$APK_DIR/release/Strake_0.0.0_aarch64.apk"
 
       - name: Delete private key file
         if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/ci-test')) && startsWith(matrix.platform.os, 'macos') && vars.APPLE_API_KEY_PATH != '' }}
@@ -177,7 +200,7 @@ jobs:
 
       - name: Delete Android keystore
         if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/ci-test')) && matrix.platform.target == 'aarch64-linux-android' }}
-        run: rm ./apps/browser/keystore.jks
+        run: rm -f ./apps/browser/keystore.jks
 
       - name: Upload app bundle
         uses: actions/upload-artifact@v7
