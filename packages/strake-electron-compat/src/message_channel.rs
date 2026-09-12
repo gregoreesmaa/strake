@@ -31,23 +31,6 @@ impl Port {
     }
 }
 
-/// Failures posting a message.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ChannelError {
-    /// The sending port is closed (programmer error).
-    PortClosed,
-}
-
-impl std::fmt::Display for ChannelError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::PortClosed => write!(f, "MessagePort is closed"),
-        }
-    }
-}
-
-impl std::error::Error for ChannelError {}
-
 /// An entangled port pair (`new MessageChannel()`).
 ///
 /// Each port has an inbox; `post_message` on one port enqueues into the
@@ -78,16 +61,20 @@ impl MessageChannel {
     }
 
     /// `port.postMessage(value)`: enqueue into the peer's inbox.
-    /// `Err(PortClosed)` when the sending port is closed; messages to a
-    /// closed peer are dropped (matching the spec's neutered-port posture).
-    pub fn post_message(&mut self, port: Port, message: Value) -> Result<(), ChannelError> {
+    ///
+    /// A send on a closed port, or to a closed peer, is a silent no-op:
+    /// per the HTML `message-port-post-message` steps a disentangled port
+    /// resolves its target to null on both sides, and browsers never throw
+    /// for closed ports (only for unserializable payloads). There is
+    /// deliberately no `Err` surface here, so the QuickJS binding must map
+    /// this call to `undefined` unconditionally — never to a JS exception.
+    pub fn post_message(&mut self, port: Port, message: Value) {
         if self.is_closed(port) {
-            return Err(ChannelError::PortClosed);
+            return;
         }
         if !self.is_closed(port.peer()) {
             self.inbox[Self::index(port.peer())].push_back(message);
         }
-        Ok(())
     }
 
     /// Drain `port`'s inbox in FIFO order (`onmessage` batch).
@@ -100,7 +87,7 @@ impl MessageChannel {
         self.inbox[Self::index(port)].len()
     }
 
-    /// `port.close()`: further sends from this port fail; sends to it drop.
+    /// `port.close()`: further sends from this port, and sends to it, drop.
     pub fn close(&mut self, port: Port) {
         self.closed[Self::index(port)] = true;
     }
@@ -114,11 +101,9 @@ mod tests {
     #[test]
     fn ports_exchange_fifo_both_directions() {
         let mut channel = MessageChannel::new();
-        channel.post_message(Port::First, json!(1)).expect("send");
-        channel.post_message(Port::First, json!(2)).expect("send");
-        channel
-            .post_message(Port::Second, json!("back"))
-            .expect("send");
+        channel.post_message(Port::First, json!(1));
+        channel.post_message(Port::First, json!(2));
+        channel.post_message(Port::Second, json!("back"));
         assert_eq!(
             channel.take_messages(Port::Second),
             vec![json!(1), json!(2)]
@@ -128,28 +113,27 @@ mod tests {
     }
 
     #[test]
-    fn close_semantics() {
+    fn close_is_silent_noop_both_directions() {
         let mut channel = MessageChannel::new();
         assert!(!channel.is_closed(Port::First));
         channel.close(Port::First);
         assert!(channel.is_closed(Port::First));
-        assert_eq!(
-            channel.post_message(Port::First, json!(1)),
-            Err(ChannelError::PortClosed),
-            "sending on a closed port fails"
-        );
+        // Sending ON a closed port is a silent no-op (browsers never throw
+        // for closed ports): nothing is enqueued anywhere.
+        channel.post_message(Port::First, json!(1));
+        assert_eq!(channel.pending_count(Port::Second), 0);
         // The live peer can still send; its payloads drop at the closed end.
-        channel.post_message(Port::Second, json!(2)).expect("send");
+        channel.post_message(Port::Second, json!(2));
         assert_eq!(
             channel.pending_count(Port::First),
             0,
             "dropped at closed peer"
         );
         channel.close(Port::Second);
-        assert_eq!(
-            channel.post_message(Port::Second, json!(3)),
-            Err(ChannelError::PortClosed)
-        );
+        channel.post_message(Port::Second, json!(3));
+        channel.post_message(Port::First, json!(4));
+        assert_eq!(channel.pending_count(Port::First), 0);
+        assert_eq!(channel.pending_count(Port::Second), 0);
     }
 
     #[test]

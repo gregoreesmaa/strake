@@ -8,7 +8,7 @@
 //! stores strings — origin partitioning, insertion-ordered `key(n)`, a 5MB
 //! quota, and a change feed for the future `storage` event dispatch.
 //! Persistence (redb/SQLite backends, cross-window sync) binds the
-//! [`StorageBackend`] seam next; the stores themselves are backend-agnostic.
+//! `StorageBackend` seam next; the stores themselves are backend-agnostic.
 
 use std::collections::HashMap;
 
@@ -29,10 +29,61 @@ pub enum StorageAreaKind {
 pub struct Origin(String);
 
 impl Origin {
-    /// A new origin key (already normalized to `scheme://host:port` by the
-    /// caller).
+    /// A new origin key, normalized so textual variants of one origin share
+    /// a partition: the scheme and host are lowercased, default ports
+    /// (`:80` for `http`, `:443` for `https`) are dropped, and any
+    /// path/query/fragment is stripped (an origin is scheme + host + port).
+    /// Inputs without a `scheme://` prefix are lowercased verbatim.
     pub fn new(origin: &str) -> Self {
-        Self(origin.to_string())
+        Self(normalize_origin(origin))
+    }
+}
+
+/// Lowercase scheme/host, drop default ports, strip path and below.
+///
+/// Kept dependency-free on purpose (no URL crate in this layer): it covers
+/// `scheme://authority[/path][?query][#fragment]` plus bare hosts, IPv6
+/// literals in brackets, and explicit ports. Anything unrecognized falls
+/// back to a trimmed lowercase copy rather than failing.
+fn normalize_origin(origin: &str) -> String {
+    let origin = origin.trim();
+    let Some(scheme_end) = origin.find("://") else {
+        return origin.to_lowercase();
+    };
+    let scheme = origin[..scheme_end].to_lowercase();
+    let rest = &origin[scheme_end + 3..];
+    let authority_end = rest.find(['/', '?', '#']).unwrap_or(rest.len());
+    let authority = &rest[..authority_end];
+    // Split host from port without breaking IPv6 literals.
+    let (host, port, bracketed) = if let Some(stripped) = authority.strip_prefix('[') {
+        match stripped.find(']') {
+            Some(close) => {
+                let host = &stripped[..close];
+                let port = stripped[close + 1..].strip_prefix(':');
+                (host, port, true)
+            }
+            None => (authority, None, false),
+        }
+    } else {
+        match authority.rfind(':') {
+            Some(colon) if authority[colon + 1..].bytes().all(|b| b.is_ascii_digit()) => {
+                (&authority[..colon], Some(&authority[colon + 1..]), false)
+            }
+            _ => (authority, None, false),
+        }
+    };
+    let host = if bracketed {
+        format!("[{}]", host.to_lowercase())
+    } else {
+        host.to_lowercase()
+    };
+    let default_port = matches!(
+        (scheme.as_str(), port),
+        ("http", Some("80")) | ("https", Some("443"))
+    );
+    match port {
+        Some(port) if !default_port && !port.is_empty() => format!("{scheme}://{host}:{port}"),
+        _ => format!("{scheme}://{host}"),
     }
 }
 
@@ -108,7 +159,7 @@ impl StorageArea {
         area: StorageAreaKind,
         key: &str,
         value: &str,
-    ) -> Result<Option<StorageChange>, StorageError> {
+    ) -> Result<StorageChange, StorageError> {
         // The quota counts keys and values (UTF-8 bytes); overwrites keep
         // their key, so only the value delta counts then.
         let old_total = self.get(key).map(|old| key.len() + old.len()).unwrap_or(0);
@@ -125,19 +176,24 @@ impl StorageArea {
                 None
             };
         self.used_bytes = self.used_bytes.saturating_sub(old_total) + new_total;
-        Ok(Some(StorageChange {
+        Ok(StorageChange {
             area,
             key: Some(key.to_string()),
             old_value,
             new_value: Some(value.to_string()),
-        }))
+        })
     }
 
     /// `removeItem`. `None` when the key was absent (no change, no event).
     pub fn remove(&mut self, area: StorageAreaKind, key: &str) -> Option<StorageChange> {
         let index = self.entries.iter().position(|(stored, _)| stored == key)?;
         let (_, old) = self.entries.remove(index);
-        self.used_bytes -= key.len() + old.len();
+        // Defensive `saturating_sub` (mirroring `set`): `used_bytes` must
+        // equal the entry-size sum, but a future path that touches `entries`
+        // without updating the counter (backend restore, cross-window sync)
+        // must degrade to 0, never underflow-panic in debug or wrap in
+        // release.
+        self.used_bytes = self.used_bytes.saturating_sub(key.len() + old.len());
         Some(StorageChange {
             area,
             key: Some(key.to_string()),
@@ -197,6 +253,14 @@ impl WebStorage {
         }
     }
 
+    fn area(&self, origin: &Origin, area: StorageAreaKind) -> Option<&StorageArea> {
+        let partition = self.partitions.get(origin)?;
+        match area {
+            StorageAreaKind::Local => Some(&partition.local),
+            StorageAreaKind::Session => Some(&partition.session),
+        }
+    }
+
     /// `getItem` on an origin's area.
     pub fn get(&self, origin: &Origin, area: StorageAreaKind, key: &str) -> Option<String> {
         let partition = self.partitions.get(origin)?;
@@ -207,6 +271,9 @@ impl WebStorage {
     }
 
     /// `setItem` on an origin's area, recording the change.
+    ///
+    /// A quota-rejected write on an otherwise-empty partition prunes the
+    /// just-created partition instead of leaving an empty entry behind.
     pub fn set(
         &mut self,
         origin: &Origin,
@@ -214,21 +281,73 @@ impl WebStorage {
         key: &str,
         value: &str,
     ) -> Result<(), StorageError> {
-        let change = self.area_mut(origin, area).set(area, key, value)?;
-        self.changes.extend(change);
-        Ok(())
+        let result = self.area_mut(origin, area).set(area, key, value);
+        match result {
+            Ok(change) => {
+                self.changes.push(change);
+                Ok(())
+            }
+            Err(error) => {
+                if self.partitions.get(origin).is_some_and(|partition| {
+                    partition.local.is_empty() && partition.session.is_empty()
+                }) {
+                    self.partitions.remove(origin);
+                }
+                Err(error)
+            }
+        }
     }
 
     /// `removeItem` on an origin's area, recording the change.
+    ///
+    /// A missing key — or a missing partition — records nothing and inserts
+    /// nothing.
     pub fn remove(&mut self, origin: &Origin, area: StorageAreaKind, key: &str) {
-        let change = self.area_mut(origin, area).remove(area, key);
+        let Some(partition) = self.partitions.get_mut(origin) else {
+            return;
+        };
+        let slot = match area {
+            StorageAreaKind::Local => &mut partition.local,
+            StorageAreaKind::Session => &mut partition.session,
+        };
+        let change = slot.remove(area, key);
         self.changes.extend(change);
     }
 
     /// `clear()` on an origin's area, recording the change.
+    ///
+    /// Clearing an empty or missing area records nothing and inserts
+    /// nothing.
     pub fn clear(&mut self, origin: &Origin, area: StorageAreaKind) {
-        let change = self.area_mut(origin, area).clear(area);
+        let Some(partition) = self.partitions.get_mut(origin) else {
+            return;
+        };
+        let slot = match area {
+            StorageAreaKind::Local => &mut partition.local,
+            StorageAreaKind::Session => &mut partition.session,
+        };
+        let change = slot.clear(area);
         self.changes.extend(change);
+    }
+
+    /// `length` for an origin's area: 0 when the partition is absent.
+    ///
+    /// Reads through a shared `get` lookup so a missing partition is never
+    /// inserted — the JS `localStorage.length` binding calls this.
+    pub fn len(&self, origin: &Origin, area: StorageAreaKind) -> usize {
+        self.area(origin, area).map_or(0, StorageArea::len)
+    }
+
+    /// Whether an origin's area holds nothing (absent partitions count as
+    /// empty).
+    pub fn is_empty(&self, origin: &Origin, area: StorageAreaKind) -> bool {
+        self.len(origin, area) == 0
+    }
+
+    /// `key(n)` for an origin's area in insertion order: `None` when the
+    /// partition is absent or `n` is out of range, without inserting.
+    pub fn key(&self, origin: &Origin, area: StorageAreaKind, index: usize) -> Option<String> {
+        self.area(origin, area)?.key(index)
     }
 
     /// Drain recorded changes in order (future `storage` event dispatch).
@@ -260,15 +379,21 @@ mod tests {
                 .as_deref(),
             Some("1")
         );
-        // Overwrite keeps its original index.
+        // Overwrite keeps its original index (via the public `WebStorage`
+        // surface, the same path the JS `length` / `key(n)` binding uses).
         storage
             .set(&origin(), StorageAreaKind::Local, "b", "3")
             .expect("set");
-        let partition = storage.partitions.get(&origin()).expect("partition");
-        assert_eq!(partition.local.key(0).as_deref(), Some("b"));
-        assert_eq!(partition.local.key(1).as_deref(), Some("a"));
-        assert_eq!(partition.local.key(2), None);
-        assert_eq!(partition.local.len(), 2);
+        assert_eq!(
+            storage.key(&origin(), StorageAreaKind::Local, 0).as_deref(),
+            Some("b")
+        );
+        assert_eq!(
+            storage.key(&origin(), StorageAreaKind::Local, 1).as_deref(),
+            Some("a")
+        );
+        assert_eq!(storage.key(&origin(), StorageAreaKind::Local, 2), None);
+        assert_eq!(storage.len(&origin(), StorageAreaKind::Local), 2);
     }
 
     #[test]
@@ -333,5 +458,144 @@ mod tests {
         assert_eq!(changes[3].key, None, "clear() has no key");
         assert_eq!(changes[3].area, StorageAreaKind::Session);
         assert!(storage.take_changes().is_empty(), "drain empties the feed");
+    }
+
+    #[test]
+    fn origin_variants_share_one_partition() {
+        for spelling in [
+            "https://example.com",
+            "https://example.com:443",
+            "HTTPS://EXAMPLE.COM",
+            "https://example.com:443/some/path?query#fragment",
+            "  https://Example.COM  ",
+        ] {
+            assert_eq!(
+                Origin::new(spelling),
+                origin(),
+                "spelling shares the partition: {spelling}"
+            );
+        }
+        // Non-default ports, schemes, and hosts stay isolated.
+        assert_ne!(Origin::new("https://example.com:8443"), origin());
+        assert_ne!(Origin::new("http://example.com"), origin());
+        assert_ne!(Origin::new("http://example.com:80"), origin());
+        assert_eq!(
+            Origin::new("http://example.com"),
+            Origin::new("http://example.com:80"),
+            "http default port drops too"
+        );
+        assert_ne!(Origin::new("https://other.test"), origin());
+        // Data written under one spelling reads back under the others.
+        let mut storage = WebStorage::new();
+        storage
+            .set(
+                &Origin::new("HTTPS://EXAMPLE.COM:443"),
+                StorageAreaKind::Local,
+                "k",
+                "v",
+            )
+            .expect("set");
+        assert_eq!(
+            storage
+                .get(
+                    &Origin::new("https://example.com"),
+                    StorageAreaKind::Local,
+                    "k"
+                )
+                .as_deref(),
+            Some("v")
+        );
+    }
+
+    #[test]
+    fn length_and_key_read_absent_partitions_without_inserting() {
+        let storage = WebStorage::new();
+        let missing = Origin::new("https://missing.test");
+        assert_eq!(storage.len(&missing, StorageAreaKind::Local), 0);
+        assert!(storage.is_empty(&missing, StorageAreaKind::Session));
+        assert_eq!(storage.key(&missing, StorageAreaKind::Local, 0), None);
+        assert_eq!(storage.get(&missing, StorageAreaKind::Local, "k"), None);
+        assert!(
+            !storage.partitions.contains_key(&missing),
+            "reads must not insert partitions"
+        );
+    }
+
+    #[test]
+    fn noop_mutations_leave_no_partition_behind() {
+        let mut storage = WebStorage::new();
+        let missing = Origin::new("https://missing.test");
+        storage.remove(&missing, StorageAreaKind::Local, "nope");
+        storage.clear(&missing, StorageAreaKind::Local);
+        storage.clear(&missing, StorageAreaKind::Session);
+        // A quota-rejected write must not leave an empty partition either.
+        let big = "x".repeat(STORAGE_QUOTA_BYTES + 1);
+        assert_eq!(
+            storage.set(&missing, StorageAreaKind::Local, "big", &big),
+            Err(StorageError::QuotaExceeded)
+        );
+        assert!(
+            !storage.partitions.contains_key(&missing),
+            "no-op mutations must not insert partitions"
+        );
+        assert!(storage.take_changes().is_empty());
+        // And the public reads still report empty without inserting.
+        assert_eq!(storage.len(&missing, StorageAreaKind::Local), 0);
+        assert_eq!(storage.key(&missing, StorageAreaKind::Local, 0), None);
+    }
+
+    #[test]
+    fn quota_credits_remove_overwrite_shrink_and_clear() {
+        let mut storage = WebStorage::new();
+        // Fill to 10 bytes under quota; the same-shaped write then fails.
+        let filler = "v".repeat(STORAGE_QUOTA_BYTES - "filler".len() - 10);
+        storage
+            .set(&origin(), StorageAreaKind::Local, "filler", &filler)
+            .expect("near-quota set");
+        let blocked_value = "v".repeat(11);
+        assert_eq!(
+            storage.set(&origin(), StorageAreaKind::Local, "extra", &blocked_value),
+            Err(StorageError::QuotaExceeded)
+        );
+        // `remove` frees the bytes: the same write succeeds again.
+        storage.remove(&origin(), StorageAreaKind::Local, "filler");
+        storage
+            .set(&origin(), StorageAreaKind::Local, "extra", &blocked_value)
+            .expect("remove credits quota");
+        // Overwrite-with-smaller frees the delta: a near-quota refill fits.
+        let refill = "w".repeat(STORAGE_QUOTA_BYTES - "extra".len() - blocked_value.len() - 1);
+        storage
+            .set(&origin(), StorageAreaKind::Local, "extra", "s")
+            .expect("shrink");
+        storage
+            .set(&origin(), StorageAreaKind::Local, "refill", &refill)
+            .expect("overwrite-shrink credits quota");
+        assert_eq!(
+            storage
+                .get(&origin(), StorageAreaKind::Local, "refill")
+                .as_deref(),
+            Some(refill.as_str())
+        );
+        // `clear` frees everything: the full-size write fits again.
+        storage.clear(&origin(), StorageAreaKind::Local);
+        let full = "z".repeat(STORAGE_QUOTA_BYTES - "full".len());
+        storage
+            .set(&origin(), StorageAreaKind::Local, "full", &full)
+            .expect("clear credits quota");
+    }
+
+    #[test]
+    fn remove_with_stale_counter_saturates_instead_of_underflowing() {
+        // Simulates a future path (backend restore, cross-window sync) that
+        // touches `entries` without updating the counter: the accounting
+        // must degrade to 0, never underflow (panic in debug, wrap in
+        // release).
+        let mut area = StorageArea::new();
+        area.set(StorageAreaKind::Local, "k", "value").expect("set");
+        area.used_bytes = 0;
+        let change = area.remove(StorageAreaKind::Local, "k");
+        assert!(change.is_some(), "entry is still removed");
+        assert_eq!(area.used_bytes, 0);
+        assert!(area.is_empty());
     }
 }
