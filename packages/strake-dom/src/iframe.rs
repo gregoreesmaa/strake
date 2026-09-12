@@ -129,6 +129,7 @@ impl BaseDocument {
             self.id(),
             Some(node_id),
             self.shell_provider.clone(),
+            url.as_str().to_string(),
             DocumentSrcHandler,
         );
         let signal = self.new_iframe_generation(node_id, Some(handler.request_id()));

@@ -57,12 +57,22 @@ impl<D: Send + Sync + 'static> WptNetProvider<D> {
         match request.url.scheme() {
             "data" => {
                 let url = request.url.as_str().to_string();
-                let data_url = DataUrl::process(request.url.as_str()).inspect_err(|_| {
-                    callback.queue.record_failure(request_id);
-                })?;
-                let decoded = data_url.decode_to_vec().inspect_err(|_| {
-                    callback.queue.record_failure(request_id);
-                })?;
+                let data_url = match DataUrl::process(request.url.as_str()) {
+                    Ok(data_url) => data_url,
+                    Err(e) => {
+                        callback.queue.record_failure(request_id);
+                        handler.error(url, format!("failed to parse data URL: {e:?}"));
+                        return Err(e.into());
+                    }
+                };
+                let decoded = match data_url.decode_to_vec() {
+                    Ok(decoded) => decoded,
+                    Err(e) => {
+                        callback.queue.record_failure(request_id);
+                        handler.error(url, format!("failed to decode data URL: {e:?}"));
+                        return Err(e.into());
+                    }
+                };
                 handler.bytes(url, Bytes::from(decoded.0));
 
                 callback.queue.record_success(None, request_id);
@@ -75,10 +85,16 @@ impl<D: Send + Sync + 'static> WptNetProvider<D> {
                     .strip_prefix('/')
                     .unwrap_or(request.url.path());
                 let path = self.base_path.join(relative_path);
-                let file_content = std::fs::read(&path).inspect_err(|err| {
-                    warn!("Error loading {}: {}", path.display(), err);
-                    callback.queue.record_failure(request_id);
-                })?;
+                let url = request.url.to_string();
+                let file_content = match std::fs::read(&path) {
+                    Ok(file_content) => file_content,
+                    Err(e) => {
+                        warn!("Error loading {}: {}", path.display(), e);
+                        callback.queue.record_failure(request_id);
+                        handler.error(url, format!("failed to read {}: {e}", path.display()));
+                        return Err(e.into());
+                    }
+                };
                 catch_unwind(AssertUnwindSafe(|| {
                     handler.bytes(request.url.to_string(), Bytes::from(file_content))
                 }))

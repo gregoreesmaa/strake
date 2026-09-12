@@ -16,6 +16,7 @@ strake-test-harness = { workspace = true }
 strake-dom = { workspace = true, features = ["accessibility", "floats", "system-fonts"] }
 strake-html = { workspace = true }
 strake-traits = { workspace = true }
+strake-shell = { workspace = true, features = ["data-uri"] }
 strake-paint = { workspace = true, features = ["scrollbars", "svg"] }
 dioxus-native-dom = { workspace = true }
 anyrender = { workspace = true }

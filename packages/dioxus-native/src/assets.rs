@@ -48,9 +48,11 @@ impl NetProvider for DioxusNativeNetProvider {
                     tracing::trace!("fetching asset from file system success {request:#?}");
                     handler.bytes(request.url.to_string(), res.into_body().into())
                 }
-                Err(_) => {
+                Err(e) => {
                     #[cfg(feature = "tracing")]
                     tracing::warn!("fetching asset from file system error {request:#?}");
+                    let url = request.url.to_string();
+                    handler.error(url, format!("asset fetch failed: {e:?}"));
                 }
             }
         } else if let Some(inner) = &self.inner_net_provider {
@@ -58,6 +60,10 @@ impl NetProvider for DioxusNativeNetProvider {
         } else {
             #[cfg(feature = "tracing")]
             tracing::warn!("net feature not enabled, cannot fetch {request:#?}");
+            handler.error(
+                request.url.to_string(),
+                String::from("net feature not enabled, cannot fetch"),
+            );
         }
     }
 }

@@ -505,6 +505,7 @@ impl BaseDocument {
                         self.pending_images
                             .insert(url_str.to_string(), vec![(node_id, kind.image_type(idx))]);
 
+                        let request_url = url_str.to_string();
                         self.net_provider.fetch(
                             doc_id,
                             crate::net::stamped_request(
@@ -516,6 +517,7 @@ impl BaseDocument {
                                 doc_id,
                                 None, // Don't pass node_id, we'll handle via pending_images
                                 self.shell_provider.clone(),
+                                request_url,
                                 ImageHandler::new(kind.image_type(idx)),
                             ),
                         );

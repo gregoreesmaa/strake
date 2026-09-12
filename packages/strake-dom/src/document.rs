@@ -1092,6 +1092,7 @@ impl BaseDocument {
                     // println!("Node {node_id} {href} {href_to_reload} {} {}", resolved_href.as_str(), resolved_href.as_str() == url_to_reload);
                     if href == href_to_reload {
                         let resolved_href = self.resolve_url(href);
+                        let request_url = resolved_href.as_str().to_string();
                         self.net_provider.fetch(
                             self.id(),
                             self.build_request(resolved_href.clone()),
@@ -1100,6 +1101,7 @@ impl BaseDocument {
                                 self.id,
                                 Some(node_id),
                                 self.shell_provider.clone(),
+                                request_url,
                                 StylesheetHandler {
                                     source_url: resolved_href,
                                     guard: self.guard.clone(),
