@@ -27,5 +27,5 @@ mod window;
 
 pub use app::{App, AppEventKind, AppPath};
 pub use coverage::{ApiEntry, SupportStatus, TOP50};
-pub use ipc::{IpcBus, IpcError};
+pub use ipc::{IpcBus, IpcError, ListenerId};
 pub use window::{BrowserWindow, BrowserWindowOptions, TitleBarStyle, WebContents, WindowManager};

@@ -29,19 +29,32 @@ pub enum AppEventKind {
 }
 
 /// Named paths served by `app.getPath` / overridden by `app.setPath`.
+///
+/// Electron names verified against the upstream `app.getPath(name)` docs:
+/// `home`, `appData`, `userData` (= `appData` + app name), `sessionData`
+/// (= `userData`), `temp`, `exe`, `module`, `desktop`, `documents`,
+/// `downloads`, `music`, `pictures`, `videos`, `recent` (Windows-only),
+/// `logs`, `crashDumps`; unknown names throw. This MVP maps the seven
+/// variants below. Only [`AppPath::Temp`] has an OS default
+/// ([`std::env::temp_dir`]); every other variant returns `None` from
+/// [`App::get_path`] until the embedder calls [`App::set_path`]. The
+/// remaining OS folders (`$HOME`, `%APPDATA%`, XDG known-folders, …) have
+/// no sound `std`-only derivation (`std::env::home_dir` is deprecated and
+/// env-var guessing diverges from the OS known-folder APIs Electron uses),
+/// so they stay explicit rather than guessed — no new crates for this MVP.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AppPath {
-    /// Per-app profile data (`app.setPath` in embeds; no OS default here).
+    /// Per-app profile data (Electron `userData`; requires [`App::set_path`]).
     UserData,
-    /// Roaming app data (no OS default in MVP).
+    /// Roaming app data (Electron `appData`; requires [`App::set_path`]).
     AppData,
-    /// Desktop directory (no OS default in MVP).
+    /// Desktop directory (requires [`App::set_path`]).
     Desktop,
-    /// Documents directory (no OS default in MVP).
+    /// Documents directory (requires [`App::set_path`]).
     Documents,
-    /// Downloads directory (no OS default in MVP).
+    /// Downloads directory (requires [`App::set_path`]).
     Downloads,
-    /// Home directory (no OS default in MVP).
+    /// Home directory (requires [`App::set_path`]).
     Home,
     /// OS temporary directory (defaults to [`std::env::temp_dir`]).
     Temp,
@@ -52,9 +65,12 @@ type Listener = Box<dyn Fn()>;
 /// Electron `app` module: lifecycle, identity, and paths.
 ///
 /// Listeners registered with [`App::on`] fire in registration order; `ready`
-/// fires exactly once. `quit()` emits `before-quit` then `will-quit`.
-/// `note_window_closed(0)` emits `window-all-closed` and quits unless
-/// opted out (macOS-style), matching Electron's default.
+/// fires exactly once and never after `quit()`. `quit()` emits
+/// `before-quit` then `will-quit`. `note_window_closed(0)` emits
+/// `window-all-closed` once per transition to zero (repeats without an
+/// intervening nonzero report are dropped) and quits unless opted out
+/// (macOS-style), matching Electron's default. No lifecycle event fires
+/// after `quit()`.
 pub struct App {
     name: String,
     version: String,
@@ -63,6 +79,7 @@ pub struct App {
     quit_on_all_windows_closed: bool,
     listeners: HashMap<AppEventKind, Vec<Listener>>,
     paths: HashMap<AppPath, PathBuf>,
+    last_window_count: Option<usize>,
 }
 
 impl App {
@@ -76,6 +93,7 @@ impl App {
             quit_on_all_windows_closed: true,
             listeners: HashMap::new(),
             paths: HashMap::from([(AppPath::Temp, std::env::temp_dir())]),
+            last_window_count: None,
         }
     }
 
@@ -108,9 +126,11 @@ impl App {
     }
 
     /// Runtime initialisation finished: fire `ready` once (`app.whenReady`
-    /// resolves). Later calls are no-ops.
+    /// resolves). Later calls are no-ops, as are calls after `quit()`: a
+    /// quit app never becomes ready, so embedders may call this
+    /// unconditionally when init completes.
     pub fn mark_ready(&mut self) {
-        if self.ready {
+        if self.ready || self.quit {
             return;
         }
         self.ready = true;
@@ -132,10 +152,16 @@ impl App {
         self.quit_on_all_windows_closed = quit;
     }
 
-    /// Called by the window manager with the remaining window count.
-    /// Zero remaining emits `window-all-closed` (and quits by default).
+    /// Called by the window manager with the remaining window count. The
+    /// first zero report — and each later nonzero-to-zero transition —
+    /// emits `window-all-closed` (and quits by default); repeated zero
+    /// reports without an intervening nonzero count are dropped so poll
+    /// loops and post-quit reports cannot re-fire listeners. Reports after
+    /// `quit()` are recorded but emit nothing.
     pub fn note_window_closed(&mut self, windows_remaining: usize) {
-        if windows_remaining > 0 {
+        let duplicate_zero = windows_remaining == 0 && self.last_window_count == Some(0);
+        self.last_window_count = Some(windows_remaining);
+        if self.quit || windows_remaining > 0 || duplicate_zero {
             return;
         }
         self.emit(AppEventKind::WindowAllClosed);
@@ -145,6 +171,12 @@ impl App {
     }
 
     /// Resolve a named path (`app.getPath`); `None` until set, except `Temp`.
+    ///
+    /// Only [`AppPath::Temp`] resolves out of the box. `UserData`,
+    /// `AppData`, `Desktop`, `Documents`, `Downloads`, and `Home` all
+    /// require [`App::set_path`] first — the Day-1 TS shim must define its
+    /// `None` mapping (e.g. fall back to `Temp` or throw like Electron
+    /// does for unknown names) rather than unwrapping.
     pub fn get_path(&self, path: AppPath) -> Option<PathBuf> {
         self.paths.get(&path).cloned()
     }
@@ -237,4 +269,70 @@ fn name_and_version_are_reported() {
     let app = App::new("QuickStart", "1.0.0");
     assert_eq!(app.name(), "QuickStart");
     assert_eq!(app.version(), "1.0.0");
+}
+
+// PIN (review PR #79): `ready` must not fire after `quit()`. A quit during
+// startup followed by a late `mark_ready()` must leave a dead app silent.
+#[test]
+fn ready_does_not_fire_after_quit() {
+    let (events, push) = log();
+    let mut app = App::new("QuickStart", "1.0.0");
+    app.on(AppEventKind::Ready, move || push("ready"));
+    app.quit();
+    app.mark_ready();
+    assert!(
+        events.borrow().is_empty(),
+        "no `ready` after quit, got {:?}",
+        *events.borrow()
+    );
+    assert!(!app.is_ready(), "a quit app never becomes ready");
+}
+
+// PIN (review PR #79): `window-all-closed` fires once per transition to
+// zero; repeated `note_window_closed(0)` reports must not re-emit.
+#[test]
+fn window_all_closed_fires_once_per_transition_to_zero() {
+    let (events, push) = log();
+    let mut app = App::new("QuickStart", "1.0.0");
+    app.set_quit_on_all_windows_closed(false);
+    app.on(AppEventKind::WindowAllClosed, move || {
+        push("window-all-closed")
+    });
+    app.note_window_closed(0);
+    app.note_window_closed(0);
+    assert_eq!(
+        *events.borrow(),
+        vec!["window-all-closed"],
+        "duplicate zero reports re-emitted"
+    );
+    app.note_window_closed(2);
+    app.note_window_closed(0);
+    assert_eq!(
+        *events.borrow(),
+        vec!["window-all-closed", "window-all-closed"],
+        "a new nonzero-to-zero transition must emit again"
+    );
+}
+
+// PIN (review PR #79): contract lock — only `Temp` has an OS default; every
+// other `AppPath` is `None` until `set_path`. If a sound `std`-only default
+// is ever added for a name, this test names the place to update.
+#[test]
+fn only_temp_resolves_without_set_path() {
+    let app = App::new("QuickStart", "1.0.0");
+    assert_eq!(app.get_path(AppPath::Temp), Some(std::env::temp_dir()));
+    for path in [
+        AppPath::UserData,
+        AppPath::AppData,
+        AppPath::Desktop,
+        AppPath::Documents,
+        AppPath::Downloads,
+        AppPath::Home,
+    ] {
+        assert_eq!(
+            app.get_path(path),
+            None,
+            "{path:?} requires set_path: no sound std-only OS default"
+        );
+    }
 }
