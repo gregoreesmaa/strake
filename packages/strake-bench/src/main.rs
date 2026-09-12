@@ -130,12 +130,12 @@ fn main() {
             "cold-boot p95 {p95:.2} ms exceeds budget {max_p95:.2} ms"
         ));
     }
-    if let Some(mib) = rss {
-        if mib > max_rss {
-            breaches.push(format!(
-                "idle RSS {mib:.2} MiB exceeds budget {max_rss:.2} MiB"
-            ));
-        }
+    if let Some(mib) = rss
+        && mib > max_rss
+    {
+        breaches.push(format!(
+            "idle RSS {mib:.2} MiB exceeds budget {max_rss:.2} MiB"
+        ));
     }
     if !breaches.is_empty() {
         for b in &breaches {
