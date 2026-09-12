@@ -86,14 +86,13 @@ impl WebContents {
         self.pending_url = Some(url.to_string());
     }
 
-    /// Load a local file (`win.loadFile`).
+    /// Load a local file (`win.loadFile`): like Electron the path resolves
+    /// to an absolute `file:///` URL. Relative paths resolve against the
+    /// process working directory (no app root exists yet at this layer),
+    /// `file://` prefixes normalize instead of passing through, Windows
+    /// `\` separators become `/`, and the path percent-encodes.
     pub fn load_file(&mut self, path: &str) {
-        let url = if path.starts_with("file://") {
-            path.to_string()
-        } else {
-            format!("file://{path}")
-        };
-        self.pending_url = Some(url);
+        self.pending_url = Some(file_url_from_path(path));
     }
 
     /// Currently loading (or loaded) target, if any.
@@ -105,6 +104,61 @@ impl WebContents {
     pub fn send(&self, bus: &IpcBus, channel: &str, value: Value) {
         bus.send(channel, value);
     }
+}
+
+/// Resolve a `loadFile` path to an absolute `file:///` URL.
+///
+/// A leading `file://` is stripped and re-derived (so a previously built
+/// `file://relative` is repaired, not passed through), `\` becomes `/`,
+/// relative paths join the process working directory, and the result is
+/// always `file://` + an absolute, percent-encoded path.
+fn file_url_from_path(path: &str) -> String {
+    let stripped = path.strip_prefix("file://").unwrap_or(path);
+    let slashed = stripped.replace('\\', "/");
+    let absolute = if is_absolute_path(&slashed) {
+        slashed
+    } else {
+        match std::env::current_dir() {
+            Ok(cwd) => {
+                let root = cwd.to_string_lossy();
+                format!(
+                    "{}/{}",
+                    root.trim_end_matches('/'),
+                    slashed.trim_start_matches('/')
+                )
+            }
+            Err(_) => format!("/{}", slashed.trim_start_matches('/')),
+        }
+    };
+    let rooted = if absolute.starts_with('/') {
+        absolute
+    } else {
+        format!("/{absolute}")
+    };
+    format!("file://{}", percent_encode_path(&rooted))
+}
+
+/// POSIX-absolute (`/...`) or Windows-absolute (`C:/...`, `C:...`).
+fn is_absolute_path(path: &str) -> bool {
+    let bytes = path.as_bytes();
+    path.starts_with('/')
+        || (bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':')
+}
+
+/// Percent-encode a URL path over UTF-8 bytes, keeping the characters that
+/// are legal bare in a `file:` URL path (`/`, `:` for drive letters, and
+/// the RFC 3986 unreserved set). `?`/`#` encode so they cannot start a
+/// query or fragment.
+fn percent_encode_path(path: &str) -> String {
+    let mut out = String::with_capacity(path.len());
+    for byte in path.bytes() {
+        if byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b'~' | b'/' | b':') {
+            out.push(byte as char);
+        } else {
+            out.push_str(&format!("%{byte:02X}"));
+        }
+    }
+    out
 }
 
 /// One managed window: options, chrome state, and web contents.
@@ -192,7 +246,7 @@ impl BrowserWindow {
 pub struct WindowManager {
     windows: HashMap<u32, BrowserWindow>,
     next_id: u32,
-    on_last_closed: Option<Box<dyn Fn()>>,
+    on_last_closed: Option<Box<dyn Fn(usize)>>,
 }
 
 impl WindowManager {
@@ -224,8 +278,13 @@ impl WindowManager {
         self.windows.get_mut(&id)
     }
 
-    /// Fire `callback` when the final window closes.
-    pub fn on_last_window_closed(&mut self, callback: impl Fn() + 'static) {
+    /// Fire `callback` with the remaining window count when the final
+    /// window closes (always zero today). The count is passed in so the
+    /// embedder can feed [`App::note_window_closed`](crate::App::note_window_closed)
+    /// without touching the manager: the callback runs while `close()`
+    /// holds `&mut self`, so re-borrowing the manager inside the callback
+    /// (e.g. via `Rc<RefCell<WindowManager>>`) panics — use the count.
+    pub fn on_last_window_closed(&mut self, callback: impl Fn(usize) + 'static) {
         self.on_last_closed = Some(Box::new(callback));
     }
 
@@ -237,7 +296,7 @@ impl WindowManager {
         if self.windows.is_empty()
             && let Some(callback) = &self.on_last_closed
         {
-            callback();
+            callback(self.windows.len());
         }
         true
     }
@@ -388,9 +447,14 @@ fn closing_last_window_fires_callback_once() {
     use std::rc::Rc;
     let mut manager = manager();
     let fires = Rc::new(RefCell::new(0u32));
+    let seen = Rc::new(RefCell::new(Vec::new()));
     {
         let fires = Rc::clone(&fires);
-        manager.on_last_window_closed(move || *fires.borrow_mut() += 1);
+        let seen = Rc::clone(&seen);
+        manager.on_last_window_closed(move |remaining| {
+            *fires.borrow_mut() += 1;
+            seen.borrow_mut().push(remaining);
+        });
     }
     let a = manager.create(BrowserWindowOptions::default());
     let b = manager.create(BrowserWindowOptions::default());
@@ -398,28 +462,59 @@ fn closing_last_window_fires_callback_once() {
     assert_eq!(*fires.borrow(), 0, "windows remain");
     assert!(manager.close(b));
     assert_eq!(*fires.borrow(), 1, "last close fires exactly once");
+    assert_eq!(*seen.borrow(), vec![0], "callback receives zero remaining");
     assert_eq!(manager.window_count(), 0);
 }
 
 #[test]
 fn last_close_drives_app_shutdown() {
-    // The Day-1 loop: manager's last-close callback feeds App, which emits
-    // window-all-closed and quits (Electron default).
+    // The Day-1 loop: the last-close callback feeds the count straight into
+    // App (no manager re-borrow), which emits window-all-closed and quits
+    // (Electron default).
     use std::cell::RefCell;
     use std::rc::Rc;
-    let mut app = crate::App::new("QuickStart", "1.0.0");
+    let app = Rc::new(RefCell::new(crate::App::new("QuickStart", "1.0.0")));
     let mut manager = manager();
     let events: Rc<RefCell<Vec<String>>> = Rc::new(RefCell::new(Vec::new()));
-    app.on(crate::AppEventKind::WindowAllClosed, {
+    app.borrow_mut().on(crate::AppEventKind::WindowAllClosed, {
         let events = Rc::clone(&events);
         move || events.borrow_mut().push(String::from("window-all-closed"))
     });
+    {
+        let app = Rc::clone(&app);
+        manager.on_last_window_closed(move |remaining| {
+            app.borrow_mut().note_window_closed(remaining);
+        });
+    }
     let id = manager.create(BrowserWindowOptions::default());
-    manager.on_last_window_closed(|| {});
     assert!(manager.close(id));
-    app.note_window_closed(manager.window_count());
     assert_eq!(*events.borrow(), vec!["window-all-closed"]);
-    assert!(app.is_quit());
+    assert!(app.borrow().is_quit());
+}
+
+// PIN (review PR #79): the Day-1 wiring must survive shared ownership
+// (`Rc<RefCell<..>>` on both sides). Before the count-passing callback the
+// only wiring re-borrowed the manager inside `close()` and panicked with
+// `BorrowMutError`; now the callback never touches the manager.
+#[test]
+fn last_close_wiring_needs_no_manager_reborrow() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    let app = Rc::new(RefCell::new(crate::App::new("QuickStart", "1.0.0")));
+    let manager = Rc::new(RefCell::new(manager()));
+    {
+        let app = Rc::clone(&app);
+        manager
+            .borrow_mut()
+            .on_last_window_closed(move |remaining| {
+                assert_eq!(remaining, 0);
+                app.borrow_mut().note_window_closed(remaining);
+            });
+    }
+    let id = manager.borrow_mut().create(BrowserWindowOptions::default());
+    assert!(manager.borrow_mut().close(id));
+    assert!(app.borrow().is_quit());
+    assert_eq!(manager.borrow().window_count(), 0);
 }
 
 #[test]
@@ -446,3 +541,50 @@ fn web_contents_records_navigation_and_sends_ipc() {
     win.web_contents().send(&bus, "ping", json!({"n": 1}));
     assert_eq!(*received.borrow(), Some(json!({"n": 1})));
 }
+
+// PIN (review PR #79): relative `loadFile` paths must resolve to absolute
+// `file:///` URLs, never `file://<host-ish-first-segment>`.
+#[test]
+fn load_file_resolves_relative_paths_to_absolute_file_urls() {
+    let mut contents = WebContents::default();
+    contents.load_file("renderer/index.html");
+    let url = contents.pending_url().expect("pending url").to_string();
+    assert!(
+        url.starts_with("file:///"),
+        "relative path must yield an absolute file URL, got {url}"
+    );
+    assert!(
+        url.ends_with("/renderer/index.html"),
+        "path tail must survive, got {url}"
+    );
+}
+
+// PIN (review PR #79): `file://` prefixes normalize, special chars encode,
+// Windows separators convert.
+#[test]
+fn load_file_normalizes_prefix_encodes_and_converts_separators() {
+    let mut contents = WebContents::default();
+    contents.load_file("file:///app/index.html");
+    assert_eq!(
+        contents.pending_url(),
+        Some("file:///app/index.html"),
+        "already-absolute file URL must round-trip"
+    );
+    contents.load_file("/app/my page.html");
+    assert_eq!(
+        contents.pending_url(),
+        Some("file:///app/my%20page.html"),
+        "spaces must be percent-encoded"
+    );
+    contents.load_file("C:\\app\\index.html");
+    assert_eq!(
+        contents.pending_url(),
+        Some("file:///C:/app/index.html"),
+        "Windows separators must convert"
+    );
+}
+
+// NOTE (review PR #79): a temporary REPRO test on the pre-fix code proved
+// the old `Fn()` wiring panicked here with `RefCell already mutably
+// borrowed`; it was replaced by `last_close_wiring_needs_no_manager_reborrow`
+// above once the callback received the remaining count.

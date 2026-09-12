@@ -18,6 +18,9 @@ pub enum IpcError {
     UnknownChannel(String),
     /// The channel handler rejected the invocation.
     HandlerFailed(String),
+    /// A handler is already registered for the channel, matching Electron's
+    /// `ipcMain.handle` throw ("Attempted to register a second handler").
+    DuplicateHandler(String),
 }
 
 impl fmt::Display for IpcError {
@@ -25,6 +28,10 @@ impl fmt::Display for IpcError {
         match self {
             Self::UnknownChannel(channel) => write!(f, "no IPC handler for channel {channel:?}"),
             Self::HandlerFailed(message) => write!(f, "IPC handler failed: {message}"),
+            Self::DuplicateHandler(channel) => write!(
+                f,
+                "attempted to register a second handler for channel {channel:?}"
+            ),
         }
     }
 }
@@ -33,6 +40,14 @@ impl std::error::Error for IpcError {}
 
 type Handler = Box<dyn Fn(Value) -> Result<Value, String>>;
 type Listener = Box<dyn Fn(&Value)>;
+
+/// Handle to one `on` listener, returned for `removeListener`.
+pub type ListenerId = u64;
+
+struct ListenerEntry {
+    id: ListenerId,
+    callback: Listener,
+}
 
 /// In-process JSON IPC bus (`ipcMain` + `ipcRenderer`).
 ///
@@ -44,7 +59,8 @@ type Listener = Box<dyn Fn(&Value)>;
 #[derive(Default)]
 pub struct IpcBus {
     handlers: HashMap<String, Handler>,
-    listeners: HashMap<String, Vec<Listener>>,
+    listeners: HashMap<String, Vec<ListenerEntry>>,
+    next_listener_id: ListenerId,
 }
 
 impl IpcBus {
@@ -53,14 +69,20 @@ impl IpcBus {
         Self::default()
     }
 
-    /// Register an `ipcMain.handle(channel, handler)` responder,
-    /// replacing any previous handler for the channel.
+    /// Register an `ipcMain.handle(channel, handler)` responder. Errors
+    /// with [`IpcError::DuplicateHandler`] when the channel already has a
+    /// handler, matching Electron's throw; call [`IpcBus::remove_handler`]
+    /// first to replace one intentionally.
     pub fn handle(
         &mut self,
         channel: &str,
         handler: impl Fn(Value) -> Result<Value, String> + 'static,
-    ) {
+    ) -> Result<(), IpcError> {
+        if self.handlers.contains_key(channel) {
+            return Err(IpcError::DuplicateHandler(channel.to_string()));
+        }
         self.handlers.insert(channel.to_string(), Box::new(handler));
+        Ok(())
     }
 
     /// Remove an `ipcMain.handle` registration.
@@ -76,15 +98,44 @@ impl IpcBus {
         }
     }
 
-    /// Subscribe an `ipcMain.on` / `ipcRenderer.on` listener.
-    pub fn on(&mut self, channel: &str, listener: impl Fn(&Value) + 'static) {
+    /// Subscribe an `ipcMain.on` / `ipcRenderer.on` listener, returning its
+    /// handle for [`IpcBus::remove_listener`]. Ids are monotonic and never
+    /// reused, so a stale id simply matches nothing.
+    pub fn on(&mut self, channel: &str, listener: impl Fn(&Value) + 'static) -> ListenerId {
+        let id = self.next_listener_id;
+        self.next_listener_id += 1;
         self.listeners
             .entry(channel.to_string())
             .or_default()
-            .push(Box::new(listener));
+            .push(ListenerEntry {
+                id,
+                callback: Box::new(listener),
+            });
+        id
     }
 
-    /// Drop every listener on a channel (`removeListener`/`removeAllListeners`).
+    /// Remove one listener by handle (`removeListener`); `false` when the
+    /// channel or id is unknown. Removing the last listener drops the
+    /// channel entry.
+    pub fn remove_listener(&mut self, channel: &str, id: ListenerId) -> bool {
+        let empty = {
+            let Some(entries) = self.listeners.get_mut(channel) else {
+                return false;
+            };
+            let before = entries.len();
+            entries.retain(|entry| entry.id != id);
+            if entries.len() == before {
+                return false;
+            }
+            entries.is_empty()
+        };
+        if empty {
+            self.listeners.remove(channel);
+        }
+        true
+    }
+
+    /// Drop every listener on a channel (`removeAllListeners`).
     pub fn remove_all_listeners(&mut self, channel: &str) {
         self.listeners.remove(channel);
     }
@@ -93,8 +144,8 @@ impl IpcBus {
     /// Channels without listeners are a silent no-op.
     pub fn send(&self, channel: &str, value: Value) {
         if let Some(listeners) = self.listeners.get(channel) {
-            for listener in listeners {
-                listener(&value);
+            for entry in listeners {
+                (entry.callback)(&value);
             }
         }
     }
@@ -106,7 +157,8 @@ use serde_json::json;
 #[test]
 fn invoke_round_trip_returns_handler_value() {
     let mut bus = IpcBus::new();
-    bus.handle("get-data", |args| Ok(json!({"echo": args})));
+    bus.handle("get-data", |args| Ok(json!({"echo": args})))
+        .expect("first registration");
     let reply = bus
         .invoke("get-data", json!({"n": 1}))
         .expect("known channel");
@@ -125,7 +177,8 @@ fn invoke_unknown_channel_errors() {
 #[test]
 fn handler_failure_propagates() {
     let mut bus = IpcBus::new();
-    bus.handle("boom", |_| Err(String::from("kaput")));
+    bus.handle("boom", |_| Err(String::from("kaput")))
+        .expect("first registration");
     let err = bus.invoke("boom", json!(null)).expect_err("handler error");
     assert_eq!(err, IpcError::HandlerFailed(String::from("kaput")));
 }
@@ -144,10 +197,57 @@ fn send_fans_out_to_all_listeners() {
     bus.send("nobody-listens", json!({}));
 }
 
+// PIN (review PR #79): duplicate `handle` registration must error like
+// Electron ("Attempted to register a second handler"), not silently swap.
+#[test]
+fn duplicate_handler_registration_errors() {
+    let mut bus = IpcBus::new();
+    bus.handle("get-data", |args| Ok(args))
+        .expect("first registration succeeds");
+    let err = bus
+        .handle("get-data", |args| Ok(args))
+        .expect_err("second registration must error");
+    assert_eq!(err, IpcError::DuplicateHandler(String::from("get-data")));
+}
+
+// PIN (review PR #79): single-listener removal must leave siblings live.
+#[test]
+fn single_listener_removal_keeps_siblings() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    let mut bus = IpcBus::new();
+    let first = Rc::new(RefCell::new(0u32));
+    let second = Rc::new(RefCell::new(0u32));
+    let first_id = bus.on("tick", {
+        let first = Rc::clone(&first);
+        move |_| *first.borrow_mut() += 1
+    });
+    bus.on("tick", {
+        let second = Rc::clone(&second);
+        move |_| *second.borrow_mut() += 1
+    });
+    assert!(bus.remove_listener("tick", first_id), "known id removes");
+    bus.send("tick", json!({}));
+    assert_eq!(
+        (*first.borrow(), *second.borrow()),
+        (0, 1),
+        "removed listener stays quiet, sibling still fires"
+    );
+    assert!(
+        !bus.remove_listener("tick", first_id),
+        "double removal reports false"
+    );
+    assert!(
+        !bus.remove_listener("missing", 999),
+        "unknown channel reports false"
+    );
+}
+
 #[test]
 fn removed_routes_go_quiet() {
     let mut bus = IpcBus::new();
-    bus.handle("get-data", |args| Ok(args));
+    bus.handle("get-data", |args| Ok(args))
+        .expect("first registration");
     bus.on("tick", |_| panic!("must not fire after removal"));
     bus.remove_handler("get-data");
     bus.remove_all_listeners("tick");

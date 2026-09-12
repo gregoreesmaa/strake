@@ -147,7 +147,7 @@ pub const TOP50: &[ApiEntry] = &[
     },
     ApiEntry {
         electron: "ipcRenderer.removeListener",
-        strake: "IpcBus::remove_all_listeners",
+        strake: "IpcBus::on -> ListenerId + remove_listener",
         status: Shimmed,
     },
     ApiEntry {
