@@ -23,11 +23,18 @@
 mod app;
 mod coverage;
 mod ipc;
+mod menu;
+mod permissions;
 mod shell;
 mod window;
 
 pub use app::{App, AppEventKind, AppPath};
 pub use coverage::{ApiEntry, SupportStatus, TOP50};
 pub use ipc::{IpcBus, IpcError, ListenerId};
+pub use menu::{
+    Accelerator, AcceleratorError, MenuError, MenuItemTemplate, MenuRole, MenuTemplate, Modifier,
+    parse_accelerator,
+};
+pub use permissions::{Decision, Enforcer, NetScope, PathScope, PermissionManifest, clean_path};
 pub use shell::{ShellError, ShellWindow};
 pub use window::{BrowserWindow, BrowserWindowOptions, TitleBarStyle, WebContents, WindowManager};
