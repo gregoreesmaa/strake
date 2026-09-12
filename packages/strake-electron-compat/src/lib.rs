@@ -23,11 +23,18 @@
 mod app;
 mod coverage;
 mod ipc;
+mod message_channel;
 mod shell;
+mod web_storage;
 mod window;
 
 pub use app::{App, AppEventKind, AppPath};
 pub use coverage::{ApiEntry, SupportStatus, TOP50};
 pub use ipc::{IpcBus, IpcError, ListenerId};
+pub use message_channel::{ChannelError, MessageChannel, Port};
 pub use shell::{ShellError, ShellWindow};
+pub use web_storage::{
+    Origin, STORAGE_QUOTA_BYTES, StorageArea, StorageAreaKind, StorageChange, StorageError,
+    StoragePartition, WebStorage,
+};
 pub use window::{BrowserWindow, BrowserWindowOptions, TitleBarStyle, WebContents, WindowManager};
