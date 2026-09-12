@@ -16,8 +16,8 @@ use crate::url::DocumentUrl;
 use crate::util::ImageType;
 use crate::{
     DEFAULT_CSS, DocumentConfig, DocumentMutator, DummyHtmlParserProvider, ElementData,
-    EventDriver, HtmlParserProvider, Node, NodeData, NoopEventHandler, StyleThreading,
-    TextNodeData,
+    EventDriver, HtmlParserProvider, MutationHooks, Node, NodeData, NoopEventHandler,
+    NoopMutationHooks, StyleThreading, TextNodeData,
 };
 use cursor_icon::CursorIcon;
 use linebender_resource_handle::Blob;
@@ -352,6 +352,11 @@ pub struct BaseDocument {
     pub navigation_provider: Arc<dyn NavigationProvider>,
     /// Shell provider. Can be used to request a redraw or set the cursor icon
     pub shell_provider: Arc<dyn ShellProvider>,
+    /// Synchronous DOM-mutation hooks for embedders implementing the DOM
+    /// standard (issue #56). See [`MutationHooks`]; defaults to
+    /// [`NoopMutationHooks`]. Set via
+    /// [`BaseDocument::set_mutation_hooks`].
+    pub mutation_hooks: Arc<dyn MutationHooks>,
     /// HTML parser provider. Used to parse HTML for setInnerHTML
     pub html_parser_provider: Arc<dyn HtmlParserProvider>,
     /// Carried on every sub-resource `Request` this document issues; aborting
@@ -486,6 +491,7 @@ impl BaseDocument {
             net_provider,
             navigation_provider,
             shell_provider,
+            mutation_hooks: Arc::new(NoopMutationHooks),
             html_parser_provider,
             abort_signal: config.abort_signal,
             last_mousedown_time: None,
@@ -541,6 +547,11 @@ impl BaseDocument {
     /// Set the Document's shell provider
     pub fn set_shell_provider(&mut self, shell_provider: Arc<dyn ShellProvider>) {
         self.shell_provider = shell_provider;
+    }
+
+    /// Set the Document's synchronous DOM-mutation hooks (issue #56).
+    pub fn set_mutation_hooks(&mut self, hooks: Arc<dyn MutationHooks>) {
+        self.mutation_hooks = hooks;
     }
 
     /// Set the Document's html parser provider
