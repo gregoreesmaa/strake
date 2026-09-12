@@ -261,6 +261,11 @@ pub const TOP50: &[ApiEntry] = &[
         status: Shimmed,
     },
     ApiEntry {
+        electron: "win.on(closed)",
+        strake: "WindowManager::on_closed",
+        status: Shimmed,
+    },
+    ApiEntry {
         electron: "win.restore",
         strake: "WindowManager::restore",
         status: Shimmed,
@@ -358,14 +363,14 @@ const MVP_MUST: &[&str] = &[
 fn coverage_freeze_has_fifty_sorted_unique_apis() {
     // Seeded at 50 for the Day-1 shim; issues #90/#96 add nine entries
     // (window geometry, webContents title, screen enumeration, plus the
-    // setMenuBarVisibility deferral decision).
-    assert_eq!(TOP50.len(), 59, "freeze grows only by reviewed diff");
+    // setMenuBarVisibility deferral decision); issue #84 adds win.on(closed).
+    assert_eq!(TOP50.len(), 60, "freeze grows only by reviewed diff");
     let names: Vec<_> = TOP50.iter().map(|entry| entry.electron).collect();
     let mut sorted = names.clone();
     sorted.sort_unstable();
     assert_eq!(names, sorted, "keep the freeze table sorted for review");
     sorted.dedup();
-    assert_eq!(sorted.len(), 59, "no duplicate Electron APIs");
+    assert_eq!(sorted.len(), 60, "no duplicate Electron APIs");
 }
 
 #[test]

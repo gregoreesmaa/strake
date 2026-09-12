@@ -232,6 +232,75 @@ fn window_geometry_resizable_and_screen_parity() {
     );
 }
 
+/// Issue #84 canary: the calculator demo's `main.js`
+/// (gregoreesmaa/strake-electron-calculator@strake-demo, 62 lines) boots
+/// under the shim — ready → one 365x675 window → loadURL → closed →
+/// window-all-closed → quit. Verbatim except for the Node core stand-ins in
+/// the header (`path`/`url`/`process` are owned by #16) and `var` for the
+/// window handle (the shipped app uses `let`; `var` only exposes the handle
+/// to the test driver). The `activate` re-create handler is registered but
+/// not exercised headless, matching the demo's own COMPAT.md.
+#[test]
+fn calculator_demo_boots_and_quits() {
+    let host = ElectronHost::new("Calculator", "1.0.0");
+    let mut doc =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    doc.install_electron(&host);
+    doc.eval(
+        "const path = { join: (...parts) => parts.join('/') }; \
+         const url = { format: (o) => 'file://' + o.pathname }; \
+         globalThis.process = { platform: 'linux' }; \
+         const electron = require('electron'); \
+         const app = electron.app; \
+         const BrowserWindow = electron.BrowserWindow; \
+         var mainWindow = null; \
+         function createWindow () { \
+             mainWindow = new BrowserWindow({width: 365, height: 675}); \
+             mainWindow.setResizable(false); \
+             mainWindow.loadURL(url.format({ pathname: path.join('/app', 'index.html'), protocol: 'file:', slashes: true })); \
+             mainWindow.on('closed', function () { mainWindow = null; __strake_send_message('demo:closed'); }); \
+         } \
+         app.on('ready', createWindow); \
+         app.on('window-all-closed', function () { if (process.platform !== 'darwin') { app.quit(); } }); \
+         app.on('activate', function () { if (mainWindow === null) { createWindow(); } });",
+    );
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "demo main.js must evaluate without throwing"
+    );
+    assert_eq!(host.window_count(), 0, "no window before ready");
+
+    doc.mark_electron_ready();
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "ready → createWindow must not throw"
+    );
+    assert_eq!(host.window_count(), 1, "exactly one window");
+    assert_eq!(host.created_window_ids(), vec![0]);
+    assert_eq!(
+        host.window_bounds(0)
+            .map(|bounds| (bounds.width, bounds.height)),
+        Some((365, 675))
+    );
+    assert_eq!(host.window_resizable(0), Some(false));
+    let pending = host
+        .window_pending_url(0)
+        .expect("loadURL records a target");
+    assert!(
+        pending.ends_with("/app/index.html"),
+        "loadURL resolves to index.html, got {pending}"
+    );
+
+    // OS close: `closed` dereferences the window, then the app quits (linux).
+    doc.eval("mainWindow.close();");
+    assert!(doc.take_js_errors().is_empty(), "close path must not throw");
+    assert_eq!(doc.take_messages(), vec!["demo:closed"]);
+    assert_eq!(host.window_count(), 0);
+    assert!(host.is_quit(), "window-all-closed quits on linux");
+}
+
 #[test]
 fn methods_on_destroyed_window_throw() {
     let (mut doc, _host) = main_doc();

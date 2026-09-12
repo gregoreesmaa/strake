@@ -26,6 +26,9 @@ pub struct Bounds {
     pub height: u32,
 }
 
+/// `win.on('closed')` listeners by window id (issue #84).
+type ClosedListeners = HashMap<u32, Vec<Box<dyn Fn(u32)>>>;
+
 /// One main-to-renderer `webContents.send` awaiting the pump (issue #91).
 #[derive(Debug, Clone, PartialEq)]
 pub struct MainSend {
@@ -329,6 +332,10 @@ pub struct WindowManager {
     windows: HashMap<u32, BrowserWindow>,
     next_id: u32,
     on_last_closed: Option<Box<dyn Fn(usize)>>,
+    /// Per-window `closed` listeners (`win.on('closed')`, issue #84).
+    /// Listeners observe only the closed id, so firing them while `close`
+    /// holds `&mut self` cannot re-borrow the manager.
+    closed_listeners: ClosedListeners,
 }
 
 impl WindowManager {
@@ -375,10 +382,33 @@ impl WindowManager {
         if self.windows.remove(&id).is_none() {
             return false;
         }
+        if let Some(listeners) = self.closed_listeners.remove(&id) {
+            for listener in listeners {
+                listener(id);
+            }
+        }
         if self.windows.is_empty()
             && let Some(callback) = &self.on_last_closed
         {
             callback(self.windows.len());
+        }
+        true
+    }
+
+    /// `win.on('closed', listener)` (issue #84): run `listener` with the
+    /// window id when this window closes. `false` for unknown ids; other
+    /// event names are the JS binding's concern (accepted, never fired).
+    pub fn on_closed(&mut self, id: u32, listener: impl Fn(u32) + 'static) -> bool {
+        match self.closed_listeners.get_mut(&id) {
+            Some(listeners) => {
+                listeners.push(Box::new(listener));
+            }
+            None => {
+                if !self.windows.contains_key(&id) {
+                    return false;
+                }
+                self.closed_listeners.insert(id, vec![Box::new(listener)]);
+            }
         }
         true
     }
@@ -813,6 +843,27 @@ fn bounds_round_trip_through_manager() {
         "unknown id fails softly"
     );
     assert_eq!(manager.get_bounds(id + 999), None);
+}
+
+#[test]
+fn closed_listeners_fire_with_id_then_release() {
+    use std::cell::RefCell;
+    use std::rc::Rc;
+    let mut manager = manager();
+    let a = manager.create(BrowserWindowOptions::default());
+    let b = manager.create(BrowserWindowOptions::default());
+    let seen = Rc::new(RefCell::new(Vec::new()));
+    for id in [a, b] {
+        let seen = Rc::clone(&seen);
+        assert!(manager.on_closed(id, move |closed| seen.borrow_mut().push(closed)));
+    }
+    assert!(!manager.on_closed(404, |_| {}), "unknown id fails softly");
+    assert!(manager.close(a));
+    assert_eq!(*seen.borrow(), vec![a], "only the closed window fires");
+    assert!(manager.close(b));
+    assert_eq!(*seen.borrow(), vec![a, b]);
+    assert!(!manager.close(a), "second close stays soft");
+    assert_eq!(*seen.borrow(), vec![a, b], "no double fire");
 }
 
 #[test]
