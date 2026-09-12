@@ -192,6 +192,49 @@ fn payloads_marshal_structurally() {
     );
 }
 
+/// Issue #92: notify → recorded delivery → click dispatch → `onclick` fires.
+#[test]
+fn notification_click_fires_onclick() {
+    let host = ElectronHost::new("QuickStart", "1.0.0");
+    let mut renderer = ScriptDocument::from_html(
+        "<html><body><script></script></body></html>",
+        DocumentConfig::default(),
+    )
+    .without_timer_thread()
+    .with_virtual_time();
+    renderer.install_electron_renderer(&host);
+    renderer.execute_scripts();
+    renderer.eval(
+        "const n = new Notification('Build done', { body: 'ok' }); \
+         n.onclick = (e) => { __strake_send_message('clicked:' + e.type); };",
+    );
+    assert!(
+        renderer.take_js_errors().is_empty(),
+        "notification construction must not throw"
+    );
+
+    let delivered = host.notification_delivered();
+    assert_eq!(delivered.len(), 1, "one recorded delivery");
+    assert_eq!(delivered[0].request.title, "Build done");
+    assert_eq!(delivered[0].request.body.as_deref(), Some("ok"));
+    assert!(!delivered[0].clicked);
+
+    assert!(
+        renderer.dispatch_notification_click(delivered[0].id),
+        "known id dispatches"
+    );
+    assert!(
+        !renderer.dispatch_notification_click(999),
+        "unknown id dispatches nothing"
+    );
+    assert!(renderer.take_js_errors().is_empty());
+    assert_eq!(renderer.take_messages(), vec!["clicked:click"]);
+    assert!(
+        host.notification_delivered()[0].clicked,
+        "delivery marked clicked"
+    );
+}
+
 #[test]
 fn pump_without_host_is_a_noop() {
     let mut main =

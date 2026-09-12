@@ -148,6 +148,56 @@ fn last_window_close_fires_window_all_closed_and_quits() {
 }
 
 #[test]
+fn os_bridges_clipboard_safe_storage_power() {
+    use strake_vibey_script::electron::PowerEvent;
+    let host = ElectronHost::new("QuickStart", "1.0.0");
+    let mut doc =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    doc.install_electron(&host);
+    doc.eval(
+        "const { clipboard, safeStorage, powerMonitor, powerSaveBlocker } = require('electron'); \
+         clipboard.writeText('hello-os'); \
+         __strake_send_message('clipboard:' + clipboard.readText()); \
+         clipboard.clear(); \
+         __strake_send_message('cleared:' + JSON.stringify(clipboard.readText())); \
+         __strake_send_message('secure:' + safeStorage.isEncryptionAvailable()); \
+         __strake_send_message('roundtrip:' + safeStorage.decryptString(safeStorage.encryptString('s3cret'))); \
+         powerMonitor.on('suspend', (e) => __strake_send_message('power:' + e.type)); \
+         powerMonitor.on('resume', (e) => __strake_send_message('power:' + e.type)); \
+         const bid = powerSaveBlocker.start('prevent-display-sleep'); \
+         __strake_send_message('blocker:' + powerSaveBlocker.isStarted(bid)); \
+         powerSaveBlocker.stop(bid); \
+         __strake_send_message('blocker-stopped:' + powerSaveBlocker.isStarted(bid));",
+    );
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "os bridge calls must not throw"
+    );
+
+    // Synthetic probe (issue #93): inject sleep/resume, assert delivery.
+    host.inject_power_event(PowerEvent::Suspend);
+    host.inject_power_event(PowerEvent::Resume);
+    assert_eq!(doc.dispatch_power_events(), 2);
+    assert!(doc.take_js_errors().is_empty());
+
+    assert_eq!(
+        doc.take_messages(),
+        vec![
+            "clipboard:hello-os",
+            "cleared:\"\"",
+            "secure:true",
+            "roundtrip:s3cret",
+            "blocker:true",
+            "blocker-stopped:false",
+            "power:suspend",
+            "power:resume",
+        ]
+    );
+}
+
+#[test]
 fn methods_on_destroyed_window_throw() {
     let (mut doc, _host) = main_doc();
     doc.eval(
