@@ -27,7 +27,7 @@ use crate::{
         construct::{
             ConstructionTask, ConstructionTaskData, ConstructionTaskResult,
             ConstructionTaskResultData, LayoutChildren, build_inline_layout_into,
-            collect_layout_children,
+            collect_layout_children, reparent_out_of_flow_children,
         },
         damage::{ALL_DAMAGE, CONSTRUCT_BOX, CONSTRUCT_DESCENDENT, CONSTRUCT_FC},
     },
@@ -94,6 +94,10 @@ impl BaseDocument {
 
         // Fix up tree for layout (insert anonymous blocks as necessary, etc)
         self.resolve_layout_children();
+        // Hoist out-of-flow boxes to their containing blocks: Taffy anchors
+        // absolute children to their tree parent, which must be the
+        // containing block rather than the DOM parent (issue #67).
+        let reparented = reparent_out_of_flow_children(self);
         timer.record_time("construct");
 
         self.resolve_deferred_tasks();
@@ -120,7 +124,9 @@ impl BaseDocument {
         // See issue #2, section 3D.
         let mut layout_damage = tree_damage;
         layout_damage.remove(RestyleDamage::REPAINT);
-        if device_changed || !layout_damage.is_empty() {
+        // A reparent is a structural tree change computed after damage
+        // propagation, so it forces a Taffy pass on its own.
+        if device_changed || reparented || !layout_damage.is_empty() {
             self.resolve_layout();
         }
         timer.record_time("layout");

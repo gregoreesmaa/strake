@@ -663,6 +663,175 @@ fn collect_layout_children_with_wrap(
     }
 }
 
+/// Reparent out-of-flow boxes to their containing blocks (issue #67).
+///
+/// Taffy resolves an absolutely-positioned child against its *taffy-tree*
+/// parent, but [`collect_layout_children`] builds the tree from DOM children,
+/// so an abspos box was anchored to its DOM parent's flow position instead of
+/// its containing block (nearest positioned ancestor for `absolute`, the
+/// viewport for `fixed`). This pass detaches such boxes from the DOM parent's
+/// `layout_children` and grafts them onto the containing block's list,
+/// updating `layout_parent` so Taffy geometry, paint/hit-test origins (both
+/// derived from the `layout_parent` chain), and `paint_children` (derived
+/// from `layout_children` in `flush_styles_to_layout`) agree.
+///
+/// Runs after every `resolve_layout_children` (reconstruction rebuilds each
+/// list from DOM children, dropping grafts) and before `resolve_layout`.
+/// Idempotent: a correctly placed box is left alone, so steady-state frames
+/// move nothing. Returns whether any box moved — a structural change the
+/// layout-damage gate in `resolve` must force a Taffy pass for.
+///
+/// Limitations (MVP scope of the issue): transformed, filtered, perspective,
+/// `contain: layout/paint`, and `will-change` ancestors are not treated as
+/// containing blocks, and `fixed` always hoists to the root element even
+/// under such an ancestor. `display: contents` ancestors stay transparent
+/// even when positioned (they generate no box to graft onto).
+pub(crate) fn reparent_out_of_flow_children(doc: &mut BaseDocument) -> bool {
+    let root_id = doc.root_element().id;
+    if doc.nodes.get(root_id).is_none() {
+        return false;
+    }
+
+    fn box_position(doc: &BaseDocument, node_id: NodeId) -> PositionProperty {
+        doc.nodes
+            .get(node_id)
+            .and_then(|node| node.primary_styles())
+            .map(|s| s.clone_position())
+            .unwrap_or(PositionProperty::Static)
+    }
+
+    // Collect out-of-flow boxes in layout-tree order so graft order preserves
+    // relative document order among boxes sharing a containing block (paint
+    // order within one stacking level is a stable sort over this order).
+    let mut out_of_flow: Vec<(NodeId, NodeId)> = Vec::new();
+    let mut stack = vec![doc.root_node().id];
+    while let Some(id) = stack.pop() {
+        let Some(node) = doc.nodes.get(id) else {
+            continue;
+        };
+        let children: Vec<NodeId> = node
+            .layout_children
+            .borrow()
+            .as_ref()
+            .map(|c| c.iter().copied().collect())
+            .unwrap_or_default();
+        for child_id in children {
+            if doc.nodes.get(child_id).is_none() {
+                continue;
+            }
+            if box_position(doc, child_id).is_absolutely_positioned() {
+                out_of_flow.push((child_id, id));
+            }
+            stack.push(child_id);
+        }
+    }
+
+    let mut moved_any = false;
+    for (node_id, from_id) in out_of_flow {
+        if node_id == root_id {
+            continue;
+        }
+        let position = box_position(doc, node_id);
+        if !position.is_absolutely_positioned() {
+            continue;
+        }
+        let to_id = if matches!(position, PositionProperty::Fixed) {
+            root_id
+        } else {
+            positioned_ancestor(doc, node_id, root_id)
+        };
+        if to_id == from_id || doc.nodes.get(to_id).is_none() {
+            continue;
+        }
+
+        // Detach from the DOM parent's list. If the node is not there the
+        // tree disagrees with `layout_parent`; skip rather than duplicate.
+        let detached = doc.nodes.get(from_id).is_some_and(|from| {
+            let mut borrowed = from.layout_children.borrow_mut();
+            if let Some(children) = borrowed.as_mut() {
+                if let Some(pos) = children.iter().position(|id| *id == node_id) {
+                    children.remove(pos);
+                    return true;
+                }
+            }
+            false
+        });
+        if !detached {
+            continue;
+        }
+
+        // Graft onto the containing block (no duplicates).
+        if let Some(to) = doc.nodes.get(to_id) {
+            let mut borrowed = to.layout_children.borrow_mut();
+            let children = borrowed.get_or_insert_with(ThinVec::new);
+            if !children.contains(&node_id) {
+                children.push(node_id);
+            }
+        }
+        doc.nodes[node_id].layout_parent.set(Some(to_id));
+
+        // Taffy caches are keyed to the old tree shape: clear the moved
+        // subtree plus both parents so the forced layout pass recomputes
+        // them while untouched subtrees keep their caches.
+        clear_layout_cache_subtree(doc, node_id);
+        if let Some(from) = doc.nodes.get_mut(from_id) {
+            from.clear_layout_cache();
+        }
+        if let Some(to) = doc.nodes.get_mut(to_id) {
+            to.clear_layout_cache();
+        }
+        moved_any = true;
+    }
+    moved_any
+}
+
+/// Nearest DOM ancestor that establishes a containing block for
+/// absolutely-positioned descendants: a non-`static`-positioned element that
+/// generates a box. `display: contents` ancestors are transparent even when
+/// positioned (no box to graft onto), as are `display: none` subtrees.
+/// Falls back to the root element (initial containing block).
+fn positioned_ancestor(doc: &BaseDocument, node_id: NodeId, root_id: NodeId) -> NodeId {
+    let mut current = doc.nodes.get(node_id).and_then(|n| n.parent);
+    while let Some(id) = current {
+        if id == root_id {
+            return root_id;
+        }
+        let Some(node) = doc.nodes.get(id) else {
+            break;
+        };
+        let establishes = node
+            .primary_styles()
+            .is_some_and(|s| !matches!(s.clone_position(), PositionProperty::Static))
+            && node.display_style().is_some_and(|d| {
+                !matches!(d.inside(), DisplayInside::Contents)
+                    && !matches!(d.outside(), DisplayOutside::None)
+            });
+        if establishes {
+            return id;
+        }
+        current = node.parent;
+    }
+    root_id
+}
+
+/// Clear the Taffy layout cache for a layout subtree (follow `layout_children`).
+fn clear_layout_cache_subtree(doc: &mut BaseDocument, id: NodeId) {
+    let mut stack = vec![id];
+    while let Some(cur) = stack.pop() {
+        let Some(node) = doc.nodes.get_mut(cur) else {
+            continue;
+        };
+        node.clear_layout_cache();
+        stack.extend(
+            node.layout_children
+                .borrow()
+                .as_ref()
+                .map(|c| c.iter().copied().collect::<Vec<_>>())
+                .unwrap_or_default(),
+        );
+    }
+}
+
 /// Extract the text generated by a pseudo-element's `content` property
 /// (only string content items are currently supported).
 fn pe_content_text(style: &style::properties::ComputedValues) -> Option<&str> {
