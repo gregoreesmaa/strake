@@ -17,9 +17,9 @@ pub struct Display {
     /// Stable display id (winit has no stable id; the embedder assigns one
     /// per snapshot, keeping 0 for the primary).
     pub id: u64,
-    /// Display bounds in physical pixels (`Display.bounds`).
+    /// Display bounds in DIP (`Display.bounds`), the same unit as [`Bounds`].
     pub bounds: Bounds,
-    /// Work area in physical pixels (`Display.workArea`); defaults to the
+    /// Work area in DIP (`Display.workArea`); defaults to the
     /// full bounds until the embedder subtracts taskbars/docks.
     pub work_area: Bounds,
     /// Pixel scale factor (`Display.scaleFactor`).
@@ -82,8 +82,9 @@ impl Screen {
     }
 
     /// The display with the greatest overlap with `bounds`
-    /// (`screen.getDisplayMatching`). Falls back to the primary on ties and
-    /// to `None` when no metrics are available.
+    /// (`screen.getDisplayMatching`), else the primary when nothing overlaps.
+    /// `None` when no metrics are available. Ties resolve to the last display
+    /// with the greatest overlap (`max_by_key` order), not the primary.
     pub fn get_display_matching(&self, bounds: &Bounds) -> Option<&Display> {
         self.displays
             .iter()

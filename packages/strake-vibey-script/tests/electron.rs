@@ -189,7 +189,9 @@ fn window_geometry_resizable_and_screen_parity() {
          __strake_send_message('primary:' + screen.getPrimaryDisplay().id); \
          __strake_send_message('all:' + screen.getAllDisplays().length); \
          __strake_send_message('match:' + screen.getDisplayMatching({ x: 2000, y: 100, width: 800, height: 600 }).id); \
-         __strake_send_message('scale:' + screen.getDisplayMatching({ x: 2000, y: 100, width: 800, height: 600 }).scaleFactor);",
+         __strake_send_message('scale:' + screen.getDisplayMatching({ x: 2000, y: 100, width: 800, height: 600 }).scaleFactor); \
+         __strake_send_message('nearest:' + screen.getDisplayNearestPoint({ x: 100, y: 100 }).id); \
+         __strake_send_message('nearest-far:' + screen.getDisplayNearestPoint({ x: 5000, y: 5000 }).id);",
     );
     let js_errors = doc.take_js_errors();
     assert!(
@@ -218,6 +220,8 @@ fn window_geometry_resizable_and_screen_parity() {
     assert!(messages.contains(&"all:2".to_string()));
     assert!(messages.contains(&"match:1".to_string()));
     assert!(messages.contains(&"scale:2".to_string()));
+    assert!(messages.contains(&"nearest:0".to_string()));
+    assert!(messages.contains(&"nearest-far:1".to_string()));
 
     // `resizable: false` parsed from options, then flipped by setResizable.
     assert_eq!(host.window_resizable(0), Some(true));
@@ -235,17 +239,34 @@ fn window_geometry_resizable_and_screen_parity() {
 #[test]
 fn methods_on_destroyed_window_throw() {
     let (mut doc, _host) = main_doc();
+    assert_eq!(doc.take_messages(), vec!["main-evaluated:false"]);
     doc.eval(
         "const BW = require('electron').BrowserWindow; \
-         const doomed = new BW({ show: false }); \
-         doomed.close(); \
-         doomed.loadFile('late.html');",
+         globalThis.__doomed = new BW({ show: false }); \
+         globalThis.__doomed.close();",
     );
+    assert!(doc.take_js_errors().is_empty());
+    // Throwing half of the split: a throw aborts its eval, so one eval per
+    // method.
+    for stmt in [
+        "globalThis.__doomed.loadFile('late.html');",
+        "globalThis.__doomed.setBounds({ x: 1, y: 2, width: 3, height: 4 });",
+        "globalThis.__doomed.getBounds();",
+        "globalThis.__doomed.webContents.getTitle();",
+    ] {
+        doc.eval(stmt);
+    }
     let errors = doc.take_js_errors();
-    assert_eq!(errors.len(), 1, "expected one throw, got {errors:?}");
-    assert!(
-        errors[0].contains("destroyed"),
-        "unexpected error: {}",
-        errors[0]
+    assert_eq!(errors.len(), 4, "expected four throws, got {errors:?}");
+    for error in &errors {
+        assert!(error.contains("destroyed"), "unexpected error: {error}");
+    }
+    // Soft-fail half: `setResizable`/`isVisible` stay silent on destroyed
+    // windows instead of throwing.
+    doc.eval(
+        "globalThis.__doomed.setResizable(false); \
+         __strake_send_message('soft-visible:' + globalThis.__doomed.isVisible());",
     );
+    assert!(doc.take_js_errors().is_empty());
+    assert_eq!(doc.take_messages(), vec!["soft-visible:false"]);
 }

@@ -242,6 +242,60 @@ fn web_contents_send_reaches_renderer_listeners() {
     );
 }
 
+/// Issue #91 routing note, pinned: the pump discards the target window id
+/// and fans every window's outbox into the single attached renderer's channel
+/// listeners, so a send addressed to window B still fires those listeners.
+/// Per-window renderer binding rides with the multi-window transport (issue
+/// #15); that change must visibly alter this test instead of silently
+/// changing delivery.
+#[test]
+fn web_contents_send_fans_out_to_single_attached_renderer() {
+    let host = ElectronHost::new("QuickStart", "1.0.0");
+    let mut main =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    main.install_electron(&host);
+    main.eval(
+        "const BW = require('electron').BrowserWindow; \
+         const winA = new BW({ show: false }); \
+         const winB = new BW({ show: false }); \
+         winA.webContents.send('tick', 'for-A'); \
+         winB.webContents.send('tick', 'for-B'); \
+         __strake_send_message('main-sent');",
+    );
+    assert!(main.take_js_errors().is_empty());
+    assert_eq!(main.take_messages(), vec!["main-sent"]);
+    assert_eq!(host.pending_main_send_count(), 2);
+
+    let mut renderer = ScriptDocument::from_html(
+        "<html><body><script></script></body></html>",
+        DocumentConfig::default(),
+    )
+    .without_timer_thread()
+    .with_virtual_time();
+    renderer.install_electron_renderer(&host);
+    renderer.execute_scripts();
+    renderer.eval(
+        "const { ipcRenderer } = require('electron'); \
+         ipcRenderer.on('tick', (event, word) => { \
+             __strake_send_message('renderer-tick:' + word); \
+         });",
+    );
+    assert!(renderer.take_js_errors().is_empty());
+
+    assert_eq!(main.pump_ipc(&mut renderer), 2);
+    assert_eq!(host.pending_main_send_count(), 0);
+    assert!(main.take_js_errors().is_empty());
+    assert!(renderer.take_js_errors().is_empty());
+    // Both windows' payloads reach the one attached renderer in window-id
+    // order, including the send addressed to window B.
+    assert_eq!(
+        renderer.take_messages(),
+        vec!["renderer-tick:for-A", "renderer-tick:for-B"]
+    );
+}
+
 /// Issue #91: sends to unknown/closed windows fail softly (no throw),
 /// matching Electron's fire-and-forget posture.
 #[test]

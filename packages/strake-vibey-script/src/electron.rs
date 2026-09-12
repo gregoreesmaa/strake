@@ -133,6 +133,9 @@ const ELECTRON_BOOTSTRAP_JS: &str = r#"
         getDisplayMatching(rect) {
             return globalThis.__strake_electron_screen_get_display_matching(rect || {});
         },
+        getDisplayNearestPoint(point) {
+            return globalThis.__strake_electron_screen_get_display_nearest_point(point || {});
+        },
     };
     electron.ipcMain = {
         handle(channel, handler) {
@@ -312,6 +315,12 @@ impl ElectronHost {
 
     /// Install real display metrics (issue #96), replacing the headless
     /// fallback snapshot that backs `screen.*`.
+    ///
+    /// Deferred producer note: nothing outside tests calls this yet — no code
+    /// converts winit monitor handles (position/size/scale factor) into a
+    /// [`Screen`], so the live shim keeps serving the `Screen::default`
+    /// 1024x768 fallback until that winit bridge lands (issue #96,
+    /// criterion 1) in a later slice.
     pub fn set_screen(&self, screen: Screen) {
         self.shared.0.borrow_mut().screen = screen;
     }
@@ -805,6 +814,25 @@ fn e_screen_get_display_matching(
     }
 }
 
+/// `screen.getDisplayNearestPoint(point)` (issue #96). `null` without
+/// metrics. Only `x`/`y` are read; extra rectangle fields are ignored.
+fn e_screen_get_display_nearest_point(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let point = match args.first() {
+        Some(value) => js_to_display_match_rect(value, context)?,
+        None => Bounds::default(),
+    };
+    let shared = electron_state(context)?;
+    let state = shared.0.borrow();
+    match state.screen.get_display_nearest_point(point.x, point.y) {
+        Some(display) => json_to_js(&display_json(display), context),
+        None => Ok(JsValue::null()),
+    }
+}
+
 /// `getDisplayMatching` accepts a full rectangle or nothing; unlike
 /// `setBounds` a missing/non-object argument means "the zero rect", which
 /// still resolves to the primary display when metrics exist.
@@ -997,6 +1025,12 @@ impl crate::runtime::ScriptRuntime {
             "__strake_electron_screen_get_display_matching",
             1,
             e_screen_get_display_matching,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_screen_get_display_nearest_point",
+            1,
+            e_screen_get_display_nearest_point,
         );
         register_primitive(
             &mut self.context,
