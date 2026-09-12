@@ -31,6 +31,11 @@
 pub const DEFAULT_CSS: &str = include_str!("../assets/default.css");
 pub const BULLET_FONT: &[u8] = include_bytes!("../assets/moz-bullet-font.otf");
 
+/// Ahem test font for hermetic layout tests: every glyph advances exactly
+/// 1em with ascent 0.8em / descent 0.2em, independent of host OS fonts.
+/// Test-only; see `hermetic_test_font_context`.
+pub const AHEM_FONT: &[u8] = include_bytes!("../assets/Ahem.ttf");
+
 /// The DOM implementation.
 ///
 /// This is the primary entry point for this crate.
@@ -44,6 +49,7 @@ mod debug;
 mod events;
 mod font_metrics;
 mod form;
+mod hermetic;
 mod html;
 /// Loading of `<iframe>` elements into sub-documents.
 mod iframe;
@@ -87,6 +93,7 @@ pub use strake_traits::node_id::NodeId;
 // `Node::final_layout`)
 pub use config::{DocumentConfig, StyleThreading};
 pub use document::{BaseDocument, DocGuard, DocGuardMut, Document, PlainDocument};
+pub use hermetic::hermetic_test_font_context;
 pub use markup5ever::{
     LocalName, Namespace, NamespaceStaticSet, Prefix, PrefixStaticSet, QualName, local_name,
     namespace_prefix, namespace_url, ns,
