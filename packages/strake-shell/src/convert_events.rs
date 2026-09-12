@@ -720,3 +720,107 @@ pub(crate) fn winit_key_to_kbt_key(winit_key: &WinitKey) -> Key {
         },
     }
 }
+
+#[cfg(test)]
+mod conversion_tests {
+    //! Regression pins for the winit -> Strake event boundary.
+    //!
+    //! Issues #9 (mobile/touch), #10 (IME/keyboard), and #20 (pointer paths)
+    //! all build on these total mappings. Every arm must stay total: unknown
+    //! OS variants fall back to a sane default instead of panicking.
+
+    use super::*;
+    use winit::event::{FingerId, Ime};
+
+    #[test]
+    fn ime_variants_round_trip() {
+        assert_eq!(winit_ime_to_strake(Ime::Enabled), StrakeImeEvent::Enabled);
+        assert_eq!(winit_ime_to_strake(Ime::Disabled), StrakeImeEvent::Disabled);
+        assert_eq!(
+            winit_ime_to_strake(Ime::Commit("hi".to_string())),
+            StrakeImeEvent::Commit("hi".to_string())
+        );
+        assert_eq!(
+            winit_ime_to_strake(Ime::Preedit("mid".to_string(), Some((0, 3)))),
+            StrakeImeEvent::Preedit("mid".to_string(), Some((0, 3)))
+        );
+        assert_eq!(
+            winit_ime_to_strake(Ime::DeleteSurrounding {
+                before_bytes: 2,
+                after_bytes: 1,
+            }),
+            StrakeImeEvent::DeleteSurrounding {
+                before_bytes: 2,
+                after_bytes: 1,
+            }
+        );
+    }
+
+    #[test]
+    fn pointer_sources_map_to_stable_ids() {
+        use winit::event::PointerSource;
+        assert_eq!(
+            pointer_source_to_strake(&PointerSource::Mouse),
+            StrakePointerId::Mouse
+        );
+        assert_eq!(
+            pointer_source_to_strake(&PointerSource::Touch {
+                finger_id: FingerId::from_raw(7),
+                force: None,
+            }),
+            StrakePointerId::Finger(7)
+        );
+        // Unknown hardware must degrade to mouse, never panic.
+        assert_eq!(
+            pointer_source_to_strake(&PointerSource::Unknown),
+            StrakePointerId::Mouse
+        );
+    }
+
+    #[test]
+    fn pointer_kinds_map_to_stable_ids() {
+        use winit::event::PointerKind;
+        assert_eq!(
+            pointer_kind_to_strake(&PointerKind::Mouse),
+            StrakePointerId::Mouse
+        );
+        assert_eq!(
+            pointer_kind_to_strake(&PointerKind::Touch(FingerId::from_raw(3))),
+            StrakePointerId::Finger(3)
+        );
+        assert_eq!(
+            pointer_kind_to_strake(&PointerKind::Unknown),
+            StrakePointerId::Mouse
+        );
+    }
+
+    #[test]
+    fn modifiers_and_locations_map_completely() {
+        use winit::keyboard::KeyLocation as Loc;
+        use winit::keyboard::ModifiersState as WinitModifiers;
+        assert_eq!(
+            winit_modifiers_to_kbt_modifiers(WinitModifiers::empty()),
+            Modifiers::empty()
+        );
+        assert_eq!(
+            winit_modifiers_to_kbt_modifiers(WinitModifiers::SHIFT | WinitModifiers::CONTROL),
+            Modifiers::SHIFT | Modifiers::CONTROL
+        );
+        assert_eq!(
+            winit_key_location_to_kbt_location(Loc::Standard),
+            Location::Standard
+        );
+        assert_eq!(
+            winit_key_location_to_kbt_location(Loc::Left),
+            Location::Left
+        );
+        assert_eq!(
+            winit_key_location_to_kbt_location(Loc::Right),
+            Location::Right
+        );
+        assert_eq!(
+            winit_key_location_to_kbt_location(Loc::Numpad),
+            Location::Numpad
+        );
+    }
+}
