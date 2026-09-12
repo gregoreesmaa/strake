@@ -65,11 +65,17 @@ impl FallbackBackend for FakeBackend {
     }
 
     fn hibernate(&mut self) {
+        // A hibernated worker holds no fresh frames: drop the cached bitmap so
+        // `frame` serves nothing until a fresh post-wake frame arrives (per
+        // the `FallbackBackend::frame` freshness contract).
+        self.live = false;
+        self.next_frame = None;
         self.hibernates += 1;
     }
 
     fn terminate(&mut self) {
         self.live = false;
+        self.next_frame = None;
         self.terminates += 1;
     }
 

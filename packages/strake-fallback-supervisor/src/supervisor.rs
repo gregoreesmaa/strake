@@ -55,6 +55,15 @@ pub struct Supervisor<B> {
     /// When the last surface was removed (`None` while any surface lives).
     emptied_at: Option<Duration>,
     warnings: Vec<String>,
+    /// Freshness epoch: advanced on every hibernate, wake, and terminate.
+    ///
+    /// A backend may still hold its last pre-hibernate bitmap after a wake;
+    /// the [`FallbackBackend::frame`](super::FallbackBackend::frame) contract
+    /// withholds it, but embedders presenting frames (e.g. in
+    /// [`FallbackWidget`](crate::FallbackWidget)) should additionally drop
+    /// the presented frame whenever [`Supervisor::epoch`] changes, so no
+    /// stale bitmap survives a lifecycle transition.
+    epoch: u64,
 }
 
 impl<B: FallbackBackend> Supervisor<B> {
@@ -68,6 +77,7 @@ impl<B: FallbackBackend> Supervisor<B> {
             occluded_since: None,
             emptied_at: None,
             warnings: Vec::new(),
+            epoch: 0,
         }
     }
 
@@ -84,6 +94,17 @@ impl<B: FallbackBackend> Supervisor<B> {
     /// The driven backend (frame pulling, test assertions).
     pub fn backend(&self) -> &B {
         &self.backend
+    }
+
+    /// The driven backend, mutably (e.g. feeding fresh frames in tests).
+    pub fn backend_mut(&mut self) -> &mut B {
+        &mut self.backend
+    }
+
+    /// Freshness epoch: changes on every hibernate, wake, and terminate.
+    /// Embedders should drop presented frames when it changes.
+    pub fn epoch(&self) -> u64 {
+        self.epoch
     }
 
     /// Drain pending DevTools diagnostics.
@@ -105,6 +126,7 @@ impl<B: FallbackBackend> Supervisor<B> {
             WorkerState::Hibernated => {
                 self.backend.wake();
                 self.state = WorkerState::Active;
+                self.epoch += 1;
             }
             WorkerState::Active => {}
         }
@@ -116,10 +138,11 @@ impl<B: FallbackBackend> Supervisor<B> {
         Ok(id)
     }
 
-    /// Unregister a surface. `false` for an unknown id (no-op otherwise).
-    pub fn remove_surface(&mut self, id: u64, now: Duration) -> bool {
+    /// Unregister a surface. [`SupervisorError::UnknownSurface`] for an
+    /// unknown id (no-op otherwise).
+    pub fn remove_surface(&mut self, id: u64, now: Duration) -> Result<(), SupervisorError> {
         if self.surfaces.remove(&id).is_none() {
-            return false;
+            return Err(SupervisorError::UnknownSurface(id));
         }
         if self.surfaces.is_empty() {
             self.emptied_at = Some(now);
@@ -127,14 +150,20 @@ impl<B: FallbackBackend> Supervisor<B> {
         } else if !self.surfaces.values().any(|surface| surface.visible) {
             self.occluded_since.get_or_insert(now);
         }
-        true
+        Ok(())
     }
 
     /// Report surface visibility (viewport intersection). A re-visible
-    /// surface wakes a hibernated worker immediately. `false` for unknown ids.
-    pub fn set_visible(&mut self, id: u64, visible: bool, now: Duration) -> bool {
+    /// surface wakes a hibernated worker immediately.
+    /// [`SupervisorError::UnknownSurface`] for unknown ids.
+    pub fn set_visible(
+        &mut self,
+        id: u64,
+        visible: bool,
+        now: Duration,
+    ) -> Result<(), SupervisorError> {
         let Some(surface) = self.surfaces.get_mut(&id) else {
-            return false;
+            return Err(SupervisorError::UnknownSurface(id));
         };
         surface.visible = visible;
         if visible {
@@ -142,11 +171,12 @@ impl<B: FallbackBackend> Supervisor<B> {
             if self.state == WorkerState::Hibernated {
                 self.backend.wake();
                 self.state = WorkerState::Active;
+                self.epoch += 1;
             }
         } else if !self.surfaces.values().any(|surface| surface.visible) {
             self.occluded_since.get_or_insert(now);
         }
-        true
+        Ok(())
     }
 
     /// Run the eviction watchdog at `now`: hibernate a fully occluded worker,
@@ -160,6 +190,7 @@ impl<B: FallbackBackend> Supervisor<B> {
                 self.backend.terminate();
                 self.state = WorkerState::Unloaded;
                 self.emptied_at = None;
+                self.epoch += 1;
                 self.warnings.push(String::from(
                     "[Strake Fallback] Terminating idle worker; memory reclaimed to native baseline.",
                 ));
@@ -172,6 +203,7 @@ impl<B: FallbackBackend> Supervisor<B> {
         {
             self.backend.hibernate();
             self.state = WorkerState::Hibernated;
+            self.epoch += 1;
         }
     }
 
@@ -264,7 +296,7 @@ mod tests {
         let mut sim = supervisor();
         let t0 = Duration::from_secs(0);
         let id = sim.add_surface(spec(), t0).unwrap();
-        assert!(sim.set_visible(id, false, t0));
+        assert!(sim.set_visible(id, false, t0).is_ok());
         sim.poll(t0 + HIBERNATE_AFTER - Duration::from_millis(1));
         assert_eq!(sim.worker_state(), WorkerState::Active);
         sim.poll(t0 + HIBERNATE_AFTER);
@@ -288,7 +320,7 @@ mod tests {
         sim.set_visible(id, false, Duration::from_secs(0));
         sim.poll(HIBERNATE_AFTER);
         assert_eq!(sim.worker_state(), WorkerState::Hibernated);
-        assert!(sim.set_visible(id, true, HIBERNATE_AFTER));
+        assert!(sim.set_visible(id, true, HIBERNATE_AFTER).is_ok());
         assert_eq!(sim.worker_state(), WorkerState::Active);
         assert_eq!(sim.backend().wakes, 1);
         assert_eq!(
@@ -302,7 +334,7 @@ mod tests {
     fn removing_last_surface_terminates_after_timeout() {
         let mut sim = supervisor();
         let id = sim.add_surface(spec(), Duration::from_secs(0)).unwrap();
-        assert!(sim.remove_surface(id, Duration::from_secs(10)));
+        assert!(sim.remove_surface(id, Duration::from_secs(10)).is_ok());
         assert_eq!(sim.surface_count(), 0);
         sim.poll(Duration::from_secs(10) + TERMINATE_AFTER - Duration::from_millis(1));
         assert_eq!(sim.worker_state(), WorkerState::Active);
@@ -315,7 +347,8 @@ mod tests {
     fn demand_after_terminate_respawns() {
         let mut sim = supervisor();
         let id = sim.add_surface(spec(), Duration::from_secs(0)).unwrap();
-        sim.remove_surface(id, Duration::from_secs(0));
+        sim.remove_surface(id, Duration::from_secs(0))
+            .expect("known surface");
         sim.poll(TERMINATE_AFTER);
         assert_eq!(sim.worker_state(), WorkerState::Unloaded);
         sim.add_surface(spec(), TERMINATE_AFTER).unwrap();
@@ -324,21 +357,65 @@ mod tests {
     }
 
     #[test]
-    fn unknown_surface_ops_fail_softly() {
+    fn unknown_surface_ops_report_typed_error() {
         let mut sim = supervisor();
-        assert!(!sim.remove_surface(999, Duration::from_secs(0)));
-        assert!(!sim.set_visible(999, true, Duration::from_secs(0)));
+        assert_eq!(
+            sim.remove_surface(999, Duration::from_secs(0)),
+            Err(SupervisorError::UnknownSurface(999))
+        );
+        assert_eq!(
+            sim.set_visible(999, true, Duration::from_secs(0)),
+            Err(SupervisorError::UnknownSurface(999))
+        );
         assert_eq!(sim.backend().spawns, 0);
     }
 
     #[test]
+    fn post_wake_pump_withholds_pre_hibernate_frame() {
+        let red = CpuFrame::solid(4, 4, [255, 0, 0, 255]).expect("tiny frame cannot overflow");
+        let green = CpuFrame::solid(4, 4, [0, 255, 0, 255]).expect("tiny frame cannot overflow");
+        let mut sim = Supervisor::new(FakeBackend::with_frame(red.clone()));
+        let epoch_before = sim.epoch();
+        let id = sim.add_surface(spec(), Duration::from_secs(0)).unwrap();
+        assert_eq!(sim.pump_frame(), Some(red.clone()));
+        sim.set_visible(id, false, Duration::from_secs(0))
+            .expect("known surface");
+        sim.poll(HIBERNATE_AFTER);
+        assert_eq!(sim.worker_state(), WorkerState::Hibernated);
+        assert!(
+            sim.epoch() > epoch_before,
+            "hibernate must advance the freshness epoch"
+        );
+        let epoch_hibernated = sim.epoch();
+        sim.set_visible(id, true, HIBERNATE_AFTER)
+            .expect("known surface");
+        assert_eq!(sim.worker_state(), WorkerState::Active);
+        assert!(
+            sim.epoch() > epoch_hibernated,
+            "wake must advance the freshness epoch"
+        );
+        assert_eq!(
+            sim.pump_frame(),
+            None,
+            "pre-hibernate bitmap is stale: withheld until a fresh frame arrives"
+        );
+        sim.backend_mut().next_frame = Some(green.clone());
+        assert_eq!(
+            sim.pump_frame(),
+            Some(green.clone()),
+            "a fresh post-wake frame flows again"
+        );
+    }
+
+    #[test]
     fn pump_frame_only_flows_while_active() {
-        let red = CpuFrame::solid(4, 4, [255, 0, 0, 255]);
+        let red = CpuFrame::solid(4, 4, [255, 0, 0, 255]).expect("tiny frame cannot overflow");
         let mut sim = Supervisor::new(FakeBackend::with_frame(red.clone()));
         assert_eq!(sim.pump_frame(), None, "no worker, no frames");
         let id = sim.add_surface(spec(), Duration::from_secs(0)).unwrap();
         assert_eq!(sim.pump_frame(), Some(red.clone()));
-        sim.set_visible(id, false, Duration::from_secs(0));
+        sim.set_visible(id, false, Duration::from_secs(0))
+            .expect("known surface");
         sim.poll(HIBERNATE_AFTER);
         assert_eq!(
             sim.pump_frame(),
