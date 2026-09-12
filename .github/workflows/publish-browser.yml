@@ -195,6 +195,8 @@ jobs:
           SRC="$APK_DIR/release/app-release.apk"
           [ -f "$SRC" ] || SRC="$APK_DIR/release/app-release-unsigned.apk"
           [ -f "$SRC" ] || SRC="$APK_DIR/debug/app-debug.apk"
+          # Unsigned builds may never create release/: ensure the target dir.
+          mkdir -p "$APK_DIR/release"
           mv "$SRC" "$APK_DIR/release/Strake_0.0.0_aarch64.apk"
 
       - name: Delete private key file
