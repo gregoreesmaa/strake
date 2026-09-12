@@ -63,18 +63,25 @@ jobs:
           wpt calc-scores --in ./sites/gh-pages/wptreport.json --out ./sites/gh-pages/wptscores.json
           zstd -22 --long --ultra -o ./sites/gh-pages/wptscores.json.zst ./sites/gh-pages/wptscores.json
       - name: Fetch main-branch results
-        run: curl https://dioxuslabs.github.io/strake/wptreport.json -o ./wpt/output/main-wptreport.json
+        run: |
+          if curl -f https://gregoreesmaa.github.io/strake/wptreport.json -o ./wpt/output/main-wptreport.json; then
+            echo "WPT_BASELINE=found" >> "$GITHUB_ENV"
+          else
+            echo "WPT_BASELINE=missing" >> "$GITHUB_ENV"
+            echo "::warning::No published main-branch WPT baseline; skipping result diff."
+          fi
       - name: Diff WPT results
+        if: env.WPT_BASELINE == 'found'
         run: |
           wpt diff ./wpt/output/main-wptreport.json ./wpt/output/wptreport.json | tee ./wpt/output/wptdiff.txt
           wpt diff --format json ./wpt/output/main-wptreport.json ./wpt/output/wptreport.json > ./wpt/output/wptdiff.json
       - name: Render results in step summary
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && env.WPT_BASELINE == 'found'
         env:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: python3 ./.github/scripts/wpt_diff_to_pr.py --dry-run ./wpt/output/wptdiff.json
       - name: Upload WPT diff
-        if: github.event_name == 'pull_request'
+        if: github.event_name == 'pull_request' && env.WPT_BASELINE == 'found'
         uses: actions/upload-artifact@v7
         with:
           name: wpt-diff
