@@ -265,7 +265,9 @@ impl ShellWindow {
     }
 
     /// The exact winit attributes `View::init` will consume at handoff,
-    /// derived from live compat state (`None` once closed).
+    /// derived from live compat state (`None` once closed). Compat [`Bounds`]
+    /// are DIP, so geometry travels as `LogicalSize`/`LogicalPosition` and
+    /// winit applies the monitor scale factor to reach physical pixels.
     pub fn window_attributes(&self) -> Option<WindowAttributes> {
         if self.closed {
             return None;

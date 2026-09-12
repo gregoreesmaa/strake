@@ -13,16 +13,20 @@ use serde_json::Value;
 
 use crate::IpcBus;
 
-/// Content rectangle (`Electron.Rectangle`): `{ x, y, width, height }`.
+/// Content rectangle (`Electron.Rectangle`): `{ x, y, width, height }`, in
+/// device-independent pixels (DIP), matching Electron's DIP rectangles. The
+/// shell hands these values to winit as `LogicalSize`/`LogicalPosition`;
+/// winit applies the monitor scale factor at handoff to reach physical
+/// pixels, so no caller converts by `scale_factor` beforehand.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct Bounds {
-    /// Left edge in physical pixels.
+    /// Left edge in DIP.
     pub x: i32,
-    /// Top edge in physical pixels.
+    /// Top edge in DIP.
     pub y: i32,
-    /// Content width in physical pixels.
+    /// Content width in DIP.
     pub width: u32,
-    /// Content height in physical pixels.
+    /// Content height in DIP.
     pub height: u32,
 }
 
@@ -53,9 +57,9 @@ pub enum TitleBarStyle {
 /// `BrowserWindowConstructorOptions` (MVP subset).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BrowserWindowOptions {
-    /// Content width in physical pixels (Electron default 800).
+    /// Content width in DIP (Electron default 800).
     pub width: u32,
-    /// Content height in physical pixels (Electron default 600).
+    /// Content height in DIP (Electron default 600).
     pub height: u32,
     /// Minimum content size.
     pub min_size: Option<(u32, u32)>,
