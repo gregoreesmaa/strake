@@ -103,7 +103,12 @@ jobs:
           cache-bin: ${{ startsWith(matrix.platform.os, 'macos') }} # works around https://github.com/Swatinem/rust-cache/issues/341
 
       - name: Create Apple private key file
-        if: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/ci-test')) && startsWith(matrix.platform.os, 'macos') }}
+        # Forks without the 'Signed Builds' environment (no key path var)
+        # build unsigned: skip the key file instead of failing on an empty
+        # path. Repos with the environment configured sign exactly as before.
+        # (The `secrets` context is not available in `if` expressions, so the
+        # path var — set in the same environment — is the gate.)
+        if: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/ci-test')) && startsWith(matrix.platform.os, 'macos') && vars.APPLE_API_KEY_PATH != '' }}
         run: echo "${{ secrets.APPLE_API_KEY_CONTENT }}" > ${{ vars.APPLE_API_KEY_PATH }}
 
       - name: Setup Android signing keys
@@ -122,7 +127,9 @@ jobs:
         if: ${{ matrix.platform.use_git_cli == false }}
         uses: taiki-e/install-action@v2
         with:
-          tool: dioxus-cli@0.7.8
+          # Must match the workspace `dioxus` version (Cargo.lock): dx refuses
+          # to bundle when the CLI and library versions differ.
+          tool: dioxus-cli@0.7.10
 
       - name: Install Dioxus CLI (git)
         if: ${{ matrix.platform.use_git_cli == true }}
@@ -165,7 +172,7 @@ jobs:
           mv ./target/dx/strake/release/android/app/app/build/outputs/apk/release/app-release.apk ./target/dx/strake/release/android/app/app/build/outputs/apk/release/Strake_0.0.0_aarch64.apk
 
       - name: Delete private key file
-        if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/ci-test')) && startsWith(matrix.platform.os, 'macos') }}
+        if: ${{ always() && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/ci-test')) && startsWith(matrix.platform.os, 'macos') && vars.APPLE_API_KEY_PATH != '' }}
         run: rm ${{ vars.APPLE_API_KEY_PATH }}
 
       - name: Delete Android keystore
