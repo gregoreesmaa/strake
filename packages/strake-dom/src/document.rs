@@ -2032,10 +2032,12 @@ impl BaseDocument {
 
     /// Apply any pending device changes to the stylist, coalescing all changes
     /// since the last flush into a single device rebuild.
-    pub(crate) fn flush_pending_device_changes(&mut self) {
+    ///
+    /// Returns whether any device changes were applied.
+    pub(crate) fn flush_pending_device_changes(&mut self) -> bool {
         let changes = std::mem::take(&mut self.pending_device_changes);
         if changes.is_empty() {
-            return;
+            return false;
         }
 
         self.set_stylist_device(make_device(
@@ -2059,6 +2061,7 @@ impl BaseDocument {
                 self.nodes[root_id].set_restyle_hint(RestyleHint::recascade_subtree());
             }
         }
+        true
     }
 
     /// Update the device and reset the stylist to process the new size
