@@ -1,7 +1,7 @@
 //! Scrolling: user-initiated (interactive) and programmatic scrolling of nodes and the
 //! viewport, and the scroll animations (smooth scrolls and flings) which drive them.
 
-use strake_traits::events::{StrakeScrollEvent, DomEvent, DomEventData};
+use strake_traits::events::{DomEvent, DomEventData, StrakeScrollEvent};
 use strake_traits::node_id::NodeId;
 use style::values::computed::Overflow;
 use web_time::{SystemTime, UNIX_EPOCH};

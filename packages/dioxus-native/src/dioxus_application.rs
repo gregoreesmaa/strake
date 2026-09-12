@@ -1,8 +1,8 @@
-use strake_shell::{StrakeApplication, StrakeShellProxy, View};
 use dioxus_core::{ScopeId, provide_context};
 use dioxus_history::{History, MemoryHistory};
 use std::rc::Rc;
 use std::sync::Arc;
+use strake_shell::{StrakeApplication, StrakeShellProxy, View};
 use winit::application::ApplicationHandler;
 use winit::event::{StartCause, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
@@ -13,7 +13,7 @@ use winit::platform::macos::ApplicationHandlerExtMacOS;
 
 use crate::DioxusNativeWindowRenderer;
 use crate::event_handlers::WindowEventHandlers;
-use crate::{StrakeShellEvent, DioxusDocument, WindowConfig, contexts::DioxusNativeDocument};
+use crate::{DioxusDocument, StrakeShellEvent, WindowConfig, contexts::DioxusNativeDocument};
 
 /// Dioxus-native specific event type
 pub enum DioxusNativeEvent {

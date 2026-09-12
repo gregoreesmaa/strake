@@ -3,10 +3,10 @@
 
 use std::path::PathBuf;
 
-use strake_dom::{Document, DocumentConfig, NodeId};
-use strake_traits::events::{StrakeKeyEvent, DomEvent, KeyState, UiEvent};
-use strake_vibey_script::ScriptDocument;
 use keyboard_types::{Code, Key, Location, Modifiers};
+use strake_dom::{Document, DocumentConfig, NodeId};
+use strake_traits::events::{DomEvent, KeyState, StrakeKeyEvent, UiEvent};
+use strake_vibey_script::ScriptDocument;
 use url::Url;
 
 fn preact_example_dir() -> PathBuf {

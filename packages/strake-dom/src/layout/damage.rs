@@ -1,5 +1,5 @@
-use strake_traits::node_id::NodeId;
 use std::ops::Range;
+use strake_traits::node_id::NodeId;
 
 use crate::Node;
 use crate::net::ResourceHandler;

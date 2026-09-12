@@ -1,5 +1,5 @@
-use strake_traits::node_id::NodeId;
 use std::cmp::Ordering;
+use strake_traits::node_id::NodeId;
 
 use style::{dom::TNode as _, values::specified::box_::DisplayInside};
 

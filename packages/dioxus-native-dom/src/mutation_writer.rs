@@ -1,12 +1,12 @@
 //! Integration between Dioxus and Strake
 use crate::{NodeId, qual_name, trace, write_once_attr::WriteOnceAttr};
-use strake_dom::{BaseDocument, Document, DocumentMutator, Widget};
-use strake_traits::events::DomEventKind;
 use dioxus_core::{
     AttributeValue, ElementId, Template, TemplateAttribute, TemplateNode, WriteMutations,
 };
 use rustc_hash::FxHashMap;
 use std::str::FromStr as _;
+use strake_dom::{BaseDocument, Document, DocumentMutator, Widget};
+use strake_traits::events::DomEventKind;
 
 /// The state of the Dioxus integration with the RealDom
 #[derive(Debug)]

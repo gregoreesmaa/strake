@@ -4,12 +4,12 @@ use anyrender_vello::VelloImageRenderer;
 #[cfg(feature = "cpu")]
 use anyrender_vello_cpu::VelloCpuImageRenderer as VelloImageRenderer;
 use atomic_float::AtomicF64;
-use strake_dom::net::Resource;
-use strake_traits::navigation::{DummyNavigationProvider, NavigationProvider};
-use strake_traits::shell::{ColorScheme, Viewport};
 use panic_backtrace::StashedPanicInfo;
 use parley::FontContext;
 use report::{generate_expectations, generate_report};
+use strake_dom::net::Resource;
+use strake_traits::navigation::{DummyNavigationProvider, NavigationProvider};
+use strake_traits::shell::{ColorScheme, Viewport};
 use supports_hyperlinks::Stream as HyperlinkStream;
 use terminal_link::Link;
 use test_runners::{SubtestResult, process_test_file};

@@ -1,7 +1,7 @@
 //! Resolve style and layout
 
-use strake_traits::node_id::NodeId;
 use std::cell::RefCell;
+use strake_traits::node_id::NodeId;
 
 use debug_timer::debug_timer;
 use kurbo::{Affine, Rect};
@@ -77,17 +77,20 @@ impl BaseDocument {
 
         // Apply any device changes (viewport resize, zoom, color-scheme, etc)
         // accumulated since the last resolve as a single device rebuild.
-        self.flush_pending_device_changes();
+        let device_changed = self.flush_pending_device_changes();
 
         // we need to resolve stylist first since it will need to drive our layout bits
         self.resolve_stylist(current_time_for_animations);
         timer.record_time("style");
 
         // Propagate damage flags (from mutation and restyles) up and down the tree
-        if self.incremental_layout {
-            self.propagate_damage_flags(root_node_id, RestyleDamage::empty());
+        let tree_damage = if self.incremental_layout {
+            let damage = self.propagate_damage_flags(root_node_id, RestyleDamage::empty());
             timer.record_time("damage");
-        }
+            damage
+        } else {
+            ALL_DAMAGE
+        };
 
         // Fix up tree for layout (insert anonymous blocks as necessary, etc)
         self.resolve_layout_children();
@@ -104,8 +107,22 @@ impl BaseDocument {
         self.flush_styles_to_layout(root_node_id);
         timer.record_time("flush");
 
-        // Next we resolve layout with the data resolved by stlist
-        self.resolve_layout();
+        // Next we resolve layout with the data resolved by stlist, skipping
+        // the Taffy pass when the tree carries no layout-affecting damage:
+        // pure repaints (e.g. `color` changes) and fully clean trees reuse
+        // the cached geometry. Restyle damage levels nest
+        // (REPAINT < REBUILD_STACKING_CONTEXT < RECALCULATE_OVERFLOW <
+        // RELAYOUT), so anything beyond a pure repaint leaves bits behind
+        // once REPAINT is removed; the custom layout bits
+        // (ONLY_RELAYOUT/CONSTRUCT_*) are disjoint from REPAINT entirely. A
+        // flushed device change (resize, zoom, ...) alters the available
+        // space even with zero style damage, so it always forces a pass.
+        // See issue #2, section 3D.
+        let mut layout_damage = tree_damage;
+        layout_damage.remove(RestyleDamage::REPAINT);
+        if device_changed || !layout_damage.is_empty() {
+            self.resolve_layout();
+        }
         timer.record_time("layout");
 
         // Resolve transforms
@@ -390,6 +407,7 @@ impl BaseDocument {
 
         // println!("\n\nRESOLVE LAYOUT\n===========\n");
 
+        self.layout_passes += 1;
         taffy::compute_root_layout(self, root_element_id, available_space);
         taffy::round_layout(self, root_element_id);
 

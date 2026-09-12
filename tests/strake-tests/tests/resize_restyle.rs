@@ -2,10 +2,10 @@
 //! invalidated for origins whose media query results changed and for elements
 //! whose styles use viewport units (vw/vh/etc).
 
+use std::sync::Arc;
 use strake_dom::DocumentConfig;
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 
 const HTML: &str = r#"<!DOCTYPE html>
 <html><head><style>

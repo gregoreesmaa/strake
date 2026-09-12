@@ -12,10 +12,10 @@
 //! the `system-fonts` feature (enabled by default when testing the whole
 //! workspace) text measures 0x0 and the assertions pass vacuously.
 
+use std::sync::Arc;
 use strake_dom::{DocumentConfig, FontContext};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 
 fn layout_doc(html: &str) -> HtmlDocument {
     let mut doc = HtmlDocument::from_html(

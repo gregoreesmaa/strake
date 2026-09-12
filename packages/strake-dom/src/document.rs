@@ -19,12 +19,6 @@ use crate::{
     EventDriver, HtmlParserProvider, Node, NodeData, NoopEventHandler, StyleThreading,
     TextNodeData,
 };
-use strake_traits::devtools::DevtoolSettings;
-use strake_traits::events::{DomEvent, HitResult, UiEvent};
-use strake_traits::navigation::{DummyNavigationProvider, NavigationProvider};
-use strake_traits::net::{AbortSignal, DummyNetProvider, NetProvider, Request};
-use strake_traits::node_id::NodeId;
-use strake_traits::shell::{DummyShellProvider, ShellProvider, Viewport};
 use cursor_icon::CursorIcon;
 use linebender_resource_handle::Blob;
 use markup5ever::{LocalName, local_name};
@@ -41,6 +35,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLockReadGuard, RwLockWriteGuard};
 use std::task::{Context as TaskContext, Waker};
+use strake_traits::devtools::DevtoolSettings;
+use strake_traits::events::{DomEvent, HitResult, UiEvent};
+use strake_traits::navigation::{DummyNavigationProvider, NavigationProvider};
+use strake_traits::net::{AbortSignal, DummyNetProvider, NetProvider, Request};
+use strake_traits::node_id::NodeId;
+use strake_traits::shell::{DummyShellProvider, ShellProvider, Viewport};
 use style::Atom;
 use style::animation::DocumentAnimationSet;
 use style::attr::{AttrIdentifier, AttrValue};
@@ -248,6 +248,10 @@ pub struct BaseDocument {
     pub(crate) thread_font_contexts: ThreadLocal<RefCell<Box<FontContext>>>,
     /// A Parley layout context
     pub(crate) layout_ctx: parley::LayoutContext<TextBrush>,
+    /// Number of times `resolve_layout` ran Taffy layout since construction.
+    /// Test observability for restyle-isolation pins (issue #2): paint-only
+    /// mutations must not increment this counter.
+    pub(crate) layout_passes: u64,
 
     /// The real (non-anonymous) node which is currently hovered (if any).
     /// This is never a layout-generated (anonymous) node, so it remains valid
@@ -452,6 +456,7 @@ impl BaseDocument {
             #[cfg(feature = "parallel-construct")]
             thread_font_contexts: ThreadLocal::new(),
             layout_ctx: parley::LayoutContext::new(),
+            layout_passes: 0,
 
             hover_node_id: None,
             hover_hit_node_id: None,
@@ -1970,6 +1975,12 @@ impl BaseDocument {
         self.incremental_layout = enabled;
     }
 
+    /// Number of Taffy layout passes executed by `resolve_layout` since the
+    /// document was constructed.
+    pub fn layout_pass_count(&self) -> u64 {
+        self.layout_passes
+    }
+
     pub fn devtools(&self) -> &DevtoolSettings {
         &self.devtool_settings
     }
@@ -2021,10 +2032,12 @@ impl BaseDocument {
 
     /// Apply any pending device changes to the stylist, coalescing all changes
     /// since the last flush into a single device rebuild.
-    pub(crate) fn flush_pending_device_changes(&mut self) {
+    ///
+    /// Returns whether any device changes were applied.
+    pub(crate) fn flush_pending_device_changes(&mut self) -> bool {
         let changes = std::mem::take(&mut self.pending_device_changes);
         if changes.is_empty() {
-            return;
+            return false;
         }
 
         self.set_stylist_device(make_device(
@@ -2048,6 +2061,7 @@ impl BaseDocument {
                 self.nodes[root_id].set_restyle_hint(RestyleHint::recascade_subtree());
             }
         }
+        true
     }
 
     /// Update the device and reset the stylist to process the new size
@@ -2113,6 +2127,9 @@ impl BaseDocument {
         }
     }
 
+    /// Must not be called between queueing device changes and `resolve()`: it
+    /// consumes the pending-device signal that `resolve` uses to force layout,
+    /// so a future mid-frame call could swallow a pending device change.
     pub fn stylist_device(&mut self) -> &Device {
         self.flush_pending_device_changes();
         self.stylist.device()
@@ -2739,8 +2756,8 @@ impl AsMut<BaseDocument> for BaseDocument {
 #[cfg(test)]
 mod zoom_tests {
     use super::*;
-    use strake_traits::shell::ColorScheme;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use strake_traits::shell::ColorScheme;
 
     #[derive(Default)]
     struct CountingShellProvider {

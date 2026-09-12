@@ -7365,6 +7365,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "strake-bench"
+version = "0.3.0-beta.2"
+dependencies = [
+ "strake-dom",
+ "strake-html",
+ "strake-traits",
+]
+
+[[package]]
 name = "strake-dom"
 version = "0.3.0-beta.2"
 dependencies = [

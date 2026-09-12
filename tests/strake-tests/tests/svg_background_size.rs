@@ -8,12 +8,12 @@
 
 use anyrender::render_to_buffer;
 use anyrender_vello_cpu::VelloCpuImageRenderer;
+use std::sync::Arc;
 use strake_dom::DocumentConfig;
 use strake_dom::node::{ImageData, SvgImageData};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_paint::paint_scene;
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 
 /// Renders a 100x100 div whose `background` is set to the given shorthand and
 /// whose loaded background image is the provided SVG source. Returns the pixel

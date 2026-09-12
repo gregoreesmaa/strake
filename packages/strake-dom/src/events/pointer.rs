@@ -1,17 +1,17 @@
-use strake_traits::node_id::NodeId;
 use std::collections::VecDeque;
+use strake_traits::node_id::NodeId;
 
 use web_time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use keyboard_types::Modifiers;
+use markup5ever::local_name;
 use strake_traits::{
     events::{
-        StrakeInputEvent, StrakePointerEvent, StrakePointerId, StrakeWheelDelta, StrakeWheelEvent,
-        DomEvent, DomEventData, MouseEventButton, MouseEventButtons,
+        DomEvent, DomEventData, MouseEventButton, MouseEventButtons, StrakeInputEvent,
+        StrakePointerEvent, StrakePointerId, StrakeWheelDelta, StrakeWheelEvent,
     },
     navigation::NavigationOptions,
 };
-use keyboard_types::Modifiers;
-use markup5ever::local_name;
 use style::values::computed::{Overflow, TouchAction, UserSelect};
 use style_dom::ElementState;
 use taffy::AbsoluteAxis;

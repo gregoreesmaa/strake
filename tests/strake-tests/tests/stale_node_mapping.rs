@@ -15,12 +15,12 @@
 //! "invalid key" slab panic in strake-dom's `DocumentMutator` later in the
 //! same render (matching the stack trace reported in the PR).
 
-use strake_test_harness::HarnessOptions;
 use dioxus::prelude::*;
 use dioxus_core::ScopeId;
 use dioxus_native_dom::DioxusDocument;
 use std::cell::Cell;
 use std::rc::Rc;
+use strake_test_harness::HarnessOptions;
 
 #[derive(Props, Clone)]
 struct AppProps {

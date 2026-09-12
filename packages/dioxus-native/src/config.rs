@@ -1,7 +1,7 @@
 use anyrender::CompositeAlphaMode;
-use strake_dom::FontContext;
 use dioxus_core::LaunchConfig;
 use peniko::Color;
+use strake_dom::FontContext;
 use winit::window::WindowAttributes;
 
 /// Launch-time configuration for a dioxus-native application.

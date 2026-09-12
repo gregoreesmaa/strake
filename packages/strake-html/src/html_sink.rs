@@ -6,13 +6,13 @@ use html5ever::tree_builder::TreeBuilderOpts;
 use std::borrow::Cow;
 use std::cell::{Cell, Ref, RefCell, RefMut};
 
-use strake_dom::node::Attribute;
-use strake_dom::{DocumentMutator, HtmlParserProvider, NodeId};
 use html5ever::{
     QualName,
     tendril::{StrTendril, TendrilSink},
     tree_builder::{ElementFlags, NodeOrText, QuirksMode, TreeSink},
 };
+use strake_dom::node::Attribute;
+use strake_dom::{DocumentMutator, HtmlParserProvider, NodeId};
 
 /// Convert an html5ever Attribute which uses tendril for its value to a strake Attribute
 /// which uses String.

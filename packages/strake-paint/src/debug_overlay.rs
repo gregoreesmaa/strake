@@ -1,6 +1,6 @@
 use anyrender::PaintScene;
-use strake_dom::{BaseDocument, NodeId};
 use kurbo::{Affine, Rect, Vec2};
+use strake_dom::{BaseDocument, NodeId};
 
 use crate::color::Color;
 

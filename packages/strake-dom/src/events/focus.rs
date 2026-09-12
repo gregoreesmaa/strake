@@ -1,4 +1,4 @@
-use strake_traits::events::{StrakeFocusEvent, DomEvent, DomEventData};
+use strake_traits::events::{DomEvent, DomEventData, StrakeFocusEvent};
 
 use crate::BaseDocument;
 

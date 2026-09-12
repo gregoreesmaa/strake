@@ -21,10 +21,10 @@ mod link_handler;
 #[cfg(feature = "prelude")]
 pub mod prelude;
 
-#[cfg(all(feature = "net", not(target_arch = "wasm32")))]
-use strake_traits::net::NetProvider;
 #[doc(inline)]
 pub use dioxus_native_dom::*;
+#[cfg(all(feature = "net", not(target_arch = "wasm32")))]
+use strake_traits::net::NetProvider;
 
 use assets::DioxusNativeNetProvider;
 pub use dioxus_application::{DioxusNativeApplication, DioxusNativeEvent};
@@ -60,19 +60,19 @@ pub use {
     wgpu_context::DeviceHandle,
 };
 
-pub use strake_dom::{FontContext, Widget, build_single_font_ctx};
 pub use config::Config;
 pub use event_handlers::WinitEventHandlerId;
 pub use hooks::{use_back_button, use_window_event};
+pub use strake_dom::{FontContext, Widget, build_single_font_ctx};
 pub use winit;
 pub use winit::dpi::{LogicalSize, PhysicalSize};
 pub use winit::window::WindowAttributes;
 
-use strake_shell::{StrakeShellEvent, StrakeShellProxy, WindowConfig, create_default_event_loop};
 use dioxus_core::{ComponentFunction, Element, VirtualDom, consume_context, use_hook};
 use link_handler::DioxusNativeNavigationProvider;
 use std::any::Any;
 use std::sync::Arc;
+use strake_shell::{StrakeShellEvent, StrakeShellProxy, WindowConfig, create_default_event_loop};
 use winit::{
     raw_window_handle::{HasWindowHandle as _, RawWindowHandle},
     window::Window,

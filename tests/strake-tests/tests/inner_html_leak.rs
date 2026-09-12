@@ -1,9 +1,9 @@
 //! Repeated `set_inner_html` calls must not leak parser fragment roots.
 
+use std::sync::Arc;
 use strake_dom::DocumentConfig;
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 
 const HTML: &str = r#"<html><body><div id="target"></div></body></html>"#;
 const INNER_HTML: &str = r#"<span>one</span><span>two</span>"#;

@@ -19,10 +19,10 @@
 //! leaving `:hover` styles unapplied until unrelated damage happened to
 //! sweep the stale bits.
 
+use std::sync::Arc;
 use strake_dom::{BaseDocument, DocumentConfig};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 
 const HTML: &str = r#"<!DOCTYPE html>
 <html><head><style>

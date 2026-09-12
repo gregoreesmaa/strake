@@ -1,6 +1,6 @@
+use dioxus_native::prelude::*;
 use strake_traits::navigation::{NavigationOptions, NavigationProvider};
 use strake_traits::net::Request;
-use dioxus_native::prelude::*;
 
 pub type SyncStore<T> = Store<T, CopyValue<T, SyncStorage>>;
 

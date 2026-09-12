@@ -7,10 +7,10 @@
 //! visible` -> `hidden`), leaving transitioned properties stuck at their
 //! pre-stylesheet values in one-shot renders.
 
+use std::sync::{Arc, Mutex};
 use strake_dom::DocumentConfig;
 use strake_html::HtmlDocument;
 use strake_traits::net::{Bytes, NetHandler, NetProvider, Request};
-use std::sync::{Arc, Mutex};
 use style::properties::generated::longhands::visibility::computed_value::T as Visibility;
 
 /// A `NetProvider` which records requests so the test can deliver

@@ -219,3 +219,46 @@ jobs:
       - name: test
         run: |
           ${{ env.RUST_CARGO_COMMAND }} ${{ matrix.platform.command }} ${{ matrix.platform.args }} --target ${{ matrix.platform.target }}
+
+  perf-budget:
+    name: "Performance budgets (binary size, cold boot, RSS)"
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
+      - name: Build production bench binary
+        run: cargo build --profile production -p strake-bench
+      - name: Build size-optimized product binary
+        # [profile.small] is production + opt-level=s + panic=abort, the
+        # release tuning issue #11 prescribes for the size budget.
+        run: cargo build --profile small -p browser
+      - name: Binary size gate (budget 25MB)
+        env:
+          PERF_MAX_BINARY_MB: "25"
+        run: |
+          BIN=./target/small/strake
+          BYTES=$(stat -c%s "$BIN")
+          MB=$(python3 -c "print($BYTES/1024/1024)")
+          echo "strake product binary: $MB MiB (budget ${PERF_MAX_BINARY_MB} MiB)"
+          if python3 -c "import sys; sys.exit(0 if float('$MB') <= float('$PERF_MAX_BINARY_MB') else 1)"; then
+            STATUS="✅ PASS"
+          else
+            STATUS="❌ FAIL"
+          fi
+          {
+            echo "### Strake Performance Budget Report"
+            echo "| Metric | Measured | Budget | Status |"
+            echo "| :--- | :---: | :---: | :---: |"
+            echo "| **Binary Size (strake)** | $MB MiB | ${PERF_MAX_BINARY_MB} MiB | $STATUS |"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$STATUS" = "❌ FAIL" ]; then
+            echo "PERF BREACH: binary size $MB MiB exceeds budget ${PERF_MAX_BINARY_MB} MiB"
+            echo "(install cargo-bloat and run 'cargo bloat --profile production -p browser --crates' for per-crate attribution)"
+            exit 1
+          fi
+      - name: Cold-boot and RSS gate
+        env:
+          PERF_MAX_P95_MS: "100"
+          PERF_MAX_RSS_MB: "30"
+        run: ./target/production/strake-bench

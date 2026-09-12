@@ -8,10 +8,10 @@
 use std::sync::Arc;
 
 use anyrender_vello_hybrid::VelloHybridWindowRenderer;
+use parley::fontique::{Blob, Collection, CollectionOptions, GenericFamily, SourceCache};
 use strake_dom::{DocumentConfig, FontContext, decode_font_bytes};
 use strake_html::HtmlDocument;
 use strake_shell::{StrakeApplication, StrakeShellProxy, WindowConfig};
-use parley::fontique::{Blob, Collection, CollectionOptions, GenericFamily, SourceCache};
 use tracing::info;
 use wasm_bindgen::prelude::*;
 use winit::event_loop::EventLoop;

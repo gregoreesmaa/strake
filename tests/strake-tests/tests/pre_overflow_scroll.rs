@@ -2,10 +2,10 @@
 //! must contribute its full unwrapped line width to the container's
 //! scrollable overflow so the container can scroll horizontally.
 
+use std::sync::Arc;
 use strake_dom::DocumentConfig;
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 
 #[test]
 fn wide_pre_makes_scroller_scrollable() {

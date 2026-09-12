@@ -12,14 +12,14 @@ pub(crate) mod event;
 pub(crate) mod node;
 pub(crate) mod style;
 
-use strake_dom::node::NodeData;
-use strake_dom::{LocalName, Namespace, NodeId, QualName};
 use boa_engine::object::{FunctionObjectBuilder, JsObject};
 use boa_engine::property::{PropertyDescriptor, PropertyKey};
 use boa_engine::value::JsValue;
 use boa_engine::{
     Context, Finalize, JsData, JsNativeError, JsResult, JsString, NativeFunction, Trace,
 };
+use strake_dom::node::NodeData;
+use strake_dom::{LocalName, Namespace, NodeId, QualName};
 
 use crate::state::{DomCtx, DomProtos};
 

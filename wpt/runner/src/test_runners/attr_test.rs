@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use strake_dom::{BaseDocument, Document as _, Node};
 use log::warn;
+use strake_dom::{BaseDocument, Document as _, Node};
 use style_traits::ToCss;
 
 use super::harness_test;

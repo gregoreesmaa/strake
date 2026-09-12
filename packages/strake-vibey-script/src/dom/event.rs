@@ -2,11 +2,11 @@
 
 use std::cell::Cell;
 
-use strake_traits::events::{StrakeKeyEvent, StrakePointerEvent, StrakeWheelDelta, DomEventData};
 use boa_engine::object::JsObject;
 use boa_engine::value::JsValue;
 use boa_engine::{Context, Finalize, JsData, JsResult, Trace};
 use keyboard_types::Modifiers;
+use strake_traits::events::{DomEventData, StrakeKeyEvent, StrakePointerEvent, StrakeWheelDelta};
 
 use super::{define_accessor, define_method, define_value, js_str, to_rust_string};
 use crate::state::DomCtx;

@@ -1,6 +1,6 @@
+use dioxus_native::prelude::Key;
 use strake_traits::navigation::NavigationOptions;
 use strake_traits::net::{Method, Request, Url};
-use dioxus_native::prelude::Key;
 
 pub fn req_from_string(url_s: &str) -> Option<Request> {
     if let Ok(url) = Url::parse(url_s) {

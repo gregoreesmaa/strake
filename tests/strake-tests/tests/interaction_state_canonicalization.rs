@@ -9,16 +9,16 @@
 //! hover is additionally re-resolved against fresh layout at the end of each
 //! `resolve` pass so that layout shifts under a stationary pointer update it.
 
+use std::sync::Arc;
 use strake_dom::{Document, DocumentConfig, NodeId};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::{
     events::{
-        StrakePointerEvent, StrakePointerId, MouseEventButton, MouseEventButtons, Point,
-        PointerCoords, PointerDetails, UiEvent,
+        MouseEventButton, MouseEventButtons, Point, PointerCoords, PointerDetails,
+        StrakePointerEvent, StrakePointerId, UiEvent,
     },
     shell::{ColorScheme, Viewport},
 };
-use std::sync::Arc;
 
 fn make_doc(html: &str) -> HtmlDocument {
     let mut doc = HtmlDocument::from_html(

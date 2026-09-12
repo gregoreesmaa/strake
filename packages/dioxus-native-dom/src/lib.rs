@@ -13,9 +13,9 @@ mod dioxus_document;
 mod events;
 mod mutation_writer;
 mod write_once_attr;
-pub use strake_dom::DocumentConfig;
 pub use dioxus_document::DioxusDocument;
 pub use events::{NodeHandle, synthetic_click_event};
+pub use strake_dom::DocumentConfig;
 pub use write_once_attr::{CustomWidgetAttr, SubDocumentAttr};
 
 pub use strake_dom::NodeId;

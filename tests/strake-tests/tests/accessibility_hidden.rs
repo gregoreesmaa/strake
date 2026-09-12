@@ -1,8 +1,8 @@
 use accesskit::{Node as AccessKitNode, Role};
+use std::sync::Arc;
 use strake_dom::DocumentConfig;
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 use test_that::prelude::*;
 
 #[test]

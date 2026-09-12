@@ -7,10 +7,10 @@
 //! subsequent restyle, stylo never re-seeded it. Every `rem` in the document
 //! then resolved against 16px instead of the root's actual font-size.
 
+use std::sync::Arc;
 use strake_dom::DocumentConfig;
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 
 const HTML: &str = r#"<!DOCTYPE html>
 <html><head><style>

@@ -6,8 +6,8 @@ use std::{
     },
 };
 
-use strake_traits::net::{Request, Url};
 use dioxus_native::{NodeHandle, SubDocumentAttr, prelude::*};
+use strake_traits::net::{Request, Url};
 
 use crate::StdNetProvider;
 use crate::about_pages::{AboutPage, AboutPageView};

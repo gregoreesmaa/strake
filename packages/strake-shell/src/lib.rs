@@ -24,6 +24,7 @@ pub use crate::window::{View, WindowConfig};
 #[cfg(feature = "data-uri")]
 pub use crate::net::DataUriNetProvider;
 
+use std::sync::Arc;
 #[cfg(all(
     feature = "file-dialog",
     any(
@@ -38,7 +39,6 @@ pub use crate::net::DataUriNetProvider;
 ))]
 use strake_traits::shell::FileDialogFilter;
 use strake_traits::shell::ShellProvider;
-use std::sync::Arc;
 use winit::cursor::{Cursor, CursorIcon};
 use winit::dpi::{LogicalPosition, LogicalSize};
 pub use winit::event_loop::{ControlFlow, EventLoop, EventLoopProxy};

@@ -1,11 +1,11 @@
 //! The `Element` prototype: attributes, DOM properties (`value`, `checked`, ...),
 //! `style`, `innerHTML` and friends.
 
-use strake_dom::{LocalName, NodeId, QualName, ScrollBehavior, ScrollLogicalPosition};
 use boa_engine::object::{JsObject, ObjectInitializer};
 use boa_engine::property::Attribute as PropAttribute;
 use boa_engine::value::JsValue;
 use boa_engine::{Context, JsNativeError, JsResult, js_string};
+use strake_dom::{LocalName, NodeId, QualName, ScrollBehavior, ScrollLogicalPosition};
 
 use super::{
     define_accessor, define_method, dom_ctx, js_str, node_wrapper, this_node_id, to_rust_string,
@@ -699,7 +699,10 @@ fn utf16_to_byte(text: &str, utf16_offset: usize) -> usize {
 }
 
 /// The current selection of the node's text editor as UTF-16 offsets
-fn selection_utf16_range(doc: &strake_dom::BaseDocument, node_id: NodeId) -> Option<(usize, usize)> {
+fn selection_utf16_range(
+    doc: &strake_dom::BaseDocument,
+    node_id: NodeId,
+) -> Option<(usize, usize)> {
     let input = doc.get_node(node_id)?.element_data()?.text_input_data()?;
     let text = input.editor.raw_text();
     let range = input.editor.raw_selection().text_range();
@@ -959,7 +962,10 @@ fn scroll_height(this: &JsValue, _: &[JsValue], context: &mut Context) -> JsResu
 /// The current scroll offset of an element. The root element scrolls the
 /// viewport (per the CSS overflow propagation rules), so its offset is the
 /// viewport scroll offset.
-fn current_scroll_offset(doc: &strake_dom::BaseDocument, node_id: NodeId) -> strake_dom::Point<f64> {
+fn current_scroll_offset(
+    doc: &strake_dom::BaseDocument,
+    node_id: NodeId,
+) -> strake_dom::Point<f64> {
     if doc
         .try_root_element()
         .is_some_and(|root| root.id == node_id)

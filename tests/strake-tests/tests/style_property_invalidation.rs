@@ -11,10 +11,10 @@
 //! the stale bit, the root was never marked dirty, and the style traversal
 //! was skipped entirely.
 
+use std::sync::Arc;
 use strake_dom::{BaseDocument, DocumentConfig};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 
 const HTML: &str = r#"<!DOCTYPE html>
 <html><head><style>

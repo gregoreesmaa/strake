@@ -1,6 +1,6 @@
-use strake_traits::node_id::NodeId;
 use markup5ever::local_name;
 use parley::FontFamily;
+use strake_traits::node_id::NodeId;
 use style::computed_values::list_style_type::T as ListStyleType;
 use style::{
     computed_values::list_style_position::T as ListStylePosition, counter_style::CounterStyle,

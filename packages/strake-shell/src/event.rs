@@ -1,8 +1,8 @@
-use strake_traits::navigation::NavigationOptions;
-use strake_traits::net::NetWaker;
 use futures_util::task::ArcWake;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::{any::Any, sync::Arc};
+use strake_traits::navigation::NavigationOptions;
+use strake_traits::net::NetWaker;
 use winit::{event_loop::EventLoopProxy, window::WindowId};
 
 #[cfg(feature = "accessibility")]

@@ -1,10 +1,10 @@
 //! Enable the dom to participate in styling by servo
 //!
 
-use strake_traits::node_id::NodeId;
 use std::ptr::NonNull;
 use std::sync::Mutex;
 use std::sync::atomic::Ordering;
+use strake_traits::node_id::NodeId;
 
 use crate::StyleThreading;
 use crate::layout::damage::compute_layout_damage;

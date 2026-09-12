@@ -1,11 +1,11 @@
 use crate::HtmlParserProvider;
+use parley::FontContext;
+use std::sync::Arc;
 use strake_traits::{
     navigation::NavigationProvider,
     net::{AbortSignal, NetProvider},
     shell::{ShellProvider, Viewport},
 };
-use parley::FontContext;
-use std::sync::Arc;
 use style::media_queries::MediaType;
 
 /// Strategy for Stylo's style traversal during `resolve`.

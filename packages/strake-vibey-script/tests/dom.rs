@@ -1,9 +1,9 @@
 //! Tests for the JavaScript DOM APIs exposed by strake-vibey-script
 
+use keyboard_types::Modifiers;
 use strake_dom::{Document, DocumentConfig};
 use strake_traits::events::DomEvent;
 use strake_vibey_script::ScriptDocument;
-use keyboard_types::Modifiers;
 
 fn doc_from_html(html: &str) -> ScriptDocument {
     let mut doc = ScriptDocument::from_html(html, DocumentConfig::default());

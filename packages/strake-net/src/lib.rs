@@ -2,7 +2,6 @@
 //!
 //! Provides an implementation of the [`strake_traits::net::NetProvider`] trait.
 
-use strake_traits::net::{AbortSignal, Body, Bytes, NetHandler, NetProvider, NetWaker, Request};
 use data_url::DataUrl;
 use std::{
     collections::HashMap,
@@ -11,6 +10,7 @@ use std::{
     sync::{Arc, Mutex},
     task::Poll,
 };
+use strake_traits::net::{AbortSignal, Body, Bytes, NetHandler, NetProvider, NetWaker, Request};
 use tokio::sync::Semaphore;
 
 #[cfg(feature = "cache")]

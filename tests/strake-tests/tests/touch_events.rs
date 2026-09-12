@@ -3,11 +3,11 @@
 //! pointer events. Mouse input must NOT generate touch events (and vice-versa),
 //! and default actions remain driven by the pointer events.
 
+use keyboard_types::Modifiers;
 use strake_test_harness::{Harness, HarnessOptions, pointer_event};
 use strake_traits::events::{
-    StrakePointerEvent, StrakePointerId, MouseEventButton, MouseEventButtons, UiEvent,
+    MouseEventButton, MouseEventButtons, StrakePointerEvent, StrakePointerId, UiEvent,
 };
-use keyboard_types::Modifiers;
 
 fn event(id: StrakePointerId, x: f32, y: f32) -> StrakePointerEvent {
     pointer_event(

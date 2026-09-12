@@ -2,8 +2,8 @@
 //! document construction, inspection, and input synthesis for both
 //! `HtmlDocument` and `DioxusDocument` backed harnesses.
 
-use strake_test_harness::Harness;
 use dioxus::prelude::*;
+use strake_test_harness::Harness;
 
 #[test]
 fn html_inspection() {

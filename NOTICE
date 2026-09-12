@@ -16,6 +16,10 @@ the Mozilla Public License 2.0 (MPL-2.0).
 This product bundles the font file `packages/strake-dom/assets/moz-bullet-font.otf`,
 derived from the Mozilla Gecko project and licensed under the Mozilla Public License 2.0 (MPL-2.0).
 
+Ahem test font (packages/strake-dom/assets/Ahem.ttf): public domain,
+originally by Todd Fahrner, distributed via web-platform-tests/wpt for CSS
+conformance testing. Test-only asset; never selected outside tests.
+
 Trademarks:
 "Dioxus" and "Blitz" are trademarks of DioxusLabs and/or their respective owners.
 "Strake" is an independent project and is not affiliated with, endorsed by, or sponsored by DioxusLabs.

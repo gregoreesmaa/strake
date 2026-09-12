@@ -4,10 +4,10 @@
 //! `SpecialElementData` slot the replaced-layout match reads, so any replaced
 //! element carrying a widget used to reach `unreachable!()` on the next layout.
 
+use std::sync::Arc;
 use strake_dom::{DocumentConfig, IntrinsicSizes, Widget};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 
 struct Probe;
 impl Widget for Probe {}

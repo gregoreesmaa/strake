@@ -1,16 +1,11 @@
 //! Integration between Dioxus and Strake
 use crate::NodeId;
 use crate::events::{
-    StrakeKeyboardData, NativeConverter, NativeFocusData, NativeFormData, NativePointerData,
-    NativeScrollData, NativeTouchData, NativeWheelData, NodeHandle,
+    NativeConverter, NativeFocusData, NativeFormData, NativePointerData, NativeScrollData,
+    NativeTouchData, NativeWheelData, NodeHandle, StrakeKeyboardData,
 };
 use crate::mutation_writer::{DioxusState, MutationWriter};
 use crate::qual_name;
-use strake_dom::{
-    Attribute, BaseDocument, DEFAULT_CSS, DocGuard, DocGuardMut, Document, DocumentConfig,
-    EventDriver, EventHandler, Node,
-};
-use strake_traits::events::{DomEvent, DomEventData, EventState, UiEvent};
 use dioxus_core::{ElementId, Event, VirtualDom};
 use dioxus_html::{PlatformEventData, set_event_converter};
 use futures_util::task::noop_waker;
@@ -21,6 +16,11 @@ use std::pin::pin;
 use std::sync::LazyLock;
 use std::task::{Context as TaskContext, Waker};
 use std::{any::Any, rc::Rc};
+use strake_dom::{
+    Attribute, BaseDocument, DEFAULT_CSS, DocGuard, DocGuardMut, Document, DocumentConfig,
+    EventDriver, EventHandler, Node,
+};
+use strake_traits::events::{DomEvent, DomEventData, EventState, UiEvent};
 
 fn wrap_event_data<T: Any>(value: T) -> Rc<dyn Any> {
     Rc::new(PlatformEventData::new(Box::new(value)))
@@ -366,11 +366,11 @@ impl EventHandler for DioxusEventHandler<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use strake_dom::DocumentConfig;
     use dioxus::prelude::*;
     use dioxus_core::ScopeId;
     use std::cell::RefCell;
     use std::collections::HashMap;
+    use strake_dom::DocumentConfig;
 
     #[test]
     // Regression test for a panic. The keyed `div`s are re-ordered as the (unordered) `HashMap` grows,

@@ -1,6 +1,4 @@
 use anyrender::PaintScene as _;
-use strake_dom::node::ComputedStyles;
-use strake_traits::events::UiEvent;
 use color::parse_color;
 use dioxus_native::CustomWidgetAttr;
 use dioxus_native::Widget;
@@ -13,6 +11,8 @@ use peniko::kurbo::Rect;
 use peniko::kurbo::Vec2;
 use std::f64::consts::TAU;
 use std::time::Instant;
+use strake_dom::node::ComputedStyles;
+use strake_traits::events::UiEvent;
 
 pub fn main() {
     dioxus_native::launch(app);

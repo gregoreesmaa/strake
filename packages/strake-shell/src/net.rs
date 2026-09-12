@@ -29,9 +29,9 @@ mod data_uri_net_provider {
     //!
     //! Provides an implementation of the [`strake_traits::net::NetProvider`] trait.
 
-    use strake_traits::net::{Bytes, NetHandler, NetProvider, NetWaker, Request};
     use data_url::DataUrl;
     use std::sync::Arc;
+    use strake_traits::net::{Bytes, NetHandler, NetProvider, NetWaker, Request};
 
     pub struct DataUriNetProvider {
         #[allow(unused)]

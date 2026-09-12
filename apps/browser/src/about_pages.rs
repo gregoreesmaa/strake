@@ -1,7 +1,7 @@
 use std::time::{Duration, SystemTime};
 
-use strake_traits::net::{Request, Url};
 use dioxus_native::prelude::*;
+use strake_traits::net::{Request, Url};
 
 use crate::browser_history::{
     BrowsingHistoryStoreExt, HistoryEntry, HistoryService, format_elapsed,

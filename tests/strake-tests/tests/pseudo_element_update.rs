@@ -7,10 +7,10 @@
 //! incremental layout enabled the popup appeared but never animated, and its
 //! text stayed at the transition's start color (transparent).
 
+use std::sync::Arc;
 use strake_dom::DocumentConfig;
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 
 const HTML: &str = r#"<!DOCTYPE html>
 <html><head><style>

@@ -1,8 +1,8 @@
 use std::collections::VecDeque;
 use std::time::{Duration, SystemTime};
 
-use strake_traits::net::Url;
 use dioxus_native::prelude::*;
+use strake_traits::net::Url;
 
 pub use browser_persistence::{HistoryEntry, HistoryEntryId, HistoryStore, MAX_HISTORY_ENTRIES};
 

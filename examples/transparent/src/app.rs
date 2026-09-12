@@ -1,10 +1,10 @@
 //! Drive the renderer from Dioxus, with a transparent, decoration-less,
 //! content-sized, draggable window.
-use strake_traits::shell::ShellProvider;
 use dioxus_native::prelude::*;
 use dioxus_native::{Color, CompositeAlphaMode, Config, LogicalSize, WindowAttributes, use_window};
 use std::any::Any;
 use std::sync::Arc;
+use strake_traits::shell::ShellProvider;
 
 /// Fixed window size, chosen to snugly wrap the card content.
 const WINDOW_WIDTH: f64 = 360.0;

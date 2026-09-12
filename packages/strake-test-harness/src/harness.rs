@@ -1,12 +1,14 @@
 use std::sync::Arc;
 
-use strake_dom::{DocGuard, DocGuardMut, Document, DocumentConfig};
+use dioxus_core::{Element, VirtualDom};
+use dioxus_native_dom::DioxusDocument;
+use strake_dom::{
+    DocGuard, DocGuardMut, Document, DocumentConfig, FontContext, hermetic_test_font_context,
+};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::events::UiEvent;
 use strake_traits::net::NetProvider;
 use strake_traits::shell::{ColorScheme, Viewport};
-use dioxus_core::{Element, VirtualDom};
-use dioxus_native_dom::DioxusDocument;
 
 /// Options controlling document construction for a [`Harness`].
 pub struct HarnessOptions {
@@ -18,6 +20,10 @@ pub struct HarnessOptions {
     pub base_url: Option<String>,
     /// Net provider used to fetch sub-resources (stylesheets, images, fonts, etc)
     pub net_provider: Option<Arc<dyn NetProvider>>,
+    /// Parley font context. Defaults to the hermetic Ahem-only context
+    /// (no host system fonts) so text metrics are identical on every OS.
+    /// Set to `None` to use the engine default (host system fonts).
+    pub font_ctx: Option<FontContext>,
 }
 
 impl Default for HarnessOptions {
@@ -29,6 +35,7 @@ impl Default for HarnessOptions {
             color_scheme: ColorScheme::Light,
             base_url: None,
             net_provider: None,
+            font_ctx: Some(hermetic_test_font_context()),
         }
     }
 }
@@ -45,6 +52,7 @@ impl HarnessOptions {
             base_url: self.base_url,
             net_provider: self.net_provider,
             html_parser_provider: Some(Arc::new(HtmlProvider) as _),
+            font_ctx: self.font_ctx,
             ..Default::default()
         }
     }
@@ -136,10 +144,10 @@ impl<D: Document> Harness<D> {
     /// so document-specific event handling (e.g. forwarding to a Dioxus VirtualDom) is
     /// bypassed. Does not [`pump`](Self::pump).
     pub fn dispatch_recorded(&mut self, events: impl IntoIterator<Item = UiEvent>) -> Vec<String> {
-        use strake_dom::{EventDriver, EventHandler};
-        use strake_traits::events::{DomEvent, EventState};
         use std::cell::RefCell;
         use std::rc::Rc;
+        use strake_dom::{EventDriver, EventHandler};
+        use strake_traits::events::{DomEvent, EventState};
 
         #[derive(Clone, Default)]
         struct RecordingHandler {

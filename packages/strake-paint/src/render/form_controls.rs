@@ -1,9 +1,9 @@
 use super::ElementCx;
 use crate::color::{Color, ToColorColor as _};
 use anyrender::PaintScene;
-use strake_dom::local_name;
 use kurbo::{Affine, BezPath, Cap, Circle, Join, Point, RoundedRect, Stroke, Vec2};
 use peniko::Fill;
+use strake_dom::local_name;
 use style::dom::TElement as _;
 
 impl ElementCx<'_, '_> {

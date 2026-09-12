@@ -1,0 +1,21 @@
+[package]
+name = "strake-bench"
+description = "Hermetic performance-budget harness: cold-boot latency, idle RSS, binary size gate (issue #11)"
+publish = false
+version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+categories.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "strake-bench"
+path = "src/main.rs"
+
+[dependencies]
+# Workspace-internal only (no new external crates per repo policy).
+strake-dom = { workspace = true }
+strake-html = { workspace = true }
+strake-traits = { workspace = true }

@@ -10,8 +10,8 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::sync::Arc;
 
-use strake_traits::net::Url;
 use dioxus_native::{NodeHandle, WindowAttributes, prelude::*, use_back_button};
+use strake_traits::net::Url;
 
 #[cfg(target_os = "macos")]
 use winit::platform::macos::WindowAttributesMacOS;

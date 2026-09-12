@@ -1,11 +1,3 @@
-use strake_dom::{
-    BaseDocument, Node, ScrollBehavior as StrakeScrollBehavior,
-    ScrollLogicalPosition as StrakeScrollLogicalPosition,
-};
-use strake_traits::events::{
-    StrakeKeyEvent, StrakePointerEvent, StrakePointerId, StrakeScrollEvent, StrakeWheelDelta,
-    StrakeWheelEvent, MouseEventButton,
-};
 use dioxus_html::{
     AnimationData, CancelData, ClipboardData, CompositionData, DragData, FocusData, FormData,
     FormValue, HasFileData, HasFocusData, HasFormData, HasKeyboardData, HasMouseData,
@@ -32,6 +24,14 @@ use std::{
     future::Future,
     pin::Pin,
     rc::Rc,
+};
+use strake_dom::{
+    BaseDocument, Node, ScrollBehavior as StrakeScrollBehavior,
+    ScrollLogicalPosition as StrakeScrollLogicalPosition,
+};
+use strake_traits::events::{
+    MouseEventButton, StrakeKeyEvent, StrakePointerEvent, StrakePointerId, StrakeScrollEvent,
+    StrakeWheelDelta, StrakeWheelEvent,
 };
 
 use crate::NodeId;
@@ -76,7 +76,9 @@ impl HtmlEventConverter for NativeConverter {
     }
 
     fn convert_composition_data(&self, _event: &PlatformEventData) -> CompositionData {
-        unimplemented!("todo: convert_composition_data in dioxus-native. requires support in strake")
+        unimplemented!(
+            "todo: convert_composition_data in dioxus-native. requires support in strake"
+        )
     }
 
     fn convert_drag_data(&self, _event: &PlatformEventData) -> DragData {
@@ -657,7 +659,7 @@ pub fn synthetic_click_event(node: &Node, modifiers: Modifiers) -> Box<dyn Any> 
 mod tests {
     use super::*;
     use strake_traits::events::{
-        StrakePointerId, MouseEventButton, MouseEventButtons, Point, PointerCoords, PointerDetails,
+        MouseEventButton, MouseEventButtons, Point, PointerCoords, PointerDetails, StrakePointerId,
     };
 
     fn finger_event(id: u64, x: f32, y: f32) -> StrakePointerEvent {

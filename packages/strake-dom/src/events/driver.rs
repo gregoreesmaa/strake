@@ -1,10 +1,10 @@
 use crate::Document;
+use std::collections::VecDeque;
 use strake_traits::events::{
-    StrakePointerEvent, StrakePointerId, DomEvent, DomEventData, EventState, Point, PointerCoords,
+    DomEvent, DomEventData, EventState, Point, PointerCoords, StrakePointerEvent, StrakePointerId,
     UiEvent,
 };
 use strake_traits::node_id::NodeId;
-use std::collections::VecDeque;
 
 pub trait EventHandler {
     fn handle_event(

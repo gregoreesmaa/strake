@@ -1,11 +1,6 @@
 use crate::Document;
 use crate::layout::damage::HoistedPaintChildren;
 use bitflags::bitflags;
-use strake_traits::events::{
-    StrakePointerEvent, StrakePointerId, DomEventData, HitResult, PointerCoords,
-};
-use strake_traits::node_id::NodeId;
-use strake_traits::shell::ShellProvider;
 use euclid::{Point2D, Rect, Size2D};
 use html_escape::encode_quoted_attribute_to_string;
 use keyboard_types::Modifiers;
@@ -18,6 +13,11 @@ use std::fmt::Write;
 use std::ops::Deref;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use strake_traits::events::{
+    DomEventData, HitResult, PointerCoords, StrakePointerEvent, StrakePointerId,
+};
+use strake_traits::node_id::NodeId;
+use strake_traits::shell::ShellProvider;
 use style::invalidation::element::restyle_hints::RestyleHint;
 use style::properties::ComputedValues;
 use style::properties::generated::longhands::position::computed_value::T as Position;

@@ -16,8 +16,8 @@ mod text;
 use std::collections::HashMap;
 
 use anyrender::{PaintScene, Scene};
-use strake_dom::{BaseDocument, NodeId, util::Color};
 use render::StrakeDomPainter;
+use strake_dom::{BaseDocument, NodeId, util::Color};
 
 const FONT_EMBOLDEN_ENABLED: bool = cfg!(any(
     feature = "font-embolden",

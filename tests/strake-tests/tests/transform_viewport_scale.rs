@@ -4,10 +4,10 @@
 //! factor exactly once, while linear components (scale/rotate/skew factors)
 //! are not scaled.
 
+use std::sync::Arc;
 use strake_dom::DocumentConfig;
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 
 fn doc_for(css: &str, scale: f32) -> HtmlDocument {
     let html = format!(

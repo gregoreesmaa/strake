@@ -5,10 +5,10 @@
 //! after creating them - a roving tabindex does - so a cache that is only
 //! filled at creation leaves every one of them unfocusable.
 
+use std::sync::Arc;
 use strake_dom::{DocumentConfig, NodeId, QualName, local_name, ns};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 
 fn make_doc(html: &str) -> HtmlDocument {
     let mut doc = HtmlDocument::from_html(

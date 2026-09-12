@@ -6,8 +6,6 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
 
-use strake_dom::{BaseDocument, NodeId};
-use strake_traits::events::{DomEvent, DomEventData, EventState};
 use boa_engine::builtins::promise::PromiseState;
 use boa_engine::module::{Module, ModuleLoader, ModuleRequest, Referrer};
 use boa_engine::object::{JsObject, ObjectInitializer};
@@ -19,6 +17,8 @@ use boa_engine::{
 use boa_engine::{Finalize, Trace};
 use boa_runtime::Console;
 use boa_runtime::console::{ConsoleState, Logger};
+use strake_dom::{BaseDocument, NodeId};
+use strake_traits::events::{DomEvent, DomEventData, EventState};
 use url::Url;
 use web_time::{Duration, Instant};
 
@@ -953,57 +953,141 @@ impl ScriptRuntime {
 
         let mut any_called = false;
 
-        'chain: for &node_id in chain {
-            // Gather listeners for this node: `addEventListener` listeners plus
-            // an `on<event>` property handler (if any)
-            let mut callbacks: Vec<JsObject> = Vec::new();
-            {
-                let mut state = ctx.state.borrow_mut();
-                if let Some(listeners) = state
-                    .node_listeners
-                    .get_mut(&node_id)
-                    .and_then(|map| map.get_mut(name))
+        // Phase 1 (capture): root -> target, capture listeners only. Skipped
+        // for non-bubbling events (matches current target-only behavior).
+        // `on<event>` property handlers are bubble-phase only, never capture.
+        if bubbles {
+            'capture: for &node_id in chain.iter().rev() {
+                // Gather ONLY listeners registered with `capture: true`
+                let mut callbacks: Vec<JsObject> = Vec::new();
                 {
-                    callbacks.extend(listeners.iter().map(|l| l.callback.clone()));
-                    // `once` listeners are removed at dispatch time
-                    listeners.retain(|l| !l.once);
+                    let mut state = ctx.state.borrow_mut();
+                    if let Some(listeners) = state
+                        .node_listeners
+                        .get_mut(&node_id)
+                        .and_then(|map| map.get_mut(name))
+                    {
+                        callbacks.extend(
+                            listeners
+                                .iter()
+                                .filter(|l| l.capture)
+                                .map(|l| l.callback.clone()),
+                        );
+                        // `once` listeners are removed at dispatch time;
+                        // only the capture ones gathered above are retired,
+                        // so bubble `once` listeners survive to phase 2.
+                        listeners.retain(|l| !(l.once && l.capture));
+                    }
+                }
+
+                if callbacks.is_empty() {
+                    continue;
+                }
+
+                let current_target: JsValue = node_wrapper(&ctx, node_id, context).into();
+                crate::dom::define_value(
+                    &event_obj,
+                    "currentTarget",
+                    current_target.clone(),
+                    context,
+                );
+
+                for callback in callbacks {
+                    any_called = true;
+                    if let Err(error) =
+                        callback.call(&current_target, &[event_obj.clone().into()], context)
+                    {
+                        report_js_error(&ctx, "event listener", &error);
+                    }
+                    if event_ref(&event_obj, &|event| event.stopped_immediate.get()) {
+                        break 'capture;
+                    }
+                }
+
+                if event_ref(&event_obj, &|event| event.stopped.get()) {
+                    break;
                 }
             }
-            let wrapper = ctx.state.borrow().node_wrappers.get(&node_id).cloned();
-            if let Some(wrapper) = wrapper {
-                if let Ok(handler) = wrapper.get(on_name.clone(), context) {
-                    if let Some(handler) = handler.as_object() {
-                        if handler.is_callable() {
-                            callbacks.push(handler);
+        }
+
+        // A `stopped` flag set during capture prevents the bubble phase
+        // entirely (`stopImmediatePropagation` also sets `stopped`).
+        let capture_stopped = event_ref(&event_obj, &|event| event.stopped.get());
+
+        // Phase 2 (bubble): target -> root, bubble listeners only plus the
+        // `on<event>` property handler. Exception: at the TARGET of a
+        // non-bubbling event, capture listeners fire too (W3C at-target
+        // semantics); phase 1 is skipped when `!bubbles`, so without this
+        // they would be silently dropped. When `bubbles` is true the guard
+        // is false and phase 1 already fired target capture listeners.
+        if !capture_stopped {
+            'chain: for (idx, &node_id) in chain.iter().enumerate() {
+                let is_target = idx == 0;
+                let at_target_no_bubble = !bubbles && is_target;
+                // Gather ONLY listeners registered with `capture: false` plus
+                // an `on<event>` property handler (if any)
+                let mut callbacks: Vec<JsObject> = Vec::new();
+                {
+                    let mut state = ctx.state.borrow_mut();
+                    if let Some(listeners) = state
+                        .node_listeners
+                        .get_mut(&node_id)
+                        .and_then(|map| map.get_mut(name))
+                    {
+                        callbacks.extend(
+                            listeners
+                                .iter()
+                                .filter(|l| !l.capture || at_target_no_bubble)
+                                .map(|l| l.callback.clone()),
+                        );
+                        // `once` listeners are removed at dispatch time;
+                        // capture ones gathered above are retired here; when `bubbles`
+                        // is true the target's capture `once` listeners were already
+                        // retired in phase 1.
+                        listeners.retain(|l| !(l.once && (!l.capture || at_target_no_bubble)));
+                    }
+                }
+                let wrapper = ctx.state.borrow().node_wrappers.get(&node_id).cloned();
+                if let Some(wrapper) = wrapper {
+                    if let Ok(handler) = wrapper.get(on_name.clone(), context) {
+                        if let Some(handler) = handler.as_object() {
+                            if handler.is_callable() {
+                                callbacks.push(handler);
+                            }
                         }
                     }
                 }
-            }
 
-            if callbacks.is_empty() {
-                if !bubbles {
+                if callbacks.is_empty() {
+                    if !bubbles {
+                        break;
+                    }
+                    continue;
+                }
+
+                let current_target: JsValue = node_wrapper(&ctx, node_id, context).into();
+                crate::dom::define_value(
+                    &event_obj,
+                    "currentTarget",
+                    current_target.clone(),
+                    context,
+                );
+
+                for callback in callbacks {
+                    any_called = true;
+                    if let Err(error) =
+                        callback.call(&current_target, &[event_obj.clone().into()], context)
+                    {
+                        report_js_error(&ctx, "event listener", &error);
+                    }
+                    if event_ref(&event_obj, &|event| event.stopped_immediate.get()) {
+                        break 'chain;
+                    }
+                }
+
+                if !bubbles || event_ref(&event_obj, &|event| event.stopped.get()) {
                     break;
                 }
-                continue;
-            }
-
-            let current_target: JsValue = node_wrapper(&ctx, node_id, context).into();
-            crate::dom::define_value(&event_obj, "currentTarget", current_target.clone(), context);
-
-            for callback in callbacks {
-                any_called = true;
-                if let Err(error) =
-                    callback.call(&current_target, &[event_obj.clone().into()], context)
-                {
-                    report_js_error(&ctx, "event listener", &error);
-                }
-                if event_ref(&event_obj, &|event| event.stopped_immediate.get()) {
-                    break 'chain;
-                }
-            }
-
-            if !bubbles || event_ref(&event_obj, &|event| event.stopped.get()) {
-                break;
             }
         }
 

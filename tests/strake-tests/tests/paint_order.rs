@@ -3,11 +3,11 @@
 
 use anyrender::render_to_buffer;
 use anyrender_vello_cpu::VelloCpuImageRenderer;
+use std::sync::Arc;
 use strake_dom::DocumentConfig;
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_paint::paint_scene;
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 
 fn center_pixel(html: &str) -> [u8; 3] {
     let mut doc = HtmlDocument::from_html(
