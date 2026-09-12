@@ -1,7 +1,7 @@
 # AGENTS.md — Autonomous Agent Operational Guide & Architecture Contract
 
 > **Target Audience**: Autonomous AI coding agents (Antigravity, Claude Code, Cursor, Copilot Workspace, Devin).  
-> **Repository**: `gregoreesmaa/blitz` (Transitioning to **Aerolite**).  
+> **Repository**: `gregoreesmaa/boson` (**Boson**).  
 > **Rule of Precedence**: Instructions in this document supersede general world knowledge or default assumptions regarding repository conventions, architectural patterns, and workflow commands.
 
 ---
@@ -19,7 +19,7 @@
 ## 2. Project Vision & North Star
 
 ### Mission
-Blitz (transitioning to **Aerolite**) is a modular, ultra-fast native HTML/CSS/JS runtime and next-generation **Electron alternative** engineered in Rust. It compiles and renders standard web code into true native desktop and mobile applications without embedding a monolithic Chromium browser or Node.js runtime.
+Boson is a modular, ultra-fast native HTML/CSS/JS runtime and next-generation **Electron alternative** engineered in Rust. It compiles and renders standard web code into true native desktop and mobile applications without embedding a monolithic Chromium browser or Node.js runtime.
 
 ### Target Performance Profile
 * **Cold Starts**: Sub-100ms instantaneous application launches.
@@ -103,7 +103,7 @@ The repository is structured as a Cargo workspace:
 ```
 blitz/
 ├── apps/
-│   ├── browser/          # Desktop reference browser (bin: blitz / aerolite)
+│   ├── browser/          # Desktop reference browser (bin: blitz / boson)
 │   │   └── persistence/  # SQLite browser history persistence (rusqlite)
 │   ├── bump/             # Workspace semantic release and version bumper tool
 │   └── readme/           # Standalone live-watching markdown viewer (bin: rdme)

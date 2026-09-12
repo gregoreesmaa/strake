@@ -1,0 +1,13 @@
+Boson Native Application Runtime
+Copyright 2026 Gregor Eesmaa and contributors.
+
+This product includes software originally developed by DioxusLabs and contributors
+as part of the Blitz project (https://github.com/DioxusLabs/blitz).
+Original Work Copyright (c) 2022-2026 Jonathan Kelley, Nico Burns, and contributors.
+
+This product is dual-licensed under the Apache License, Version 2.0 and the MIT License.
+Portions of this software (`stylo_taffy`) are licensed under the Mozilla Public License 2.0 (MPL-2.0).
+
+Trademarks:
+"Dioxus" and "Blitz" are trademarks of DioxusLabs and/or their respective owners.
+"Boson" is an independent project and is not affiliated with, endorsed by, or sponsored by DioxusLabs.
