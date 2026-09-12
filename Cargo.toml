@@ -14,6 +14,7 @@ members = [
     "packages/dioxus-native",
     "packages/dioxus-native-dom",
     "packages/strake-test-harness",
+    "packages/strake-fallback-supervisor",
     "packages/strake-bench",
     "apps/browser",
     "apps/browser/persistence",
@@ -57,6 +58,7 @@ debug_timer = { version = "0.1.2", path = "./packages/debug_timer" }
 accesskit_xplat = { version = "0.1", path = "./packages/accesskit_xplat", default-features = false }
 browser-persistence = { path = "./apps/browser/persistence" }
 strake-test-harness = { path = "./packages/strake-test-harness" }
+strake-fallback-supervisor = { version = "=0.3.0-beta.2", path = "./packages/strake-fallback-supervisor", default-features = false }
 
 # Servo dependencies
 style = { version = "0.21.0", package = "stylo" }
