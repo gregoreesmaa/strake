@@ -3,7 +3,7 @@
 //! Measures, with std-only timing:
 //! - cold-boot latency: parse + `resolve(0.0)` of a 1000-node fixture,
 //!   50 iterations, reporting median / p95 / stddev;
-//! - idle RSS after resolve, via `/proc/self/statm` (Linux only;
+//! - idle RSS after resolve, via `VmRSS:` in `/proc/self/status` (Linux only;
 //!   prints SKIP elsewhere so macOS/Windows dev machines stay usable).
 //!
 //! Budgets (issue #11 defaults, env-overridable):
@@ -73,11 +73,13 @@ fn idle_rss_mib(html: &str) -> Option<f64> {
         doc.resolve(0.0);
         // Quiescence: resolve twice so deferred/microtask-driven work settles.
         doc.resolve(0.0);
-        let statm = std::fs::read_to_string("/proc/self/statm").ok()?;
-        let resident_pages: f64 = statm.split_whitespace().nth(1)?.parse().ok()?;
+        let status = std::fs::read_to_string("/proc/self/status").ok()?;
+        let mib = parse_vmrss_mib(&status)?;
         drop(doc);
-        // RSS pages are 4 KiB on every supported Linux target (x86_64/aarch64).
-        Some(resident_pages * 4096.0 / 1024.0 / 1024.0)
+        // `VmRSS:` in /proc/self/status is already in kB, so no page-size
+        // assumption is needed (statm resident pages × 4096 would be wrong
+        // on 16 KiB-page aarch64 Linux).
+        Some(mib)
     }
     #[cfg(not(target_os = "linux"))]
     {
@@ -86,8 +88,23 @@ fn idle_rss_mib(html: &str) -> Option<f64> {
     }
 }
 
+/// Parse the `VmRSS:` line (kB) from `/proc/self/status` contents into MiB.
+/// Returns `None` when the line is absent or its value is unparseable.
+#[cfg(any(target_os = "linux", test))]
+fn parse_vmrss_mib(status_contents: &str) -> Option<f64> {
+    for line in status_contents.lines() {
+        let Some(rest) = line.strip_prefix("VmRSS:") else {
+            continue;
+        };
+        let kb: f64 = rest.split_whitespace().next()?.parse().ok()?;
+        return Some(kb / 1024.0);
+    }
+    None
+}
+
 fn percentile(sorted: &mut [f64], p: f64) -> f64 {
-    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap());
+    // NaN is impossible: samples are finite elapsed times.
+    sorted.sort_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal));
     let idx = ((p / 100.0) * (sorted.len() - 1) as f64).round() as usize;
     sorted[idx]
 }
@@ -173,11 +190,37 @@ fn main() {
                 table.push_str("| **Idle Memory (RSS)** | SKIP (non-Linux) | — | ⚪ SKIP |\n");
             }
         }
-        OpenOptions::new()
+        if let Err(e) = OpenOptions::new()
             .create(true)
             .append(true)
-            .open(summary)
+            .open(&summary)
             .and_then(|mut f| f.write_all(table.as_bytes()))
-            .expect("append step summary");
+        {
+            eprintln!("failed to append step summary: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_vmrss_mib;
+
+    #[test]
+    fn parses_vmrss_kb_into_mib() {
+        let status = "Name:\tstrake-bench\nVmSize:\t   12345 kB\nVmRSS:\t   12345 kB\nVmSwap:\t       0 kB\n";
+        assert_eq!(parse_vmrss_mib(status), Some(12345.0 / 1024.0));
+    }
+
+    #[test]
+    fn missing_vmrss_returns_none() {
+        let status = "Name:\tstrake-bench\nVmSize:\t   12345 kB\nVmSwap:\t       0 kB\n";
+        assert_eq!(parse_vmrss_mib(status), None);
+    }
+
+    #[test]
+    fn malformed_vmrss_returns_none() {
+        let status = "Name:\tstrake-bench\nVmRSS:\t   not-a-number kB\n";
+        assert_eq!(parse_vmrss_mib(status), None);
     }
 }

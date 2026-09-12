@@ -1041,7 +1041,9 @@ impl ScriptRuntime {
                                 .map(|l| l.callback.clone()),
                         );
                         // `once` listeners are removed at dispatch time;
-                        // capture ones were already retired in phase 1.
+                        // capture ones gathered above are retired here; when `bubbles`
+                        // is true the target's capture `once` listeners were already
+                        // retired in phase 1.
                         listeners.retain(|l| !(l.once && (!l.capture || at_target_no_bubble)));
                     }
                 }

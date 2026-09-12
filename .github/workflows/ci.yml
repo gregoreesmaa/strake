@@ -237,14 +237,21 @@ jobs:
           BYTES=$(stat -c%s "$BIN")
           MB=$(python3 -c "print($BYTES/1024/1024)")
           echo "strake-bench binary: $MB MiB (budget ${PERF_MAX_BINARY_MB} MiB)"
+          if python3 -c "import sys; sys.exit(0 if float('$MB') <= float('$PERF_MAX_BINARY_MB') else 1)"; then
+            STATUS="✅ PASS"
+          else
+            STATUS="❌ FAIL"
+          fi
           {
             echo "### Strake Performance Budget Report"
             echo "| Metric | Measured | Budget | Status |"
             echo "| :--- | :---: | :---: | :---: |"
-            echo "| **Binary Size** | $MB MiB | ${PERF_MAX_BINARY_MB} MiB | ✅ PASS |"
+            echo "| **Binary Size** | $MB MiB | ${PERF_MAX_BINARY_MB} MiB | $STATUS |"
           } >> "$GITHUB_STEP_SUMMARY"
-          python3 -c "import sys; sys.exit(0 if float('$MB') <= float('$PERF_MAX_BINARY_MB') else 1)" \
-            || { echo "PERF BREACH: binary size $MB MiB exceeds budget ${PERF_MAX_BINARY_MB} MiB"; exit 1; }
+          if [ "$STATUS" = "❌ FAIL" ]; then
+            echo "PERF BREACH: binary size $MB MiB exceeds budget ${PERF_MAX_BINARY_MB} MiB"
+            exit 1
+          fi
       - name: Cold-boot and RSS gate
         env:
           PERF_MAX_P95_MS: "100"

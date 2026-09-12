@@ -94,10 +94,7 @@ fn detached_subtree_reparent_keeps_document_order() {
     drop(m);
     doc.resolve(0.0);
     assert!(doc.query_selector("span").unwrap().is_some());
-    assert_eq!(
-        doc.query_selector("#root div span").unwrap().is_some(),
-        true
-    );
+    assert!(doc.query_selector("#root div span").unwrap().is_some());
 }
 
 #[test]

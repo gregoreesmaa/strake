@@ -2127,6 +2127,9 @@ impl BaseDocument {
         }
     }
 
+    /// Must not be called between queueing device changes and `resolve()`: it
+    /// consumes the pending-device signal that `resolve` uses to force layout,
+    /// so a future mid-frame call could swallow a pending device change.
     pub fn stylist_device(&mut self) -> &Device {
         self.flush_pending_device_changes();
         self.stylist.device()
