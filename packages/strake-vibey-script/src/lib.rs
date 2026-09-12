@@ -32,6 +32,7 @@
 mod clock;
 mod document;
 mod dom;
+mod engine;
 mod event_handler;
 mod fetch;
 mod runtime;
@@ -39,4 +40,5 @@ mod state;
 mod timers;
 
 pub use document::ScriptDocument;
+pub use engine::ScriptEngine;
 pub use fetch::{DefaultScriptFetcher, FetchError, ScriptFetcher};

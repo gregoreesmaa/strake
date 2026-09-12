@@ -26,6 +26,7 @@ use crate::dom::event::{EventRef, create_event, create_event_for_dom_event};
 use crate::dom::{
     NodeRef, dom_ctx, node_id_of_value, node_wrapper, to_rust_string, wrap_style_object,
 };
+use crate::engine::ScriptEngine;
 use crate::fetch::ScriptFetcher;
 use crate::state::{DomCtx, Listener, ReadyState};
 
@@ -657,62 +658,10 @@ impl ScriptRuntime {
         runtime
     }
 
-    /// Evaluate a script, logging (but not propagating) any uncaught errors,
-    /// then drain the microtask queue.
-    pub fn eval(&mut self, code: &str, description: &str) {
-        self.eval_internal(code, description);
-        self.run_jobs(description);
-    }
-
     fn eval_internal(&mut self, code: &str, description: &str) {
         if let Err(error) = self.context.eval(Source::from_bytes(code)) {
             report_js_error(&self.ctx, description, &error);
         }
-    }
-
-    /// Run pending promise jobs (microtasks)
-    pub fn run_jobs(&mut self, description: &str) {
-        if let Err(error) = self.context.run_jobs() {
-            report_js_error(&self.ctx, description, &error);
-        }
-    }
-
-    /// Evaluate an ES module script: parse it, load its imports (via the module
-    /// loader), then link and evaluate it. Uncaught errors are logged (but not
-    /// propagated), matching [`eval`](Self::eval).
-    pub fn eval_module(&mut self, code: &str, url: Option<&Url>) {
-        let description = url
-            .map(Url::as_str)
-            .unwrap_or("<inline module>")
-            .to_string();
-        let path = url.map(|url| Path::new(url.as_str()));
-        let source = Source::from_reader(code.as_bytes(), path);
-
-        let module = match Module::parse(source, None, &mut self.context) {
-            Ok(module) => module,
-            Err(error) => {
-                report_js_error(&self.ctx, &description, &error);
-                return;
-            }
-        };
-        // Register the module so that imports resolving to this URL (including
-        // circular ones) reuse it rather than re-fetching
-        if let Some(url) = url
-            && self.module_loader.get(url).is_none()
-        {
-            self.module_loader.insert(url.clone(), module.clone());
-        }
-
-        let promise = module.load_link_evaluate(&mut self.context);
-        self.run_jobs(&description);
-        if let PromiseState::Rejected(reason) = promise.state() {
-            report_js_error(&self.ctx, &description, &JsError::from_opaque(reason));
-        }
-    }
-
-    /// The deadline of the soonest pending timer (if any)
-    pub fn next_timer_deadline(&self) -> Option<Instant> {
-        self.ctx.state.borrow().timers.next_deadline()
     }
 
     /// Set the value exposed as `document.readyState`
@@ -813,9 +762,63 @@ impl ScriptRuntime {
             );
         }
     }
+}
+
+impl crate::engine::ScriptEngine for ScriptRuntime {
+    /// Evaluate a script, logging (but not propagating) any uncaught errors,
+    /// then drain the microtask queue.
+    fn eval(&mut self, code: &str, description: &str) {
+        self.eval_internal(code, description);
+        self.run_jobs(description);
+    }
+
+    /// Run pending promise jobs (microtasks)
+    fn run_jobs(&mut self, description: &str) {
+        if let Err(error) = self.context.run_jobs() {
+            report_js_error(&self.ctx, description, &error);
+        }
+    }
+
+    /// Evaluate an ES module script: parse it, load its imports (via the module
+    /// loader), then link and evaluate it. Uncaught errors are logged (but not
+    /// propagated), matching [`eval`](crate::engine::ScriptEngine::eval).
+    fn eval_module(&mut self, code: &str, url: Option<&Url>) {
+        let description = url
+            .map(Url::as_str)
+            .unwrap_or("<inline module>")
+            .to_string();
+        let path = url.map(|url| Path::new(url.as_str()));
+        let source = Source::from_reader(code.as_bytes(), path);
+
+        let module = match Module::parse(source, None, &mut self.context) {
+            Ok(module) => module,
+            Err(error) => {
+                report_js_error(&self.ctx, &description, &error);
+                return;
+            }
+        };
+        // Register the module so that imports resolving to this URL (including
+        // circular ones) reuse it rather than re-fetching
+        if let Some(url) = url
+            && self.module_loader.get(url).is_none()
+        {
+            self.module_loader.insert(url.clone(), module.clone());
+        }
+
+        let promise = module.load_link_evaluate(&mut self.context);
+        self.run_jobs(&description);
+        if let PromiseState::Rejected(reason) = promise.state() {
+            report_js_error(&self.ctx, &description, &JsError::from_opaque(reason));
+        }
+    }
+
+    /// The deadline of the soonest pending timer (if any)
+    fn next_timer_deadline(&self) -> Option<Instant> {
+        self.ctx.state.borrow().timers.next_deadline()
+    }
 
     /// Run all timers that are currently due. Returns `true` if any JavaScript was run.
-    pub fn run_due_timers(&mut self) -> bool {
+    fn run_due_timers(&mut self) -> bool {
         let due = {
             let mut state = self.ctx.state.borrow_mut();
             let now = state.clock.now();
@@ -832,11 +835,17 @@ impl ScriptRuntime {
             {
                 report_js_error(&self.ctx, "timer callback", &error);
             }
+            // HTML spec: a microtask checkpoint runs after *each* task, so a
+            // microtask queued by one timer runs before the next timer's
+            // callback (issue #4). Draining once after the batch let later
+            // timers jump the queue.
+            self.run_jobs("timer microtasks");
         }
-        self.run_jobs("timer microtasks");
         true
     }
+}
 
+impl ScriptRuntime {
     /// Dispatch a Strake DOM event to JavaScript event listeners registered on
     /// the nodes in `chain` (which is ordered target-first).
     ///

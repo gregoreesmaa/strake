@@ -14,6 +14,7 @@ use strake_traits::events::{DomEvent, UiEvent};
 use url::Url;
 use web_time::Instant;
 
+use crate::engine::ScriptEngine;
 use crate::event_handler::ScriptEventHandler;
 use crate::fetch::{DefaultScriptFetcher, ScriptFetcher};
 use crate::runtime::ScriptRuntime;
@@ -185,14 +186,14 @@ impl ScriptDocument {
             if script.is_module {
                 // Inline modules resolve imports against the document base URL
                 let module_url = url.or_else(|| self.base_url.clone());
-                self.runtime.eval_module(&code, module_url.as_ref());
+                self.engine_mut().eval_module(&code, module_url.as_ref());
             } else {
                 let description = url
                     .as_ref()
                     .map(Url::as_str)
                     .unwrap_or("<inline script>")
                     .to_string();
-                self.runtime.eval(&code, &description);
+                self.engine_mut().eval(&code, &description);
             }
         }
 
@@ -234,9 +235,18 @@ impl ScriptDocument {
     /// Evaluate arbitrary JavaScript code in the document's script context
     pub fn eval(&mut self, code: &str) {
         self.runtime.sync_named_element_globals();
-        self.runtime.eval(code, "<eval>");
+        self.engine_mut().eval(code, "<eval>");
         self.request_redraw();
         self.arm_timer_thread();
+    }
+
+    /// The document's JavaScript engine behind the [`ScriptEngine`] seam.
+    ///
+    /// Embedders drive evaluation, microtask checkpoints, and timers through
+    /// this object so a future engine backend can substitute without
+    /// touching embedder code.
+    pub fn engine_mut(&mut self) -> &mut dyn ScriptEngine {
+        &mut self.runtime
     }
 
     /// Drain messages sent from JavaScript via the global
@@ -273,7 +283,13 @@ impl ScriptDocument {
     /// event loop `Waker`) can sleep until this deadline and then call
     /// [`poll`](Document::poll) to run due timers.
     pub fn next_timer_deadline(&self) -> Option<Instant> {
-        self.runtime.next_timer_deadline()
+        self.engine().next_timer_deadline()
+    }
+
+    /// Drive the engine behind the [`ScriptEngine`] seam (shared helper for
+    /// `&self` contexts: the deadline query never mutates engine state).
+    fn engine(&self) -> &dyn ScriptEngine {
+        &self.runtime
     }
 
     /// Dispatch a synthetic DOM event (e.g. a click created with
@@ -343,7 +359,7 @@ impl ScriptDocument {
         if !self.timer_thread_enabled {
             return;
         }
-        let Some(deadline) = self.runtime.next_timer_deadline() else {
+        let Some(deadline) = self.engine_mut().next_timer_deadline() else {
             return;
         };
 
@@ -440,7 +456,7 @@ impl Document for ScriptDocument {
             ran = true;
         }
 
-        ran |= self.runtime.run_due_timers();
+        ran |= self.engine_mut().run_due_timers();
         self.arm_timer_thread();
         ran
     }

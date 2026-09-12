@@ -75,7 +75,11 @@ impl TimerQueue {
             }
         }
 
-        due.sort_by_key(|timer| timer.deadline);
+        // Order by deadline, breaking ties by schedule order (timer ids grow
+        // monotonically). `swap_remove` above scrambles arrival order, and a
+        // deadline-only stable sort would preserve that scramble for timers
+        // sharing a deadline (issue #4).
+        due.sort_by_key(|timer| (timer.deadline, timer.id));
         due
     }
 }
