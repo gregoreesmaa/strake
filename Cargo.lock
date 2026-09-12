@@ -7422,7 +7422,13 @@ dependencies = [
 name = "strake-electron-compat"
 version = "0.3.0-beta.2"
 dependencies = [
+ "anyrender",
  "serde_json",
+ "strake-dom",
+ "strake-html",
+ "strake-shell",
+ "strake-traits",
+ "winit",
 ]
 
 [[package]]
@@ -7609,6 +7615,7 @@ dependencies = [
  "log",
  "markup5ever",
  "strake-dom",
+ "strake-electron-compat",
  "strake-html",
  "strake-traits",
  "tracing",
