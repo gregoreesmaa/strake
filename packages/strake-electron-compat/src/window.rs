@@ -7,11 +7,33 @@
 //! close the [`App`](crate::App) loop. Real `winit`/`strake-shell` windows
 //! bind to these options in a follow-up without changing this contract.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use serde_json::Value;
 
 use crate::IpcBus;
+
+/// Content rectangle (`Electron.Rectangle`): `{ x, y, width, height }`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct Bounds {
+    /// Left edge in physical pixels.
+    pub x: i32,
+    /// Top edge in physical pixels.
+    pub y: i32,
+    /// Content width in physical pixels.
+    pub width: u32,
+    /// Content height in physical pixels.
+    pub height: u32,
+}
+
+/// One main-to-renderer `webContents.send` awaiting the pump (issue #91).
+#[derive(Debug, Clone, PartialEq)]
+pub struct MainSend {
+    /// Target channel (`ipcRenderer.on` in the renderer).
+    pub channel: String,
+    /// JSON payload (already `JSON.stringify`-shaped by the caller).
+    pub payload: Value,
+}
 
 /// macOS title-bar modes (`titleBarStyle`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -40,6 +62,9 @@ pub struct BrowserWindowOptions {
     pub position: Option<(i32, i32)>,
     /// Window frame and title bar (Electron default true).
     pub frame: bool,
+    /// Whether the user can resize the window (Electron default true,
+    /// issue #90).
+    pub resizable: bool,
     /// `titleBarStyle` (macOS).
     pub title_bar_style: TitleBarStyle,
     /// Transparent background (Electron default false).
@@ -61,6 +86,7 @@ impl Default for BrowserWindowOptions {
             max_size: None,
             position: None,
             frame: true,
+            resizable: true,
             title_bar_style: TitleBarStyle::Default,
             transparent: false,
             background_color: None,
@@ -75,15 +101,55 @@ impl Default for BrowserWindowOptions {
 /// MVP: records the pending navigation target (`loadURL`/`loadFile`) and
 /// delivers `send` into the [`IpcBus`] for renderer listeners.
 /// `executeJavaScript`/DevTools/print need the renderer binding (deferred).
+///
+/// Main-to-renderer traffic (issue #91) queues per window in [`Self::outbox`]:
+/// `queue_send` records one payload and the embedder drains it with
+/// [`Self::take_pending_sends`] (or across windows with
+/// [`WindowManager::drain_web_contents_sends`]) for delivery to that window's
+/// renderer `ipcRenderer.on` listeners.
 #[derive(Debug, Default)]
 pub struct WebContents {
     pending_url: Option<String>,
+    document_title: Option<String>,
+    outbox: VecDeque<MainSend>,
 }
 
 impl WebContents {
     /// Navigate to a URL (`win.loadURL`).
     pub fn load_url(&mut self, url: &str) {
         self.pending_url = Some(url.to_string());
+    }
+
+    /// Record the loaded page's `<title>` (`webContents.getTitle`, issue
+    /// #90). The shell binding syncs this from the parsed document on every
+    /// load; until then the title is empty, matching Electron.
+    pub fn set_document_title(&mut self, title: Option<String>) {
+        self.document_title = title;
+    }
+
+    /// `webContents.getTitle`: the loaded page's `<title>`, or `""`.
+    pub fn get_title(&self) -> &str {
+        self.document_title.as_deref().unwrap_or_default()
+    }
+
+    /// `win.webContents.send(channel, payload)`: queue one main-to-renderer
+    /// payload for this window (issue #91). Delivery is fire-and-forget at
+    /// queue time; the pump drains the queue (see [`Self::take_pending_sends`]).
+    pub fn queue_send(&mut self, channel: &str, payload: Value) {
+        self.outbox.push_back(MainSend {
+            channel: channel.to_string(),
+            payload,
+        });
+    }
+
+    /// Queued main-to-renderer payloads, still awaiting the pump.
+    pub fn pending_send_count(&self) -> usize {
+        self.outbox.len()
+    }
+
+    /// Drain this window's queued main-to-renderer payloads in FIFO order.
+    pub fn take_pending_sends(&mut self) -> Vec<MainSend> {
+        self.outbox.drain(..).collect()
     }
 
     /// Load a local file (`win.loadFile`): like Electron the path resolves
@@ -213,6 +279,22 @@ impl BrowserWindow {
     /// `win.isVisible` (MVP: maps `show`/`hide` state).
     pub fn is_visible(&self) -> bool {
         self.visible
+    }
+
+    /// `win.setResizable` state (issue #90).
+    pub fn is_resizable(&self) -> bool {
+        self.options.resizable
+    }
+
+    /// `win.getBounds`: content position and size (issue #90).
+    pub fn bounds(&self) -> Bounds {
+        let (x, y) = self.options.position.unwrap_or((0, 0));
+        Bounds {
+            x,
+            y,
+            width: self.options.width,
+            height: self.options.height,
+        }
     }
 
     /// `win.isMinimized`.
@@ -350,6 +432,78 @@ impl WindowManager {
     /// `win.setTitle`.
     pub fn set_title(&mut self, id: u32, title: &str) -> bool {
         self.mutate(id, |win| win.title = title.to_string())
+    }
+
+    /// `win.setResizable` (issue #90). Unknown ids fail softly.
+    pub fn set_resizable(&mut self, id: u32, resizable: bool) -> bool {
+        self.mutate(id, |win| win.options.resizable = resizable)
+    }
+
+    /// `win.setResizable` state (issue #90). Unknown ids report `false`.
+    pub fn is_resizable(&self, id: u32) -> bool {
+        self.get(id).is_some_and(|win| win.is_resizable())
+    }
+
+    /// `win.isVisible` (issue #90). Unknown ids report `false`.
+    pub fn is_visible(&self, id: u32) -> bool {
+        self.get(id).is_some_and(|win| win.is_visible())
+    }
+
+    /// `win.setBounds` (issue #90): move and resize in one transition.
+    /// Unknown ids fail softly.
+    pub fn set_bounds(&mut self, id: u32, bounds: Bounds) -> bool {
+        self.mutate(id, |win| {
+            win.options.position = Some((bounds.x, bounds.y));
+            win.options.width = bounds.width;
+            win.options.height = bounds.height;
+        })
+    }
+
+    /// `win.getBounds` (issue #90). `None` for unknown ids.
+    pub fn get_bounds(&self, id: u32) -> Option<Bounds> {
+        self.get(id).map(|win| win.bounds())
+    }
+
+    /// Queue one main-to-renderer `webContents.send` on a window (issue #91).
+    /// Unknown ids fail softly (`false`), matching Electron's fire-and-forget
+    /// posture for unreachable targets.
+    pub fn queue_web_contents_send(&mut self, id: u32, channel: &str, payload: Value) -> bool {
+        match self.windows.get_mut(&id) {
+            Some(win) => {
+                win.web_contents_mut().queue_send(channel, payload);
+                true
+            }
+            None => false,
+        }
+    }
+
+    /// Queued main-to-renderer payloads across all windows.
+    pub fn queued_main_send_count(&self) -> usize {
+        self.windows
+            .values()
+            .map(|win| win.web_contents().pending_send_count())
+            .sum()
+    }
+
+    /// Drain every window's queued main-to-renderer payloads in window-id
+    /// order, each window FIFO (issue #91). The pump delivers each
+    /// `(window id, channel, payload)` to that window's renderer
+    /// `ipcRenderer.on` listeners.
+    pub fn drain_web_contents_sends(&mut self) -> Vec<(u32, MainSend)> {
+        let mut ids: Vec<u32> = self.windows.keys().copied().collect();
+        ids.sort_unstable();
+        let mut drained = Vec::new();
+        for id in ids {
+            if let Some(win) = self.windows.get_mut(&id) {
+                drained.extend(
+                    win.web_contents_mut()
+                        .take_pending_sends()
+                        .into_iter()
+                        .map(|send| (id, send)),
+                );
+            }
+        }
+        drained
     }
 
     /// `win.setSize`: update the content size stored on the window options.
@@ -599,3 +753,118 @@ fn load_file_normalizes_prefix_encodes_and_converts_separators() {
 // the old `Fn()` wiring panicked here with `RefCell already mutably
 // borrowed`; it was replaced by `last_close_wiring_needs_no_manager_reborrow`
 // above once the callback received the remaining count.
+
+#[test]
+fn resizable_defaults_true_and_toggles() {
+    let mut manager = manager();
+    let id = manager.create(BrowserWindowOptions::default());
+    assert!(manager.is_resizable(id), "resizable defaults to true");
+    assert!(manager.set_resizable(id, false));
+    assert!(!manager.is_resizable(id));
+    assert!(!manager.get(id).unwrap().is_resizable());
+    assert!(manager.set_resizable(id, true));
+    assert!(manager.is_resizable(id));
+    assert!(
+        !manager.set_resizable(404, false),
+        "unknown id fails softly"
+    );
+    assert!(!manager.is_resizable(404), "unknown id reports false");
+}
+
+#[test]
+fn bounds_round_trip_through_manager() {
+    let mut manager = manager();
+    let id = manager.create(BrowserWindowOptions {
+        width: 800,
+        height: 600,
+        position: Some((10, 20)),
+        ..Default::default()
+    });
+    assert_eq!(
+        manager.get_bounds(id),
+        Some(Bounds {
+            x: 10,
+            y: 20,
+            width: 800,
+            height: 600,
+        })
+    );
+    assert!(manager.set_bounds(
+        id,
+        Bounds {
+            x: 100,
+            y: 200,
+            width: 1024,
+            height: 768,
+        }
+    ));
+    assert_eq!(
+        manager.get_bounds(id),
+        Some(Bounds {
+            x: 100,
+            y: 200,
+            width: 1024,
+            height: 768,
+        })
+    );
+    assert!(manager.get(id).unwrap().options().position == Some((100, 200)));
+    assert!(
+        !manager.set_bounds(id + 999, Bounds::default()),
+        "unknown id fails softly"
+    );
+    assert_eq!(manager.get_bounds(id + 999), None);
+}
+
+#[test]
+fn manager_is_visible_mirrors_show_hide() {
+    let mut manager = manager();
+    let id = manager.create(BrowserWindowOptions::default());
+    assert!(manager.is_visible(id), "show defaults to true");
+    assert!(manager.hide(id));
+    assert!(!manager.is_visible(id));
+    assert!(manager.show(id));
+    assert!(manager.is_visible(id));
+    assert!(!manager.is_visible(404), "unknown id reports false");
+}
+
+#[test]
+fn web_contents_title_defaults_empty_until_synced() {
+    let contents = WebContents::default();
+    assert_eq!(contents.get_title(), "");
+    let mut contents = contents;
+    contents.set_document_title(Some(String::from("Settings")));
+    assert_eq!(contents.get_title(), "Settings");
+}
+
+#[test]
+fn web_contents_send_queues_per_window_fifo() {
+    let mut manager = manager();
+    let a = manager.create(BrowserWindowOptions::default());
+    let b = manager.create(BrowserWindowOptions::default());
+    assert_eq!(manager.queued_main_send_count(), 0);
+    assert!(manager.queue_web_contents_send(a, "tick", json!({"n": 1})));
+    assert!(manager.queue_web_contents_send(a, "tick", json!({"n": 2})));
+    assert!(manager.queue_web_contents_send(b, "other", json!(true)));
+    assert!(
+        !manager.queue_web_contents_send(404, "tick", json!(null)),
+        "unknown id fails softly"
+    );
+    assert_eq!(manager.queued_main_send_count(), 3);
+
+    let drained = manager.drain_web_contents_sends();
+    assert_eq!(
+        drained
+            .iter()
+            .map(|(id, send)| (*id, send.channel.as_str()))
+            .collect::<Vec<_>>(),
+        vec![(a, "tick"), (a, "tick"), (b, "other")],
+        "window-id order, each window FIFO"
+    );
+    assert_eq!(drained[0].1.payload, json!({"n": 1}));
+    assert_eq!(
+        manager.queued_main_send_count(),
+        0,
+        "drain empties every outbox"
+    );
+    assert!(manager.drain_web_contents_sends().is_empty());
+}

@@ -192,6 +192,87 @@ fn payloads_marshal_structurally() {
     );
 }
 
+/// Issue #91: main-process `win.webContents.send(channel, ...args)` queues
+/// per target window; the pump delivers each payload to that window's
+/// renderer `ipcRenderer.on` listeners as `(event, ...args)`.
+#[test]
+fn web_contents_send_reaches_renderer_listeners() {
+    let host = ElectronHost::new("QuickStart", "1.0.0");
+    let mut main =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    main.install_electron(&host);
+    main.eval(
+        "const { app, BrowserWindow } = require('electron'); \
+         app.whenReady().then(() => { \
+             const win = new BrowserWindow({ show: false }); \
+             win.webContents.send('tick', { n: 1 }, 'two'); \
+             __strake_send_message('main-sent'); \
+         });",
+    );
+    assert!(main.take_js_errors().is_empty());
+    main.mark_electron_ready();
+    assert_eq!(main.take_messages(), vec!["main-sent"]);
+    assert_eq!(host.pending_main_send_count(), 1);
+
+    let mut renderer = ScriptDocument::from_html(
+        "<html><body><script></script></body></html>",
+        DocumentConfig::default(),
+    )
+    .without_timer_thread()
+    .with_virtual_time();
+    renderer.install_electron_renderer(&host);
+    renderer.execute_scripts();
+    renderer.eval(
+        "const { ipcRenderer } = require('electron'); \
+         ipcRenderer.on('tick', (event, payload, word) => { \
+             __strake_send_message('renderer-tick:' + JSON.stringify(payload) + ':' + word + ':' + typeof event); \
+         });",
+    );
+    assert!(renderer.take_js_errors().is_empty());
+
+    assert_eq!(main.pump_ipc(&mut renderer), 1, "one main-send pumps once");
+    assert_eq!(host.pending_main_send_count(), 0);
+    assert!(main.take_js_errors().is_empty());
+    assert!(renderer.take_js_errors().is_empty());
+    assert_eq!(
+        renderer.take_messages(),
+        vec!["renderer-tick:{\"n\":1}:two:object"]
+    );
+}
+
+/// Issue #91: sends to unknown/closed windows fail softly (no throw),
+/// matching Electron's fire-and-forget posture.
+#[test]
+fn web_contents_send_to_closed_window_fails_softly() {
+    let host = ElectronHost::new("QuickStart", "1.0.0");
+    let mut main =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    main.install_electron(&host);
+    main.eval(
+        "const BW = require('electron').BrowserWindow; \
+         const doomed = new BW({ show: false }); \
+         doomed.close(); \
+         doomed.webContents.send('ghost', 1); \
+         __strake_send_message('survived');",
+    );
+    assert!(
+        main.take_js_errors().is_empty(),
+        "send on a closed window must not throw"
+    );
+    assert_eq!(main.take_messages(), vec!["survived"]);
+    assert_eq!(host.pending_main_send_count(), 0);
+
+    let mut renderer =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    assert_eq!(main.pump_ipc(&mut renderer), 0);
+}
+
 #[test]
 fn pump_without_host_is_a_noop() {
     let mut main =
