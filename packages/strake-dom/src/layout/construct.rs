@@ -12,7 +12,7 @@ use style::{
     data::ElementData as StyloElementData,
     shared_lock::StylesheetGuards,
     values::{
-        computed::{Content, ContentItem, Display, Float, TextTransform},
+        computed::{Content, ContentItem, Display, Float, Overflow, TextTransform},
         specified::box_::{DisplayInside, DisplayOutside},
     },
 };
@@ -685,7 +685,12 @@ fn collect_layout_children_with_wrap(
 /// `contain: layout/paint`, and `will-change` ancestors are not treated as
 /// containing blocks, and `fixed` always hoists to the root element even
 /// under such an ancestor. `display: contents` ancestors stay transparent
-/// even when positioned (they generate no box to graft onto).
+/// even when positioned (they generate no box to graft onto). Paint follows
+/// layout ancestry, so grafted boxes escape intermediate transforms, and
+/// `absolute` boxes under an intervening `overflow` clip/scroll container are
+/// left in place (un-reparented) rather than escaping its clip. `fixed`
+/// hoists to the root element's box rather than the viewport (ICB), so
+/// root-element border/padding leaks into its insets.
 pub(crate) fn reparent_out_of_flow_children(doc: &mut BaseDocument) -> bool {
     let root_id = doc.root_element().id;
     if doc.nodes.get(root_id).is_none() {
@@ -700,29 +705,35 @@ pub(crate) fn reparent_out_of_flow_children(doc: &mut BaseDocument) -> bool {
             .unwrap_or(PositionProperty::Static)
     }
 
-    // Collect out-of-flow boxes in layout-tree order so graft order preserves
-    // relative document order among boxes sharing a containing block (paint
-    // order within one stacking level is a stable sort over this order).
+    // Collect out-of-flow boxes in document (pre-)order so graft order
+    // preserves relative document order among boxes sharing a containing
+    // block (paint order within one stacking level is a stable sort over
+    // this order). Each popped node is recorded itself and children are
+    // pushed reversed so pops follow pre-order: recording at the parent
+    // would order a shallow later box before a deep earlier one, and pushing
+    // in forward order would reverse siblings (LIFO).
     let mut out_of_flow: Vec<(NodeId, NodeId)> = Vec::new();
-    let mut stack = vec![doc.root_node().id];
-    while let Some(id) = stack.pop() {
+    let mut stack = vec![(doc.root_node().id, None)];
+    while let Some((id, from_id)) = stack.pop() {
         let Some(node) = doc.nodes.get(id) else {
             continue;
         };
+        if let Some(from_id) = from_id {
+            if box_position(doc, id).is_absolutely_positioned() {
+                out_of_flow.push((id, from_id));
+            }
+        }
         let children: Vec<NodeId> = node
             .layout_children
             .borrow()
             .as_ref()
             .map(|c| c.iter().copied().collect())
             .unwrap_or_default();
-        for child_id in children {
+        for child_id in children.into_iter().rev() {
             if doc.nodes.get(child_id).is_none() {
                 continue;
             }
-            if box_position(doc, child_id).is_absolutely_positioned() {
-                out_of_flow.push((child_id, id));
-            }
-            stack.push(child_id);
+            stack.push((child_id, Some(id)));
         }
     }
 
@@ -741,6 +752,18 @@ pub(crate) fn reparent_out_of_flow_children(doc: &mut BaseDocument) -> bool {
             positioned_ancestor(doc, node_id, root_id)
         };
         if to_id == from_id || doc.nodes.get(to_id).is_none() {
+            continue;
+        }
+        // Paint follows layout ancestry (`draw_children`/`render_element`
+        // accumulate `clip_rect` and scroll offsets through layout-tree
+        // ancestors only), so grafting an `absolute` box past a
+        // clipping/scrolling DOM intermediate would let it escape that
+        // container's clip. Leave such boxes in place until DOM-ancestor
+        // clips are carried through paint. (`fixed` is exempt: ancestor
+        // overflow does not clip viewport-anchored boxes.)
+        if !matches!(position, PositionProperty::Fixed)
+            && has_clipping_intermediate(doc, node_id, to_id)
+        {
             continue;
         }
 
@@ -783,6 +806,38 @@ pub(crate) fn reparent_out_of_flow_children(doc: &mut BaseDocument) -> bool {
         moved_any = true;
     }
     moved_any
+}
+
+/// Whether any DOM ancestor strictly between `node_id` and its containing
+/// block `cb_id` establishes clipping/scrolling (`overflow-x`/`overflow-y`
+/// other than `visible`). Grafting past such an intermediate would move the
+/// box out of the layout ancestry that paint clips through, so the graft
+/// must be skipped (see `reparent_out_of_flow_children`).
+fn has_clipping_intermediate(doc: &BaseDocument, node_id: NodeId, cb_id: NodeId) -> bool {
+    let mut current = doc.nodes.get(node_id).and_then(|n| n.parent);
+    while let Some(id) = current {
+        if id == cb_id {
+            return false;
+        }
+        let Some(node) = doc.nodes.get(id) else {
+            break;
+        };
+        // Box-less ancestors (`display: contents`/`none`) cannot clip.
+        let generates_box = node.display_style().is_some_and(|d| {
+            !matches!(d.inside(), DisplayInside::Contents)
+                && !matches!(d.outside(), DisplayOutside::None)
+        });
+        if generates_box
+            && node.primary_styles().is_some_and(|s| {
+                !matches!(s.get_box().overflow_x, Overflow::Visible)
+                    || !matches!(s.get_box().overflow_y, Overflow::Visible)
+            })
+        {
+            return true;
+        }
+        current = node.parent;
+    }
+    false
 }
 
 /// Nearest DOM ancestor that establishes a containing block for
