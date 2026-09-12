@@ -13,13 +13,13 @@ mod dioxus_document;
 mod events;
 mod mutation_writer;
 mod write_once_attr;
-pub use boson_dom::DocumentConfig;
+pub use strake_dom::DocumentConfig;
 pub use dioxus_document::DioxusDocument;
 pub use events::{NodeHandle, synthetic_click_event};
 pub use write_once_attr::{CustomWidgetAttr, SubDocumentAttr};
 
-pub use boson_dom::NodeId;
-use boson_dom::{LocalName, Namespace, QualName, ns};
+pub use strake_dom::NodeId;
+use strake_dom::{LocalName, Namespace, QualName, ns};
 
 pub(crate) fn qual_name(local_name: &str, namespace: Option<&str>) -> QualName {
     QualName {

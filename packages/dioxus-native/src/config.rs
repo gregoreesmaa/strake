@@ -1,5 +1,5 @@
 use anyrender::CompositeAlphaMode;
-use boson_dom::FontContext;
+use strake_dom::FontContext;
 use dioxus_core::LaunchConfig;
 use peniko::Color;
 use winit::window::WindowAttributes;

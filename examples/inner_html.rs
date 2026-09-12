@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
 use anyrender_vello::VelloWindowRenderer;
-use boson_dom::DocumentConfig;
-use boson_html::{HtmlDocument, HtmlProvider};
-use boson_shell::{BosonApplication, BosonShellProxy, WindowConfig, create_default_event_loop};
+use strake_dom::DocumentConfig;
+use strake_html::{HtmlDocument, HtmlProvider};
+use strake_shell::{StrakeApplication, StrakeShellProxy, WindowConfig, create_default_event_loop};
 
 pub fn main() {
     // Create renderer
 
-    // Parse the HTML into a Boson document
+    // Parse the HTML into a Strake document
     let mut doc = HtmlDocument::from_html(
         HTML,
         DocumentConfig {
@@ -23,8 +23,8 @@ pub fn main() {
 
     // Create the Winit application and window
     let event_loop = create_default_event_loop();
-    let (proxy, reciever) = BosonShellProxy::new(event_loop.create_proxy());
-    let mut application = BosonApplication::new(proxy, reciever);
+    let (proxy, reciever) = StrakeShellProxy::new(event_loop.create_proxy());
+    let mut application = StrakeApplication::new(proxy, reciever);
     let renderer = VelloWindowRenderer::new();
     let window = WindowConfig::new(Box::new(doc), renderer);
     application.add_window(window);

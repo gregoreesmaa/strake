@@ -3,7 +3,7 @@ name = "dioxus-native"
 version = "0.7.0"
 authors = ["Jonathan Kelley", "Nico Burns"]
 edition = "2024"
-description = "Native renderer for Dioxus based on boson"
+description = "Native renderer for Dioxus based on strake"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/DioxusLabs/dioxus/"
 homepage = "https://dioxuslabs.com/learn/0.7/getting_started"
@@ -14,21 +14,21 @@ default = ["accessibility", "hot-reload", "net", "html", "svg", "system-fonts", 
 prelude = ["dep:dioxus-core-macro", "dep:dioxus-hooks", "dep:dioxus-signals", "dep:dioxus-stores", "dep:manganis"]
 
 # DOM features
-svg = ["boson-dom/svg", "boson-paint/svg"]
-floats = ["boson-dom/floats"]
-autofocus = ["boson-dom/autofocus"]
-system-fonts = ["boson-dom/system-fonts"]
+svg = ["strake-dom/svg", "strake-paint/svg"]
+floats = ["strake-dom/floats"]
+autofocus = ["strake-dom/autofocus"]
+system-fonts = ["strake-dom/system-fonts"]
 # complex-scripts: enable dictionary-based line-breaking
-complex-scripts = ["boson-dom/complex-scripts"]
+complex-scripts = ["strake-dom/complex-scripts"]
 # WOFF/WOFF2 decoder. Default-on so wasm callers (which can't use system fonts)
 # can bundle compressed fonts without extra setup.
-woff = ["boson-dom/woff"]
+woff = ["strake-dom/woff"]
 
 # Shell Features
-clipboard = ["boson-shell/clipboard"]
-file-dialog = ["boson-shell/file-dialog"]
-accessibility = ["boson-shell/accessibility", "boson-dom/accessibility"]
-data-uri = ["boson-shell/data-uri"]
+clipboard = ["strake-shell/clipboard"]
+file-dialog = ["strake-shell/file-dialog"]
+accessibility = ["strake-shell/accessibility", "strake-dom/accessibility"]
+data-uri = ["strake-shell/data-uri"]
 
 # Renderer features
 vello = ["dep:anyrender_vello", "dep:wgpu_context"]
@@ -42,38 +42,38 @@ vello-cpu-pixels = ["vello-cpu-base", "anyrender_vello_cpu/pixels_window_rendere
 vello-cpu-softbuffer = ["vello-cpu-base", "anyrender_vello_cpu/softbuffer_window_renderer"]
 vello-cpu-base = ["dep:anyrender_vello_cpu"]
 
-font-embolden = ["boson-paint/font-embolden"]
-apple-font-embolden = ["boson-paint/apple-font-embolden"]
-scrollbars = ["boson-paint/scrollbars"]
+font-embolden = ["strake-paint/font-embolden"]
+apple-font-embolden = ["strake-paint/apple-font-embolden"]
+scrollbars = ["strake-paint/scrollbars"]
 
 # Other features
-# No-op on wasm32 (boson_net::Provider needs tokio's threaded runtime); launch_cfg
+# No-op on wasm32 (strake_net::Provider needs tokio's threaded runtime); launch_cfg
 # falls back to the in-process DioxusNativeNetProvider there.
-net = ["dep:tokio", "dep:boson-net"]
-html = ["dep:boson-html"]
+net = ["dep:tokio", "dep:strake-net"]
+html = ["dep:strake-html"]
 
 # Dev
 hot-reload = ["dep:dioxus-devtools"]
 
 # Debug/Logging
 log-times = ["log-phase-times", "log-frame-times"]
-log-phase-times = ["boson-dom/log-phase-times"]
+log-phase-times = ["strake-dom/log-phase-times"]
 log-frame-times = [
   "anyrender_vello_cpu?/log_frame_times",
   "anyrender_vello?/log_frame_times",
   "anyrender_vello_hybrid?/log_frame_times",
   "anyrender_skia?/log_frame_times",
 ]
-tracing = ["dep:tracing", "dioxus-native-dom/tracing", "boson-shell/tracing", "boson-dom/tracing", "boson-html/tracing", "boson-net/tracing"]
+tracing = ["dep:tracing", "dioxus-native-dom/tracing", "strake-shell/tracing", "strake-dom/tracing", "strake-html/tracing", "strake-net/tracing"]
 
 [dependencies]
-# Boson dependencies
-boson-dom = { workspace = true, features = ["custom-widget"] }
-boson-html = { workspace = true, optional = true }
-boson-net = { workspace = true, optional = true }
-boson-paint = { workspace = true, optional = true, features = ["custom-widget"] }
-boson-traits = { workspace = true }
-boson-shell = { workspace = true }
+# Strake dependencies
+strake-dom = { workspace = true, features = ["custom-widget"] }
+strake-html = { workspace = true, optional = true }
+strake-net = { workspace = true, optional = true }
+strake-paint = { workspace = true, optional = true, features = ["custom-widget"] }
+strake-traits = { workspace = true }
+strake-shell = { workspace = true }
 
 # AnyRender dependencies
 anyrender = { workspace = true }

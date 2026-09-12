@@ -1,16 +1,16 @@
-//! Integration between Dioxus and Boson
+//! Integration between Dioxus and Strake
 use crate::NodeId;
 use crate::events::{
-    BosonKeyboardData, NativeConverter, NativeFocusData, NativeFormData, NativePointerData,
+    StrakeKeyboardData, NativeConverter, NativeFocusData, NativeFormData, NativePointerData,
     NativeScrollData, NativeTouchData, NativeWheelData, NodeHandle,
 };
 use crate::mutation_writer::{DioxusState, MutationWriter};
 use crate::qual_name;
-use boson_dom::{
+use strake_dom::{
     Attribute, BaseDocument, DEFAULT_CSS, DocGuard, DocGuardMut, Document, DocumentConfig,
     EventDriver, EventHandler, Node,
 };
-use boson_traits::events::{DomEvent, DomEventData, EventState, UiEvent};
+use strake_traits::events::{DomEvent, DomEventData, EventState, UiEvent};
 use dioxus_core::{ElementId, Event, VirtualDom};
 use dioxus_html::{PlatformEventData, set_event_converter};
 use futures_util::task::noop_waker;
@@ -36,12 +36,12 @@ fn get_dioxus_id(node: &Node) -> Option<ElementId> {
         .map(ElementId)
 }
 
-/// Integrates [`BaseDocument`] from  [`boson-dom`](boson_dom)  with [`VirtualDom`] from [`dioxus-core`](dioxus_core)
+/// Integrates [`BaseDocument`] from  [`strake-dom`](strake_dom)  with [`VirtualDom`] from [`dioxus-core`](dioxus_core)
 ///
 /// ### Example
 ///
 /// ```rust
-/// use boson_traits::shell::{Viewport, ColorScheme};
+/// use strake_traits::shell::{Viewport, ColorScheme};
 /// use dioxus_native_dom::{DioxusDocument, DocumentConfig};
 /// use dioxus::prelude::*;
 ///
@@ -121,7 +121,7 @@ impl DioxusDocument {
         mutr.append_children(html_element_id, &[body_element_id]);
 
         // Create another virtual element to hold the root <div id="main"></div> under the html element
-        let main_attr = boson_dom::Attribute {
+        let main_attr = strake_dom::Attribute {
             name: qual_name("id", None),
             value: "main".to_string(),
         };
@@ -320,7 +320,7 @@ impl EventHandler for DioxusEventHandler<'_> {
             DomEventData::KeyDown(kevent)
             | DomEventData::KeyUp(kevent)
             | DomEventData::KeyPress(kevent) => {
-                Some(wrap_event_data(BosonKeyboardData(kevent.clone())))
+                Some(wrap_event_data(StrakeKeyboardData(kevent.clone())))
             }
 
             DomEventData::Input(data) => Some(wrap_event_data(NativeFormData {
@@ -366,7 +366,7 @@ impl EventHandler for DioxusEventHandler<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use boson_dom::DocumentConfig;
+    use strake_dom::DocumentConfig;
     use dioxus::prelude::*;
     use dioxus_core::ScopeId;
     use std::cell::RefCell;

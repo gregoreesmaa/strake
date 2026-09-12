@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::time::{Duration, SystemTime};
 
-use boson_traits::net::Url;
+use strake_traits::net::Url;
 use dioxus_native::prelude::*;
 
 pub use browser_persistence::{HistoryEntry, HistoryEntryId, HistoryStore, MAX_HISTORY_ENTRIES};

@@ -1,7 +1,7 @@
 //! Utility functions for capturing screenshots
 
 use anyrender::PaintScene;
-use boson_paint::paint_scene;
+use strake_paint::paint_scene;
 use peniko::Fill;
 use peniko::kurbo::Rect;
 
@@ -23,7 +23,7 @@ pub(crate) enum RenderSize {
 }
 
 impl RenderSize {
-    fn resolve(&self, doc: &boson_dom::BaseDocument) -> (u32, u32) {
+    fn resolve(&self, doc: &strake_dom::BaseDocument) -> (u32, u32) {
         match self {
             RenderSize::Viewport => doc.viewport().window_size,
             RenderSize::FullDocumentHeight => {
@@ -39,7 +39,7 @@ impl RenderSize {
 
 /// Capture a screenshot as PNG and write it to the specified path
 #[cfg(feature = "screenshot")]
-pub(crate) fn capture_screenshot(doc: &mut boson_dom::BaseDocument, path: &Path) {
+pub(crate) fn capture_screenshot(doc: &mut strake_dom::BaseDocument, path: &Path) {
     let size = RenderSize::Viewport;
     let (render_width, render_height) = size.resolve(doc);
 
@@ -65,7 +65,7 @@ pub(crate) fn capture_screenshot(doc: &mut boson_dom::BaseDocument, path: &Path)
 
 /// Capture a scene as an AnyRender serialized scene
 #[cfg(feature = "capture")]
-pub(crate) fn capture_anyrender_scene(doc: &mut boson_dom::BaseDocument, path: &Path) {
+pub(crate) fn capture_anyrender_scene(doc: &mut strake_dom::BaseDocument, path: &Path) {
     let mut scene = anyrender::Scene::new();
     render_scene(doc, &mut scene, RenderSize::Viewport);
 
@@ -79,7 +79,7 @@ pub(crate) fn capture_anyrender_scene(doc: &mut boson_dom::BaseDocument, path: &
 }
 
 fn render_scene(
-    doc: &mut boson_dom::BaseDocument,
+    doc: &mut strake_dom::BaseDocument,
     scene: &mut impl PaintScene,
     size: RenderSize,
 ) -> (u32, u32) {
@@ -89,7 +89,7 @@ fn render_scene(
     scene.fill(
         Fill::NonZero,
         Default::default(),
-        boson_dom::util::Color::WHITE,
+        strake_dom::util::Color::WHITE,
         Default::default(),
         &Rect::new(0.0, 0.0, render_width as f64, render_height as f64),
     );
@@ -104,7 +104,7 @@ pub(crate) async fn try_get_save_path(file_type_name: &str, ext: &str) -> Option
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs();
-    let default_name = format!("boson-screenshot-{timestamp}.{ext}");
+    let default_name = format!("strake-screenshot-{timestamp}.{ext}");
 
     #[cfg(any(target_os = "android", target_os = "ios"))]
     let path = Some(std::path::PathBuf::from(&default_name));

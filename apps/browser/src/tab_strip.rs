@@ -1,4 +1,4 @@
-use boson_traits::net::Url;
+use strake_traits::net::Url;
 use dioxus_native::prelude::*;
 use dioxus_native::use_window_event;
 use winit::event::WindowEvent;

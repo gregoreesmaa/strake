@@ -28,9 +28,9 @@ vello-cpu-filters = ["anyrender_vello_cpu?/filters"]
 avif = ["dep:image", "image?/avif-native"]
 comrak = ["dep:comrak"]
 pulldown_cmark = ["dep:pulldown-cmark"]
-floats = ["boson-dom/floats"]
-scrollbars = ["boson-dom/scrollbars", "boson-paint/scrollbars"]
-cache = ["boson-net/cache"]
+floats = ["strake-dom/floats"]
+scrollbars = ["strake-dom/scrollbars", "strake-paint/scrollbars"]
+cache = ["strake-net/cache"]
 log-times = ["log-frame-times", "log-phase-times"]
 log-frame-times = [
   "anyrender_vello_cpu?/log_frame_times",
@@ -38,16 +38,16 @@ log-frame-times = [
   "anyrender_vello?/log_frame_times",
   "anyrender_skia?/log_frame_times",
 ]
-log-phase-times = ["boson-dom/log-phase-times"]
-tracing = ["dep:tracing-subscriber", "boson-shell/tracing", "boson-net/tracing", "boson-html/tracing"]
+log-phase-times = ["strake-dom/log-phase-times"]
+tracing = ["dep:tracing-subscriber", "strake-shell/tracing", "strake-net/tracing", "strake-html/tracing"]
 
 [dependencies]
-boson-traits = { workspace = true }
-boson-dom = { workspace = true, features = ["default", "parallel-construct"] }
-boson-html = { workspace = true }
-boson-paint = { workspace = true, features = ["default"] }
-boson-net = { workspace = true, features = ["cookies"] }
-boson-shell = { workspace = true, features = ["default"] }
+strake-traits = { workspace = true }
+strake-dom = { workspace = true, features = ["default", "parallel-construct"] }
+strake-html = { workspace = true }
+strake-paint = { workspace = true, features = ["default"] }
+strake-net = { workspace = true, features = ["cookies"] }
+strake-shell = { workspace = true, features = ["default"] }
 anyrender_vello = { workspace = true, optional = true }
 anyrender_skia = { workspace = true, optional = true }
 anyrender_vello_cpu = { workspace = true, features = ["multithreading"], optional = true }

@@ -1,24 +1,24 @@
-# Boson — Ultra-Fast Native Web Runtime & Modern Electron Alternative
+# Strake — Ultra-Fast Native Web Runtime & Modern Electron Alternative
 
-> *"Electron gives apps mass. Boson gives them velocity."*
+> *"Electron gives apps mass. Strake gives them velocity."*
 
-[![Build Status](https://github.com/gregoreesmaa/boson/actions/workflows/ci.yml/badge.svg)](https://github.com/gregoreesmaa/boson/actions)
+[![Build Status](https://github.com/gregoreesmaa/strake/actions/workflows/ci.yml/badge.svg)](https://github.com/gregoreesmaa/strake/actions)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache_2.0-blue.svg)](LICENSE-APACHE)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE-MIT)
-[![Repository](https://img.shields.io/badge/GitHub-gregoreesmaa%2Fboson-181717.svg?logo=github)](https://github.com/gregoreesmaa/boson)
+[![Repository](https://img.shields.io/badge/GitHub-gregoreesmaa%2Fstrake-181717.svg?logo=github)](https://github.com/gregoreesmaa/strake)
 
-> **Notice:** Boson is an independent native application runtime originally derived from [Blitz](https://github.com/DioxusLabs/blitz) by DioxusLabs. It builds upon modular HTML/CSS foundations (Stylo, Taffy, Parley, Vello) to deliver a true lightweight **Electron replacement** capable of running standard web applications natively across **macOS, Windows, Linux, iOS, and Android**, backed by an on-demand, zero-copy offscreen Chromium fallback. See [NOTICE](NOTICE) for full attribution.
+> **Notice:** Strake is an independent native application runtime originally derived from [Blitz](https://github.com/DioxusLabs/blitz) by DioxusLabs. It builds upon modular HTML/CSS foundations (Stylo, Taffy, Parley, Vello) to deliver a true lightweight **Electron replacement** capable of running standard web applications natively across **macOS, Windows, Linux, iOS, and Android**, backed by an on-demand, zero-copy offscreen Chromium fallback. See [NOTICE](NOTICE) for full attribution.
 
 ---
 
-## The Boson Ethos: 100% Compatibility at Inception, Relentless Ultra-Optimization in Perpetuity
+## The Strake Ethos: 100% Compatibility at Inception, Relentless Ultra-Optimization in Perpetuity
 
 > **"In the compatibility layer, all hacks are permissible. On the modern path, zero waste is tolerated."**
 
-Boson is governed by two inviolable laws:
+Strake is governed by two inviolable laws:
 
 1. **The Inviolable Law of Compatibility (Day 1 Drop-in Replacement):**
-   * Any application written for Electron or standard web environments must run in Boson on Day 1 without breaking changes or painful architectural rewrites.
+   * Any application written for Electron or standard web environments must run in Strake on Day 1 without breaking changes or painful architectural rewrites.
    * In the compatibility layer, **all pragmatic shims, polyfills, monkey-patches, and offscreen Chromium fallbacks are completely acceptable**. No edge-case feature, legacy API, or obscure web specification will be turned away if an existing real-world app depends on it. Compatibility is our adoption vector.
 
 2. **The Inviolable Law of Ultra-Optimization (The End-State Moat):**
@@ -26,7 +26,7 @@ Boson is governed by two inviolable laws:
    * Ultra-optimization is our technical reason for being: **sub-30MB baseline RAM, sub-100ms cold startup, 120fps GPU compute rendering, 0% CPU at idle, and sub-20MB distributable binaries**.
 
 3. **The Bifurcated Architecture: The Modern "Hyper-Path":**
-   * **The Legacy / Fallback Path:** For unpolyfilled APIs or complex legacy browser subsystems (WebRTC, Widevine, intricate iframes), Boson dynamically routes rendering to a disposable, heavily throttled offscreen Chromium worker that hibernates or terminates the moment it is hidden.
+   * **The Legacy / Fallback Path:** For unpolyfilled APIs or complex legacy browser subsystems (WebRTC, Widevine, intricate iframes), Strake dynamically routes rendering to a disposable, heavily throttled offscreen Chromium worker that hibernates or terminates the moment it is hidden.
    * **The Modern Hyper-Path:** When an application authors clean, modern, evergreen web code (standard Flexbox/Grid layouts, modern ES modules, native Web APIs), the engine bypasses all shims, virtualization, and Chromium overhead entirely—executing directly on bare-metal Rust and GPU compute shaders with minimal resource consumption.
    * **The Developer Incentive:** Developers are never blocked by missing features, but are naturally rewarded with featherweight, battery-friendly native performance simply by writing modern standard code.
 
@@ -36,7 +36,7 @@ Boson is governed by two inviolable laws:
 
 Traditional desktop web wrappers (Electron, CEF) embed an entire Google Chromium browser and Node.js instance for every single application, consuming hundreds of megabytes of RAM, bloating binary sizes past 150MB, draining laptop battery life, and introducing seconds of cold-boot latency.
 
-**Boson** re-architects client application infrastructure from first principles:
+**Strake** re-architects client application infrastructure from first principles:
 
 ### 1. Radically Lean Resource Footprint
 * **Instant Cold Starts:** Sub-100ms cold application launch.
@@ -50,17 +50,17 @@ Traditional desktop web wrappers (Electron, CEF) embed an entire Google Chromium
 
 ### 3. Integrated Native JS/TS Execution
 * Run standard web code (HTML, CSS, JavaScript/TypeScript) without a bloated multi-process V8 engine.
-* Native microtask/macrotask HTML5 event loop wired directly to `boson-dom`'s generational SlotMap.
+* Native microtask/macrotask HTML5 event loop wired directly to `strake-dom`'s generational SlotMap.
 * Dynamic QuickJS-ng runtime with future Static Hermes AOT compilation for typed bundles.
 
 ### 4. 100% Web Feature Coverage via Lightweight Strangler-Fig Fallback
-While Boson renders modern HTML and CSS with extreme speed and fidelity, arbitrary web applications occasionally rely on long-tail browser subsystems (WebRTC, Widevine DRM media, intricate iframes, or unhandled browser extensions).
+While Strake renders modern HTML and CSS with extreme speed and fidelity, arbitrary web applications occasionally rely on long-tail browser subsystems (WebRTC, Widevine DRM media, intricate iframes, or unhandled browser extensions).
 
 Rather than failing or waiting years for full spec reimplementation:
 * **Native-First Core:** 95%+ of UI layout, styling, text shaping, image rendering, and DOM events execute directly in native Rust.
 * **Zero-Cost Idle Fallback:** The headless Chromium worker is **never launched at startup** (0 MB RAM, 0% CPU at rest).
 * **On-Demand JIT Spawning:** Spawns an isolated headless Chromium worker *only* when an unsupported element is mounted.
-* **Zero-Copy GPU Texture Sharing:** Offscreen frames stream directly into Boson's WGPU pipeline via OS-level shared GPU textures (`IOSurface` on macOS, `DXGI` shared handles on Windows, `dma-buf` on Linux) with zero CPU memory copying.
+* **Zero-Copy GPU Texture Sharing:** Offscreen frames stream directly into Strake's WGPU pipeline via OS-level shared GPU textures (`IOSurface` on macOS, `DXGI` shared handles on Windows, `dma-buf` on Linux) with zero CPU memory copying.
 * **Aggressive Auto-Eviction:** Worker hibernates after 15 seconds of inactivity and terminates after 30 seconds of zero active fallback nodes, restoring memory back to the sub-30MB baseline.
 
 ---
@@ -83,7 +83,7 @@ Rather than failing or waiting years for full spec reimplementation:
                │ Direct FFI / Microtask Event Loop       │
                ▼                                         ▼
 ┌────────────────────────────────────────────────────────────────────────┐
-│                         Boson Core (Rust)                              │
+│                         Strake Core (Rust)                              │
 │                                                                        │
 │   • Layout: Taffy (Flexbox, CSS Grid, Block layout)                    │
 │   • Typography & Shaping: Parley + HarfBuzz                            │
@@ -110,12 +110,12 @@ Rather than failing or waiting years for full spec reimplementation:
 
 ### Key Subsystems
 
-* **`boson-dom`** — Core synthetic DOM incorporating style resolution, Taffy layout, text shaping, and event dispatch.
-* **`boson-paint`** — Translates DOM render nodes into GPU compute draws via **anyrender** / **Vello**.
-* **`boson-shell`** — Connects the engine to host OS windowing, system tray, menus, dialogs, and **AccessKit** screen readers.
-* **`boson-html`** — HTML5 parsing via **html5ever**.
-* **`boson-net`** — Asynchronous resource fetching, corporate proxy discovery, and system root CA resolution.
-* **`boson-cdp`** — Embedded Chrome DevTools Protocol server for live inspection and Vite HMR live reloading.
+* **`strake-dom`** — Core synthetic DOM incorporating style resolution, Taffy layout, text shaping, and event dispatch.
+* **`strake-paint`** — Translates DOM render nodes into GPU compute draws via **anyrender** / **Vello**.
+* **`strake-shell`** — Connects the engine to host OS windowing, system tray, menus, dialogs, and **AccessKit** screen readers.
+* **`strake-html`** — HTML5 parsing via **html5ever**.
+* **`strake-net`** — Asynchronous resource fetching, corporate proxy discovery, and system root CA resolution.
+* **`strake-cdp`** — Embedded Chrome DevTools Protocol server for live inspection and Vite HMR live reloading.
 
 ---
 
@@ -125,10 +125,10 @@ Ensure you have a modern Rust toolchain installed (1.80+):
 
 ```bash
 # Clone the repository
-git clone https://github.com/gregoreesmaa/boson.git
-cd boson
+git clone https://github.com/gregoreesmaa/strake.git
+cd strake
 
-# Launch the native Boson browser
+# Launch the native Strake browser
 cargo run -rp browser
 
 # View a Markdown document via native engine
@@ -139,7 +139,7 @@ cargo run -rp rdme ./README.md
 
 ## License & Attribution
 
-Boson is an open-source project originally derived from [Blitz](https://github.com/DioxusLabs/blitz) by DioxusLabs.
+Strake is an open-source project originally derived from [Blitz](https://github.com/DioxusLabs/blitz) by DioxusLabs.
 
 This project is dual-licensed under:
 * **[Apache License, Version 2.0](LICENSE-APACHE)** ([http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0))

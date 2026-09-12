@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::io::Cursor;
 use std::sync::{Arc, LazyLock, RwLock};
 
-use boson_traits::net::{Request, Url};
+use strake_traits::net::{Request, Url};
 
 use crate::StdNetProvider;
 
@@ -56,7 +56,7 @@ async fn probe_favicon(url: &Url, net_provider: &Arc<StdNetProvider>) -> Option<
     Some(url.clone())
 }
 
-// Mirrors boson-dom's ImageHandler::parse: try the `image` crate first, then
+// Mirrors strake-dom's ImageHandler::parse: try the `image` crate first, then
 // fall back to usvg for SVG favicons. If neither succeeds the renderer
 // wouldn't be able to display it either, so we treat the probe as failed.
 fn is_decodable_image(bytes: &[u8]) -> bool {

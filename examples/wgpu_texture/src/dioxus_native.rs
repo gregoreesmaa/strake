@@ -48,7 +48,7 @@ fn app() -> Element {
             }
         }
         header {
-            h2 { "Boson WGPU Demo" }
+            h2 { "Strake WGPU Demo" }
         }
         if show_cube() {
             SpinningCube { color }

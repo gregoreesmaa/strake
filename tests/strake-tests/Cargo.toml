@@ -1,0 +1,38 @@
+[package]
+name = "strake-tests"
+description = "Integration tests for Strake"
+publish = false
+version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+categories.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dev-dependencies]
+# Strake dependencies
+strake-test-harness = { workspace = true }
+strake-dom = { workspace = true, features = ["accessibility", "floats", "system-fonts"] }
+strake-html = { workspace = true }
+strake-traits = { workspace = true }
+strake-paint = { workspace = true, features = ["scrollbars", "svg"] }
+dioxus-native-dom = { workspace = true }
+anyrender = { workspace = true }
+anyrender_vello_cpu = { workspace = true }
+
+# DioxusLabs dependencies
+dioxus = { workspace = true }
+dioxus-core = { workspace = true }
+
+# Other dependencies
+style = { workspace = true }
+accesskit = { workspace = true }
+markup5ever = { workspace = true }
+keyboard-types = { workspace = true }
+taffy = { workspace = true }
+test-that = { workspace = true }
+usvg = { workspace = true }
+
+[lib]
+path = "lib.rs"

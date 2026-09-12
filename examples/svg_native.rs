@@ -1,5 +1,5 @@
 //! First-party inline SVG (`svg-native`): the `<svg>` below is parsed straight into
-//! Boson's DOM, not painted as an opaque external image, so ordinary CSS including
+//! Strake's DOM, not painted as an opaque external image, so ordinary CSS including
 //! `:hover` applies to elements inside it.
 use dioxus_native::prelude::*;
 

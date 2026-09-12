@@ -37,8 +37,8 @@
           };
           craneLib = (inputs.crane.mkLib pkgs).overrideToolchain rustToolchain;
 
-          # Libraries that Boson loads at runtime via `dlopen` (winit + wgpu).
-          # They are not needed to *build*, but a Boson app needs them on
+          # Libraries that Strake loads at runtime via `dlopen` (winit + wgpu).
+          # They are not needed to *build*, but a Strake app needs them on
           # `LD_LIBRARY_PATH` to open a window and talk to the GPU.
           runtimeLibs = lib.optionals pkgs.stdenv.isLinux [
             pkgs.wayland
@@ -52,8 +52,8 @@
             pkgs.libxcb
           ];
 
-          # Dependencies needed to build Boson:
-          #   * openssl     -> openssl-sys, via reqwest in boson-net
+          # Dependencies needed to build Strake:
+          #   * openssl     -> openssl-sys, via reqwest in strake-net
           #   * fontconfig  -> yeslogic-fontconfig-sys, via parley/fontique
           rustBuildInputs = [
             pkgs.openssl
@@ -93,7 +93,7 @@
               // {
                 pname = package;
                 version = cargoToml.workspace.package.version;
-                # Boson's workspace root is a *virtual* manifest (no root
+                # Strake's workspace root is a *virtual* manifest (no root
                 # `[package]`), so build deps and the crate together in one
                 # derivation instead of crane's dummy deps-only layer.
                 cargoArtifacts = null;
@@ -114,14 +114,14 @@
             );
         in
         {
-          # The example browser app (`apps/browser`), whose binary is `boson`.
+          # The example browser app (`apps/browser`), whose binary is `strake`.
           packages.browser = rustPackage "browser" {
-            binary = "boson";
+            binary = "strake";
           };
           packages.default = self'.packages.browser;
 
           devShells.default = pkgs.mkShell {
-            name = "boson-dev";
+            name = "strake-dev";
             buildInputs = rustBuildInputs;
             nativeBuildInputs = rustNativeBuildInputs ++ [
               rustToolchain
@@ -131,7 +131,7 @@
               export RUST_SRC_PATH="${rustToolchain}/lib/rustlib/src/rust/library";
             ''
             + lib.optionalString pkgs.stdenv.isLinux ''
-              # Boson dlopen's these at runtime; make them discoverable when
+              # Strake dlopen's these at runtime; make them discoverable when
               # running examples/apps from inside the dev shell.
               export LD_LIBRARY_PATH="${lib.makeLibraryPath runtimeLibs}:$LD_LIBRARY_PATH"
             '';

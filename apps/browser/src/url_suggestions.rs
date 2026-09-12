@@ -343,7 +343,7 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
-    use boson_traits::net::Url;
+    use strake_traits::net::Url;
 
     fn url(s: &str) -> Url {
         Url::parse(s).unwrap()

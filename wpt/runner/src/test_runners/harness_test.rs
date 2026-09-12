@@ -1,11 +1,11 @@
 //! Runner for testharness.js tests: executes the test file's JavaScript (including
-//! the real testharness.js framework) using `boson-vibey-script`, and collects the
+//! the real testharness.js framework) using `strake-vibey-script`, and collects the
 //! harness results via a custom `testharnessreport.js`.
 
 use std::path::PathBuf;
 use std::time::Duration;
 
-use boson_vibey_script::{FetchError, ScriptFetcher};
+use strake_vibey_script::{FetchError, ScriptFetcher};
 use log::{debug, warn};
 use url::Url;
 
@@ -17,12 +17,12 @@ const HARNESS_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Custom `testharnessreport.js` served in place of WPT's stock one (which is
 /// designed to be replaced by test runners). It disables the DOM output section
-/// and reports results to the runner via the `__boson_send_message` native
-/// function provided by boson-vibey-script.
+/// and reports results to the runner via the `__strake_send_message` native
+/// function provided by strake-vibey-script.
 ///
 /// The `timeout_multiplier` scales down testharness's internal timeout (10s by
 /// default) so that tests which will never complete (e.g. ones waiting for
-/// events that Boson never fires, or for testdriver.js automation) report a
+/// events that Strake never fires, or for testdriver.js automation) report a
 /// TIMEOUT harness status quickly instead of hitting the runner's
 /// [`HARNESS_TIMEOUT`] backstop. It also proportionally shortens
 /// `step_timeout()` delays, speeding up legitimately-passing async tests.
@@ -35,7 +35,7 @@ const HARNESS_TIMEOUT: Duration = Duration::from_secs(10);
 const TESTHARNESSREPORT_JS: &str = r#"
 setup({ output: false, debug: false, timeout_multiplier: 0.5 });
 add_completion_callback(function (tests, harness_status) {
-    __boson_send_message(JSON.stringify({
+    __strake_send_message(JSON.stringify({
         type: "wpt_results",
         harness_status: {
             status: harness_status.status,
@@ -51,7 +51,7 @@ add_completion_callback(function (tests, harness_status) {
 /// Custom `testdriver-vendor.js` served in place of WPT's stock one (an empty
 /// file which automation environments are expected to replace).
 ///
-/// Boson has no testdriver automation backend. Without a vendor file,
+/// Strake has no testdriver automation backend. Without a vendor file,
 /// testdriver.js commands like `test_driver.click()` fall back to waiting for
 /// a *real user* to perform the action, so such tests hang until the harness
 /// timeout. Setting `in_automation` makes every command reject immediately
@@ -66,7 +66,7 @@ window.test_driver_internal.in_automation = true;
         const command = prefix ? prefix + "." + key : key;
         if (typeof child === "function") {
             value[key] = function () {
-                __boson_send_message(JSON.stringify({
+                __strake_send_message(JSON.stringify({
                     type: "unsupported_feature",
                     feature: "testdriver",
                     command: command,
@@ -280,9 +280,9 @@ pub(super) fn parse_results(message: &str) -> Option<(i64, Vec<SubtestResult>)> 
 
 #[cfg(test)]
 mod tests {
-    use boson_dom::DocumentConfig;
-    use boson_html::HtmlDocument;
-    use boson_vibey_script::ScriptDocument;
+    use strake_dom::DocumentConfig;
+    use strake_html::HtmlDocument;
+    use strake_vibey_script::ScriptDocument;
 
     use super::*;
 

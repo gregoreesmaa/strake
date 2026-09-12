@@ -17,7 +17,7 @@ pub fn CircleDrawer() -> Element {
     // index of circle being resized, if dialog is open
     let mut dialog_idx: Signal<Option<usize>> = use_signal(|| None);
     let mut dialog_r: Signal<f64> = use_signal(|| 20.0);
-    // Captured at mount; rect is read at click time because Boson fires
+    // Captured at mount; rect is read at click time because Strake fires
     // `mounted` before layout, and `element_coordinates()` is unimplemented.
     let mut canvas_handle: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
 

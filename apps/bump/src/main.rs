@@ -10,15 +10,15 @@ const ANYRENDER_PACKAGES: &[&str] = &[
     "anyrender_svg",
 ];
 
-// The set of the "boson" packages that are versioned together
-const BOSON_PACKAGES: &[&str] = &[
-    "boson",
-    "boson-dom",
-    "boson-html",
-    "boson-net",
-    "boson-paint",
-    "boson-shell",
-    "boson-traits",
+// The set of the "strake" packages that are versioned together
+const STRAKE_PACKAGES: &[&str] = &[
+    "strake",
+    "strake-dom",
+    "strake-html",
+    "strake-net",
+    "strake-paint",
+    "strake-shell",
+    "strake-traits",
     "stylo_taffy",
 ];
 
@@ -69,12 +69,12 @@ fn main() {
     // Parse "target" CLI arg
     let target = args.next();
     let target = match target.as_deref() {
-        Some(target @ ("boson" | "anyrender")) => target,
+        Some(target @ ("strake" | "anyrender")) => target,
         Some(target) => {
             println!("{target}");
-            bail!("Invalid target. Must be 'boson' or 'anyrender'")
+            bail!("Invalid target. Must be 'strake' or 'anyrender'")
         }
-        _ => bail!("Missing target. Must be 'boson' or 'anyrender'"),
+        _ => bail!("Missing target. Must be 'strake' or 'anyrender'"),
     };
 
     // Parse "version" CLI arg
@@ -100,12 +100,12 @@ fn main() {
         println!("Bumped anyrender versions")
     }
 
-    if target == "boson" {
+    if target == "strake" {
         set_workspace_version(&version);
-        for package in BOSON_PACKAGES {
+        for package in STRAKE_PACKAGES {
             set_workspace_dep_version(package, &version);
         }
 
-        println!("Bumped boson versions")
+        println!("Bumped strake versions")
     }
 }

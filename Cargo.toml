@@ -2,24 +2,24 @@
 members = [
     "packages/accesskit_xplat",
     "packages/debug_timer",
-    "packages/boson-traits",
-    "packages/boson-dom",
-    "packages/boson-html",
-    "packages/boson-net",
-    "packages/boson-paint",
-    "packages/boson-vibey-script",
-    "packages/boson-shell",
-    "packages/boson",
+    "packages/strake-traits",
+    "packages/strake-dom",
+    "packages/strake-html",
+    "packages/strake-net",
+    "packages/strake-paint",
+    "packages/strake-vibey-script",
+    "packages/strake-shell",
+    "packages/strake",
     "packages/stylo_taffy",
     "packages/dioxus-native",
     "packages/dioxus-native-dom",
-    "packages/boson-test-harness",
+    "packages/strake-test-harness",
     "apps/browser",
     "apps/browser/persistence",
     "apps/readme",
     "apps/bump",
     "wpt/runner",
-    "tests/boson-tests",
+    "tests/strake-tests",
     "examples/counter",
     "examples/transparent",
     "examples/seven_guis",
@@ -33,29 +33,29 @@ resolver = "2"
 [workspace.package]
 version = "0.3.0-beta.2"
 license = "MIT OR Apache-2.0"
-homepage = "https://github.com/gregoreesmaa/boson"
-repository = "https://github.com/gregoreesmaa/boson"
+homepage = "https://github.com/gregoreesmaa/strake"
+repository = "https://github.com/gregoreesmaa/strake"
 categories = ["gui"]
 edition = "2024"
 rust-version = "1.91.0"
 
 [workspace.dependencies]
-# Boson dependencies(in-repo)
-boson = { version = "=0.3.0-beta.2", path = "./packages/boson" }
-boson-dom = { version = "=0.3.0-beta.2", path = "./packages/boson-dom", default-features = false }
-boson-html = { version = "=0.3.0-beta.2", path = "./packages/boson-html", default-features = false }
-boson-net = { version = "=0.3.0-beta.2", path = "./packages/boson-net", default-features = false }
-boson-paint = { version = "=0.3.0-beta.2", path = "./packages/boson-paint", default-features = false }
-boson-vibey-script = { version = "=0.3.0-beta.2", path = "./packages/boson-vibey-script", default-features = false }
-boson-shell = { version = "=0.3.0-beta.2", path = "./packages/boson-shell", default-features = false }
-boson-traits = { version = "=0.3.0-beta.2", path = "./packages/boson-traits", default-features = false }
+# Strake dependencies(in-repo)
+strake = { version = "=0.3.0-beta.2", path = "./packages/strake" }
+strake-dom = { version = "=0.3.0-beta.2", path = "./packages/strake-dom", default-features = false }
+strake-html = { version = "=0.3.0-beta.2", path = "./packages/strake-html", default-features = false }
+strake-net = { version = "=0.3.0-beta.2", path = "./packages/strake-net", default-features = false }
+strake-paint = { version = "=0.3.0-beta.2", path = "./packages/strake-paint", default-features = false }
+strake-vibey-script = { version = "=0.3.0-beta.2", path = "./packages/strake-vibey-script", default-features = false }
+strake-shell = { version = "=0.3.0-beta.2", path = "./packages/strake-shell", default-features = false }
+strake-traits = { version = "=0.3.0-beta.2", path = "./packages/strake-traits", default-features = false }
 stylo_taffy = { version = "=0.3.0-beta.2", path = "./packages/stylo_taffy", default-features = false }
 dioxus-native = { version = "0.7.0", path = "./packages/dioxus-native", default-features = false }
 dioxus-native-dom = { version = "0.7.0", path = "./packages/dioxus-native-dom", default-features = false }
 debug_timer = { version = "0.1.2", path = "./packages/debug_timer" }
 accesskit_xplat = { version = "0.1", path = "./packages/accesskit_xplat", default-features = false }
 browser-persistence = { path = "./apps/browser/persistence" }
-boson-test-harness = { path = "./packages/boson-test-harness" }
+strake-test-harness = { path = "./packages/strake-test-harness" }
 
 # Servo dependencies
 style = { version = "0.21.0", package = "stylo" }
@@ -235,11 +235,11 @@ opt-level = 3
 # This is a "virtual package"
 # It is not meant to be published, but is used so "cargo run --example XYZ" works properly
 [package]
-name = "boson-examples"
+name = "strake-examples"
 version = "0.0.1"
 authors = ["Jonathan Kelley", "Gregor Eesmaa"]
 edition = "2024"
-description = "Top level crate for Boson"
+description = "Top level crate for Strake"
 license = "MIT OR Apache-2.0"
 keywords = ["dom", "ui", "gui", "react", "wasm"]
 rust-version = "1.91.0"
@@ -255,14 +255,14 @@ anyrender = { workspace = true }
 anyrender_vello = { workspace = true }
 anyrender_vello_cpu = { workspace = true, features = ["multithreading"] }
 anyrender_vello_hybrid = { workspace = true }
-boson-dom = { workspace = true, features = ["default"] }
-boson-html = { workspace = true }
-boson-traits = { workspace = true }
-boson-paint = { workspace = true }
-boson-shell = { workspace = true }
-boson-net = { workspace = true }
-boson-vibey-script = { workspace = true }
-boson = { workspace = true, features = ["net"] }
+strake-dom = { workspace = true, features = ["default"] }
+strake-html = { workspace = true }
+strake-traits = { workspace = true }
+strake-paint = { workspace = true }
+strake-shell = { workspace = true }
+strake-net = { workspace = true }
+strake-vibey-script = { workspace = true }
+strake = { workspace = true, features = ["net"] }
 dioxus = { workspace = true }
 dioxus-native = { workspace = true, features = [
     "vello-hybrid",

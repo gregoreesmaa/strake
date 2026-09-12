@@ -1,6 +1,6 @@
-use boson_dom::DocumentConfig;
-use boson_html::HtmlDocument;
-use boson_shell::{create_default_event_loop, BosonApplication, BosonShellProxy, WindowConfig};
+use strake_dom::DocumentConfig;
+use strake_html::HtmlDocument;
+use strake_shell::{create_default_event_loop, StrakeApplication, StrakeShellProxy, WindowConfig};
 
 use crate::{limits, DemoWidget, FEATURES, STYLES};
 
@@ -32,7 +32,7 @@ pub fn launch_html() {
 
     let renderer = create_renderer();
 
-    // Parse the HTML into a Boson document
+    // Parse the HTML into a Strake document
     let html = HTML.replace("{{STYLES_PLACEHOLDER}}", STYLES);
     let mut doc = HtmlDocument::from_html(&html, DocumentConfig::default());
 
@@ -42,8 +42,8 @@ pub fn launch_html() {
 
     // Create the Winit application and window
     let event_loop = create_default_event_loop();
-    let (proxy, reciever) = BosonShellProxy::new(event_loop.create_proxy());
-    let mut application = BosonApplication::new(proxy, reciever);
+    let (proxy, reciever) = StrakeShellProxy::new(event_loop.create_proxy());
+    let mut application = StrakeApplication::new(proxy, reciever);
     let window = WindowConfig::new(Box::new(doc), renderer);
     application.add_window(window);
 
@@ -69,7 +69,7 @@ static HTML: &str = r#"
                 <h2>Underlay</h2>
                 <p>This underlay demonstrates that the custom WGPU content can be rendered above layers and blended with the content underneath</p>
             </div>
-            <header><h1>Boson WGPU Demo</h1></header>
+            <header><h1>Strake WGPU Demo</h1></header>
             <div id="canvas-container">
                 <object id="demo-canvas" />
             </div>

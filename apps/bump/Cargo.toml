@@ -2,7 +2,7 @@
 name = "bump"
 version = "0.0.0"
 edition = "2024"
-description = "Utility to aid publishing boson"
+description = "Utility to aid publishing strake"
 license.workspace = true
 publish = false
 

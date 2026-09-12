@@ -2,11 +2,11 @@
 
 use anyrender::{PaintScene as _, render_to_buffer};
 use anyrender_vello_cpu::VelloCpuImageRenderer;
-use boson_dom::{DocumentConfig, util::Color};
-use boson_html::HtmlDocument;
-use boson_net::Provider;
-use boson_paint::paint_scene;
-use boson_traits::shell::{ColorScheme, Viewport};
+use strake_dom::{DocumentConfig, util::Color};
+use strake_html::HtmlDocument;
+use strake_net::Provider;
+use strake_paint::paint_scene;
+use strake_traits::shell::{ColorScheme, Viewport};
 use peniko::Fill;
 use peniko::kurbo::Rect;
 use reqwest::Url;

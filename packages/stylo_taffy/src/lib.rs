@@ -1,6 +1,6 @@
 //! Conversion functions from Stylo types to Taffy types
 //!
-//! This crate is an implementation detail of [`boson-dom`](https://docs.rs/boson-dom), but can also be
+//! This crate is an implementation detail of [`strake-dom`](https://docs.rs/strake-dom), but can also be
 //! used standalone, and serves as useful reference for anyone wanting to integrate [`stylo`](::style) with [`taffy`]
 
 mod wrapper;

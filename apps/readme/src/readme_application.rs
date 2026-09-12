@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use crate::WindowRenderer;
-use boson_dom::DocumentConfig;
-use boson_html::HtmlDocument;
-use boson_net::Provider;
-use boson_shell::{BosonApplication, BosonShellEvent, BosonShellProxy, View, WindowConfig};
-use boson_traits::navigation::{NavigationOptions, NavigationProvider};
+use strake_dom::DocumentConfig;
+use strake_html::HtmlDocument;
+use strake_net::Provider;
+use strake_shell::{StrakeApplication, StrakeShellEvent, StrakeShellProxy, View, WindowConfig};
+use strake_traits::navigation::{NavigationOptions, NavigationProvider};
 use tokio::runtime::Handle;
 use winit::application::ApplicationHandler;
 use winit::event::{Modifiers, StartCause, WindowEvent};
@@ -16,12 +16,12 @@ use winit::platform::macos::ApplicationHandlerExtMacOS;
 use winit::window::{Theme, WindowId};
 
 use crate::fetch;
-use crate::markdown::{BOSON_MD_STYLES, GITHUB_MD_STYLES, markdown_to_html};
+use crate::markdown::{STRAKE_MD_STYLES, GITHUB_MD_STYLES, markdown_to_html};
 
 pub struct ReadmeEvent;
 
 pub struct ReadmeApplication {
-    inner: BosonApplication<WindowRenderer>,
+    inner: StrakeApplication<WindowRenderer>,
     handle: tokio::runtime::Handle,
     net_provider: Arc<Provider>,
     raw_url: String,
@@ -32,15 +32,15 @@ pub struct ReadmeApplication {
 
 impl ReadmeApplication {
     pub fn new(
-        proxy: BosonShellProxy,
-        event_queue: std::sync::mpsc::Receiver<BosonShellEvent>,
+        proxy: StrakeShellProxy,
+        event_queue: std::sync::mpsc::Receiver<StrakeShellEvent>,
         raw_url: String,
         net_provider: Arc<Provider>,
         navigation_provider: Arc<dyn NavigationProvider>,
     ) -> Self {
         let handle = Handle::current();
         Self {
-            inner: BosonApplication::new(proxy, event_queue),
+            inner: StrakeApplication::new(proxy, event_queue),
             handle,
             raw_url,
             net_provider,
@@ -66,7 +66,7 @@ impl ReadmeApplication {
         self.handle.spawn(async move {
             let url = url;
             let (base_url, contents, is_md, _file_path) = fetch(&url, net_provider).await;
-            proxy.send_event(BosonShellEvent::NavigationLoad {
+            proxy.send_event(StrakeShellEvent::NavigationLoad {
                 url: base_url,
                 contents,
                 is_md,
@@ -82,7 +82,7 @@ impl ReadmeApplication {
             Box::new(move |result| {
                 let (url, bytes) = result.unwrap();
                 let contents = std::str::from_utf8(&bytes).unwrap().to_string();
-                proxy.send_event(BosonShellEvent::NavigationLoad {
+                proxy.send_event(StrakeShellEvent::NavigationLoad {
                     url,
                     contents,
                     is_md: false,
@@ -104,7 +104,7 @@ impl ReadmeApplication {
         if is_md {
             html = markdown_to_html(html);
             stylesheets.push(String::from(GITHUB_MD_STYLES));
-            stylesheets.push(String::from(BOSON_MD_STYLES));
+            stylesheets.push(String::from(STRAKE_MD_STYLES));
         }
 
         let doc = HtmlDocument::from_html(
@@ -190,18 +190,18 @@ impl ApplicationHandler for ReadmeApplication {
     fn proxy_wake_up(&mut self, event_loop: &dyn ActiveEventLoop) {
         while let Ok(event) = self.inner.event_queue.try_recv() {
             match event {
-                BosonShellEvent::Embedder(event) => {
+                StrakeShellEvent::Embedder(event) => {
                     if let Some(_event) = event.downcast_ref::<ReadmeEvent>() {
                         self.reload_document(true);
                     }
                 }
-                BosonShellEvent::Navigate(options) => {
+                StrakeShellEvent::Navigate(options) => {
                     let old_url = std::mem::replace(&mut self.raw_url, options.url.to_string());
                     self.url_history.push(old_url);
                     self.reload_document(false);
                     self.navigate(*options);
                 }
-                BosonShellEvent::NavigationLoad {
+                StrakeShellEvent::NavigationLoad {
                     url,
                     contents,
                     retain_scroll_position,
@@ -209,7 +209,7 @@ impl ApplicationHandler for ReadmeApplication {
                 } => {
                     self.load_document(contents, retain_scroll_position, url, is_md);
                 }
-                event => self.inner.handle_boson_shell_event(event_loop, event),
+                event => self.inner.handle_strake_shell_event(event_loop, event),
             }
         }
     }

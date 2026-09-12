@@ -1,8 +1,8 @@
 
 flowchart TB
 
-    boson-paint[**boson-paint**] --> anyrender
-    boson-paint --> boson-dom
+    strake-paint[**strake-paint**] --> anyrender
+    strake-paint --> strake-dom
 
     anyrender[**AnyRender**
     vello_cpu
@@ -19,9 +19,9 @@ flowchart TB
     %% vello --> wgpu
     %% vello_hybrid --> wgpu
 
-    boson-html --> boson-dom
+    strake-html --> strake-dom
 
-    boson-dom["`**Boson DOM**
+    strake-dom["`**Strake DOM**
     stylo (css)
     taffy (box layout)
     parley (text layout)
@@ -29,40 +29,40 @@ flowchart TB
     Accessibility
     `"]
 
-    %% boson-net --> boson-traits
-    %% boson-html --> boson-traits
-    %% boson-shell --> boson-traits
-    boson-dom --> boson-traits
-    boson-dom --> stylo
-    boson-dom --> taffy
-    boson-dom --> parley
-    boson-dom --> accesskit
-    %% boson-dom -.-> anyrender
+    %% strake-net --> strake-traits
+    %% strake-html --> strake-traits
+    %% strake-shell --> strake-traits
+    strake-dom --> strake-traits
+    strake-dom --> stylo
+    strake-dom --> taffy
+    strake-dom --> parley
+    strake-dom --> accesskit
+    %% strake-dom -.-> anyrender
 
     dioxus-native["`**Dioxus Native**
     `"]
 
-    dioxus-native --> boson-paint[**boson-paint**
+    dioxus-native --> strake-paint[**strake-paint**
     AnyRender]
-    dioxus-native --> boson-shell[**boson-shell**
+    dioxus-native --> strake-shell[**strake-shell**
     Winit]
     dioxus-native --> dioxus-native-dom[**dioxus-native-dom**]
-    dioxus-native --> boson-net[**boson-net**
+    dioxus-native --> strake-net[**strake-net**
     Reqwest/Hyper]
-    dioxus-native --> boson-html[**boson-html**
+    dioxus-native --> strake-html[**strake-html**
     html5ever]
 
-        dioxus-native-dom --> boson-dom
+        dioxus-native-dom --> strake-dom
 
-    boson-shell --> boson-dom
+    strake-shell --> strake-dom
 
     %% Styles
 
-    %% style boson-paint fill:#0097B2,color:#FFFFFF
-    %% style boson-html color:#FFFFFF,fill:#0097B2
-    %% style boson-shell color:#FFFFFF,fill:#0097B2
-    %% style boson-net color:#FFFFFF,fill:#0097B2
-    %% style boson-dom fill:#0097B2,color:#FFFFFF
+    %% style strake-paint fill:#0097B2,color:#FFFFFF
+    %% style strake-html color:#FFFFFF,fill:#0097B2
+    %% style strake-shell color:#FFFFFF,fill:#0097B2
+    %% style strake-net color:#FFFFFF,fill:#0097B2
+    %% style strake-dom fill:#0097B2,color:#FFFFFF
     %% style anyrender fill:#5CE1E6
     %% style taffy color:#000000,fill:#5CE1E6
     %% style parley fill:#5CE1E6
@@ -70,5 +70,5 @@ flowchart TB
     %% style dioxus-native-dom fill:#00BF63,color:#FFFFFF
     %% style stylo color:#FFFFFF,fill:#FF5757
     %% style wgpu fill:#FF5757,color:#FFFFFF
-    %% style boson-traits color:#FFFFFF,fill:#0097B2
+    %% style strake-traits color:#FFFFFF,fill:#0097B2
     %% style accesskit color:#FFFFFF,fill:#545454

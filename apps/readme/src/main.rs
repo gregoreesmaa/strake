@@ -2,7 +2,7 @@ mod readme_application;
 
 mod markdown {
     pub(crate) const GITHUB_MD_STYLES: &str = include_str!("../assets/github-markdown.css");
-    pub(crate) const BOSON_MD_STYLES: &str = include_str!("../assets/boson-markdown-overrides.css");
+    pub(crate) const STRAKE_MD_STYLES: &str = include_str!("../assets/strake-markdown-overrides.css");
 
     #[cfg(feature = "comrak")]
     mod comrak;
@@ -28,16 +28,16 @@ use anyrender_vello_cpu::VelloCpuWindowRenderer as WindowRenderer;
 #[cfg(feature = "hybrid")]
 use anyrender_vello_hybrid::VelloHybridWindowRenderer as WindowRenderer;
 
-use boson_dom::DocumentConfig;
-use boson_html::HtmlDocument;
-use boson_net::Provider;
-use boson_traits::navigation::{NavigationOptions, NavigationProvider};
-use boson_traits::net::Request;
-use markdown::{BOSON_MD_STYLES, GITHUB_MD_STYLES, markdown_to_html};
+use strake_dom::DocumentConfig;
+use strake_html::HtmlDocument;
+use strake_net::Provider;
+use strake_traits::navigation::{NavigationOptions, NavigationProvider};
+use strake_traits::net::Request;
+use markdown::{STRAKE_MD_STYLES, GITHUB_MD_STYLES, markdown_to_html};
 use notify::{Error as NotifyError, Event as NotifyEvent, RecursiveMode, Watcher as _};
 use readme_application::{ReadmeApplication, ReadmeEvent};
 
-use boson_shell::{BosonShellEvent, BosonShellProxy, WindowConfig, create_default_event_loop};
+use strake_shell::{StrakeShellEvent, StrakeShellProxy, WindowConfig, create_default_event_loop};
 use std::env::current_dir;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -47,13 +47,13 @@ use url::Url;
 use winit::window::WindowAttributes;
 
 struct ReadmeNavigationProvider {
-    proxy: BosonShellProxy,
+    proxy: StrakeShellProxy,
 }
 
 impl NavigationProvider for ReadmeNavigationProvider {
     fn navigate_to(&self, opts: NavigationOptions) {
         self.proxy
-            .send_event(BosonShellEvent::Navigate(Box::new(opts)));
+            .send_event(StrakeShellEvent::Navigate(Box::new(opts)));
     }
 }
 
@@ -76,7 +76,7 @@ fn main() {
 
     let event_loop = create_default_event_loop();
     let winit_proxy = event_loop.create_proxy();
-    let (proxy, event_queue) = BosonShellProxy::new(winit_proxy);
+    let (proxy, event_queue) = StrakeShellProxy::new(winit_proxy);
 
     let net_waker = Some(Arc::new(proxy.clone()) as _);
     let net_provider = Arc::new(Provider::new(net_waker));
@@ -91,7 +91,7 @@ fn main() {
     if is_md {
         html = markdown_to_html(html);
         stylesheets.push(String::from(GITHUB_MD_STYLES));
-        stylesheets.push(String::from(BOSON_MD_STYLES));
+        stylesheets.push(String::from(STRAKE_MD_STYLES));
         title = format!(
             "README for {}",
             base_url.rsplit("/").find(|s| !s.is_empty()).unwrap()
@@ -132,7 +132,7 @@ fn main() {
     if let Some(path) = file_path {
         let mut watcher =
             notify::recommended_watcher(move |_: Result<NotifyEvent, NotifyError>| {
-                let event = BosonShellEvent::Embedder(Arc::new(ReadmeEvent));
+                let event = StrakeShellEvent::Embedder(Arc::new(ReadmeEvent));
                 proxy.send_event(event);
             })
             .unwrap();

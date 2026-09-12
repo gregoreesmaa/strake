@@ -1,22 +1,22 @@
-Boson Native Application Runtime
-Copyright 2026 Gregor Eesmaa and the Boson Project contributors.
+Strake Native Application Runtime
+Copyright 2026 Gregor Eesmaa and the Strake Project contributors.
 
 This product includes software originally developed by DioxusLabs and contributors
 as part of the Blitz project (https://github.com/DioxusLabs/blitz).
 Original Work Copyright (c) 2022-2026 Jonathan Kelley, Nico Burns, and contributors.
 
 Portions of this software have been refactored, extended, and modified from upstream Blitz
-by Gregor Eesmaa and Boson contributors under the terms of the Apache License, Version 2.0.
+by Gregor Eesmaa and Strake contributors under the terms of the Apache License, Version 2.0.
 
 This product is dual-licensed under the Apache License, Version 2.0 and the MIT License.
 
 Portions of this software (`stylo_taffy` and Servo components) are licensed under
 the Mozilla Public License 2.0 (MPL-2.0).
 
-This product bundles the font file `packages/boson-dom/assets/moz-bullet-font.otf`,
+This product bundles the font file `packages/strake-dom/assets/moz-bullet-font.otf`,
 derived from the Mozilla Gecko project and licensed under the Mozilla Public License 2.0 (MPL-2.0).
 
 Trademarks:
 "Dioxus" and "Blitz" are trademarks of DioxusLabs and/or their respective owners.
-"Boson" is an independent project and is not affiliated with, endorsed by, or sponsored by DioxusLabs.
+"Strake" is an independent project and is not affiliated with, endorsed by, or sponsored by DioxusLabs.
 

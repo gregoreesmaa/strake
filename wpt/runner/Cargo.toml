@@ -12,11 +12,11 @@ gpu = ["dep:anyrender_vello"]
 cpu = ["dep:anyrender_vello_cpu"]
 
 [dependencies]
-boson-dom = { workspace = true, features = ["svg", "floats", "system-fonts", "woff"] }
-boson-html = {workspace = true }
-boson-vibey-script = { workspace = true }
-boson-traits = { workspace = true }
-boson-paint = { workspace = true, features = ["default"] }
+strake-dom = { workspace = true, features = ["svg", "floats", "system-fonts", "woff"] }
+strake-html = {workspace = true }
+strake-vibey-script = { workspace = true }
+strake-traits = { workspace = true }
+strake-paint = { workspace = true, features = ["default"] }
 anyrender = { workspace = true }
 anyrender_vello = { workspace = true, optional = true }
 anyrender_vello_cpu = { workspace = true, optional = true }

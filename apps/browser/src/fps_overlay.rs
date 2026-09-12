@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use boson_dom::Widget;
+use strake_dom::Widget;
 use dioxus_native::{CustomWidgetAttr, prelude::*};
 
 const RING_LEN: usize = 60;
@@ -79,7 +79,7 @@ impl Widget for FpsWidget {
     fn paint(
         &mut self,
         _render_ctx: &mut dyn anyrender::RenderContext,
-        _styles: &boson_dom::node::ComputedStyles,
+        _styles: &strake_dom::node::ComputedStyles,
         _width: u32,
         _height: u32,
         _scale: f64,

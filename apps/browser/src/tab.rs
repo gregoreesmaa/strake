@@ -6,7 +6,7 @@ use std::{
     },
 };
 
-use boson_traits::net::{Request, Url};
+use strake_traits::net::{Request, Url};
 use dioxus_native::{NodeHandle, SubDocumentAttr, prelude::*};
 
 use crate::StdNetProvider;

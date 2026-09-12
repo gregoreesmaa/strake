@@ -1,0 +1,25 @@
+[package]
+name = "strake-test-harness"
+description = "Headless test harness for Strake documents"
+publish = false
+version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+categories.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Strake dependencies
+strake-dom = { workspace = true, features = ["accessibility", "system-fonts"] }
+strake-html = { workspace = true }
+strake-traits = { workspace = true }
+dioxus-native-dom = { workspace = true }
+
+# DioxusLabs dependencies
+dioxus-core = { workspace = true }
+
+# Other dependencies
+keyboard-types = { workspace = true }
+smol_str = { workspace = true }

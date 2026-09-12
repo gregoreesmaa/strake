@@ -1134,246 +1134,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "boson"
-version = "0.3.0-beta.2"
-dependencies = [
- "anyrender_vello",
- "boson-dom",
- "boson-html",
- "boson-net",
- "boson-paint",
- "boson-shell",
- "boson-traits",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "boson-dom"
-version = "0.3.0-beta.2"
-dependencies = [
- "accesskit",
- "anyrender",
- "app_units",
- "atomic_refcell",
- "bitflags 2.13.1",
- "boson-traits",
- "color",
- "cssparser",
- "cursor-icon",
- "debug_timer 0.1.3",
- "euclid",
- "html-escape",
- "image",
- "keyboard-types 0.7.0",
- "kurbo",
- "linebender_resource_handle",
- "markup5ever",
- "objc2 0.6.4",
- "parley",
- "percent-encoding",
- "rayon",
- "selectors",
- "skrifa",
- "slotmap",
- "smallvec",
- "stylo",
- "stylo_dom",
- "stylo_static_prefs",
- "stylo_taffy",
- "stylo_traits",
- "svgtypes",
- "taffy",
- "thin-vec",
- "thread_local",
- "tracing",
- "url",
- "usvg",
- "web-time",
- "wuff",
-]
-
-[[package]]
-name = "boson-examples"
-version = "0.0.1"
-dependencies = [
- "anyrender",
- "anyrender_vello",
- "anyrender_vello_cpu",
- "anyrender_vello_hybrid",
- "boson",
- "boson-dom",
- "boson-html",
- "boson-net",
- "boson-paint",
- "boson-shell",
- "boson-traits",
- "boson-vibey-script",
- "color",
- "dioxus",
- "dioxus-native",
- "env_logger",
- "euclid",
- "image",
- "peniko",
- "png 0.18.1",
- "reqwest",
- "rustc-hash 2.1.3",
- "tokio",
- "tracing-subscriber",
- "url",
- "vello",
- "vello_common",
- "vello_cpu",
- "vello_hybrid",
- "wgpu",
- "wgpu_context",
-]
-
-[[package]]
-name = "boson-html"
-version = "0.3.0-beta.2"
-dependencies = [
- "boson-dom",
- "boson-traits",
- "html5ever",
- "tracing",
- "xml5ever",
-]
-
-[[package]]
-name = "boson-net"
-version = "0.3.0-beta.2"
-dependencies = [
- "boson-traits",
- "data-url",
- "directories",
- "http-cache",
- "http-cache-reqwest",
- "reqwest",
- "reqwest-middleware",
- "tokio",
- "tracing",
- "wasm-bindgen-futures",
-]
-
-[[package]]
-name = "boson-paint"
-version = "0.3.0-beta.2"
-dependencies = [
- "anyrender",
- "anyrender_svg",
- "boson-dom",
- "boson-traits",
- "color",
- "euclid",
- "kurbo",
- "parley",
- "peniko",
- "skrifa",
- "smallvec",
- "stylo",
- "taffy",
- "tracing",
- "usvg",
-]
-
-[[package]]
-name = "boson-shell"
-version = "0.3.0-beta.2"
-dependencies = [
- "accesskit",
- "accesskit_xplat",
- "android-activity",
- "anyrender",
- "arboard",
- "atomic_refcell",
- "boson-dom",
- "boson-paint",
- "boson-traits",
- "data-url",
- "futures-util",
- "keyboard-types 0.7.0",
- "rfd",
- "tracing",
- "wasm-bindgen",
- "web-sys",
- "web-time",
- "winit",
-]
-
-[[package]]
-name = "boson-test-harness"
-version = "0.3.0-beta.2"
-dependencies = [
- "boson-dom",
- "boson-html",
- "boson-traits",
- "dioxus-core",
- "dioxus-native-dom",
- "keyboard-types 0.7.0",
- "smol_str",
-]
-
-[[package]]
-name = "boson-tests"
-version = "0.3.0-beta.2"
-dependencies = [
- "accesskit",
- "anyrender",
- "anyrender_vello_cpu",
- "boson-dom",
- "boson-html",
- "boson-paint",
- "boson-test-harness",
- "boson-traits",
- "dioxus",
- "dioxus-core",
- "dioxus-native-dom",
- "keyboard-types 0.7.0",
- "markup5ever",
- "stylo",
- "taffy",
- "test-that",
- "usvg",
-]
-
-[[package]]
-name = "boson-traits"
-version = "0.3.0-beta.2"
-dependencies = [
- "atomic_refcell",
- "bitflags 2.13.1",
- "bytes",
- "cursor-icon",
- "http",
- "keyboard-types 0.7.0",
- "serde",
- "smol_str",
- "url",
-]
-
-[[package]]
-name = "boson-vibey-script"
-version = "0.3.0-beta.2"
-dependencies = [
- "boa_engine",
- "boa_gc",
- "boa_runtime",
- "boson-dom",
- "boson-html",
- "boson-traits",
- "data-url",
- "keyboard-types 0.7.0",
- "log",
- "markup5ever",
- "tracing",
- "url",
- "web-time",
-]
-
-[[package]]
 name = "brotli"
 version = "8.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1402,12 +1162,6 @@ dependencies = [
  "anyrender",
  "anyrender_serialize",
  "anyrender_vello_cpu",
- "boson-dom",
- "boson-html",
- "boson-net",
- "boson-paint",
- "boson-traits",
- "boson-vibey-script",
  "browser-persistence",
  "dioxus-native",
  "image",
@@ -1417,6 +1171,12 @@ dependencies = [
  "peniko",
  "png 0.18.1",
  "rfd",
+ "strake-dom",
+ "strake-html",
+ "strake-net",
+ "strake-paint",
+ "strake-traits",
+ "strake-vibey-script",
  "tokio",
  "tracing",
  "tracing-subscriber",
@@ -2026,10 +1786,10 @@ name = "counter"
 version = "0.1.0"
 dependencies = [
  "android-activity",
- "boson-dom",
- "boson-paint",
  "dioxus-native",
  "idna_adapter",
+ "strake-dom",
+ "strake-paint",
 ]
 
 [[package]]
@@ -2635,12 +2395,6 @@ dependencies = [
  "anyrender_vello",
  "anyrender_vello_cpu",
  "anyrender_vello_hybrid",
- "boson-dom",
- "boson-html",
- "boson-net",
- "boson-paint",
- "boson-shell",
- "boson-traits",
  "cfg-if",
  "dioxus-asset-resolver",
  "dioxus-cli-config",
@@ -2660,6 +2414,12 @@ dependencies = [
  "peniko",
  "rustc-hash 2.1.3",
  "slotmap",
+ "strake-dom",
+ "strake-html",
+ "strake-net",
+ "strake-paint",
+ "strake-shell",
+ "strake-traits",
  "tokio",
  "tracing",
  "webbrowser",
@@ -2671,14 +2431,14 @@ dependencies = [
 name = "dioxus-native-dom"
 version = "0.7.0"
 dependencies = [
- "boson-dom",
- "boson-traits",
  "dioxus",
  "dioxus-core",
  "dioxus-html",
  "futures-util",
  "keyboard-types 0.7.0",
  "rustc-hash 2.1.3",
+ "strake-dom",
+ "strake-traits",
  "tracing",
 ]
 
@@ -6619,17 +6379,17 @@ dependencies = [
  "anyrender_vello",
  "anyrender_vello_cpu",
  "anyrender_vello_hybrid",
- "boson-dom",
- "boson-html",
- "boson-net",
- "boson-paint",
- "boson-shell",
- "boson-traits",
  "comrak",
  "image",
  "notify",
  "pulldown-cmark",
  "reqwest",
+ "strake-dom",
+ "strake-html",
+ "strake-net",
+ "strake-paint",
+ "strake-shell",
+ "strake-traits",
  "tokio",
  "tracing-subscriber",
  "url",
@@ -7589,6 +7349,246 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
+name = "strake"
+version = "0.3.0-beta.2"
+dependencies = [
+ "anyrender_vello",
+ "strake-dom",
+ "strake-html",
+ "strake-net",
+ "strake-paint",
+ "strake-shell",
+ "strake-traits",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "strake-dom"
+version = "0.3.0-beta.2"
+dependencies = [
+ "accesskit",
+ "anyrender",
+ "app_units",
+ "atomic_refcell",
+ "bitflags 2.13.1",
+ "color",
+ "cssparser",
+ "cursor-icon",
+ "debug_timer 0.1.3",
+ "euclid",
+ "html-escape",
+ "image",
+ "keyboard-types 0.7.0",
+ "kurbo",
+ "linebender_resource_handle",
+ "markup5ever",
+ "objc2 0.6.4",
+ "parley",
+ "percent-encoding",
+ "rayon",
+ "selectors",
+ "skrifa",
+ "slotmap",
+ "smallvec",
+ "strake-traits",
+ "stylo",
+ "stylo_dom",
+ "stylo_static_prefs",
+ "stylo_taffy",
+ "stylo_traits",
+ "svgtypes",
+ "taffy",
+ "thin-vec",
+ "thread_local",
+ "tracing",
+ "url",
+ "usvg",
+ "web-time",
+ "wuff",
+]
+
+[[package]]
+name = "strake-examples"
+version = "0.0.1"
+dependencies = [
+ "anyrender",
+ "anyrender_vello",
+ "anyrender_vello_cpu",
+ "anyrender_vello_hybrid",
+ "color",
+ "dioxus",
+ "dioxus-native",
+ "env_logger",
+ "euclid",
+ "image",
+ "peniko",
+ "png 0.18.1",
+ "reqwest",
+ "rustc-hash 2.1.3",
+ "strake",
+ "strake-dom",
+ "strake-html",
+ "strake-net",
+ "strake-paint",
+ "strake-shell",
+ "strake-traits",
+ "strake-vibey-script",
+ "tokio",
+ "tracing-subscriber",
+ "url",
+ "vello",
+ "vello_common",
+ "vello_cpu",
+ "vello_hybrid",
+ "wgpu",
+ "wgpu_context",
+]
+
+[[package]]
+name = "strake-html"
+version = "0.3.0-beta.2"
+dependencies = [
+ "html5ever",
+ "strake-dom",
+ "strake-traits",
+ "tracing",
+ "xml5ever",
+]
+
+[[package]]
+name = "strake-net"
+version = "0.3.0-beta.2"
+dependencies = [
+ "data-url",
+ "directories",
+ "http-cache",
+ "http-cache-reqwest",
+ "reqwest",
+ "reqwest-middleware",
+ "strake-traits",
+ "tokio",
+ "tracing",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "strake-paint"
+version = "0.3.0-beta.2"
+dependencies = [
+ "anyrender",
+ "anyrender_svg",
+ "color",
+ "euclid",
+ "kurbo",
+ "parley",
+ "peniko",
+ "skrifa",
+ "smallvec",
+ "strake-dom",
+ "strake-traits",
+ "stylo",
+ "taffy",
+ "tracing",
+ "usvg",
+]
+
+[[package]]
+name = "strake-shell"
+version = "0.3.0-beta.2"
+dependencies = [
+ "accesskit",
+ "accesskit_xplat",
+ "android-activity",
+ "anyrender",
+ "arboard",
+ "atomic_refcell",
+ "data-url",
+ "futures-util",
+ "keyboard-types 0.7.0",
+ "rfd",
+ "strake-dom",
+ "strake-paint",
+ "strake-traits",
+ "tracing",
+ "wasm-bindgen",
+ "web-sys",
+ "web-time",
+ "winit",
+]
+
+[[package]]
+name = "strake-test-harness"
+version = "0.3.0-beta.2"
+dependencies = [
+ "dioxus-core",
+ "dioxus-native-dom",
+ "keyboard-types 0.7.0",
+ "smol_str",
+ "strake-dom",
+ "strake-html",
+ "strake-traits",
+]
+
+[[package]]
+name = "strake-tests"
+version = "0.3.0-beta.2"
+dependencies = [
+ "accesskit",
+ "anyrender",
+ "anyrender_vello_cpu",
+ "dioxus",
+ "dioxus-core",
+ "dioxus-native-dom",
+ "keyboard-types 0.7.0",
+ "markup5ever",
+ "strake-dom",
+ "strake-html",
+ "strake-paint",
+ "strake-test-harness",
+ "strake-traits",
+ "stylo",
+ "taffy",
+ "test-that",
+ "usvg",
+]
+
+[[package]]
+name = "strake-traits"
+version = "0.3.0-beta.2"
+dependencies = [
+ "atomic_refcell",
+ "bitflags 2.13.1",
+ "bytes",
+ "cursor-icon",
+ "http",
+ "keyboard-types 0.7.0",
+ "serde",
+ "smol_str",
+ "url",
+]
+
+[[package]]
+name = "strake-vibey-script"
+version = "0.3.0-beta.2"
+dependencies = [
+ "boa_engine",
+ "boa_gc",
+ "boa_runtime",
+ "data-url",
+ "keyboard-types 0.7.0",
+ "log",
+ "markup5ever",
+ "strake-dom",
+ "strake-html",
+ "strake-traits",
+ "tracing",
+ "url",
+ "web-time",
+]
+
+[[package]]
 name = "strict-num"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8528,11 +8528,11 @@ name = "transparent"
 version = "0.1.0"
 dependencies = [
  "android-activity",
- "boson-dom",
- "boson-paint",
- "boson-traits",
  "dioxus-native",
  "idna_adapter",
+ "strake-dom",
+ "strake-paint",
+ "strake-traits",
 ]
 
 [[package]]
@@ -9054,11 +9054,11 @@ name = "wasm_hello"
 version = "0.0.0"
 dependencies = [
  "anyrender_vello_hybrid",
- "boson-dom",
- "boson-html",
- "boson-shell",
  "console_error_panic_hook",
  "parley",
+ "strake-dom",
+ "strake-html",
+ "strake-shell",
  "tracing",
  "tracing-wasm",
  "wasm-bindgen",
@@ -9479,16 +9479,16 @@ dependencies = [
  "anyrender",
  "anyrender_vello",
  "anyrender_vello_hybrid",
- "boson-dom",
- "boson-html",
- "boson-paint",
- "boson-shell",
- "boson-traits",
  "bytemuck",
  "color",
  "dioxus-native",
  "peniko",
  "pollster",
+ "strake-dom",
+ "strake-html",
+ "strake-paint",
+ "strake-shell",
+ "strake-traits",
  "wgpu",
  "wgpu_context",
 ]
@@ -10147,11 +10147,6 @@ dependencies = [
  "anyrender_vello_cpu",
  "atomic_float",
  "bitflags 2.13.1",
- "boson-dom",
- "boson-html",
- "boson-paint",
- "boson-traits",
- "boson-vibey-script",
  "data-url",
  "dify",
  "env_logger",
@@ -10169,6 +10164,11 @@ dependencies = [
  "rayon",
  "regex",
  "serde_json",
+ "strake-dom",
+ "strake-html",
+ "strake-paint",
+ "strake-traits",
+ "strake-vibey-script",
  "stylo",
  "stylo_traits",
  "supports-hyperlinks",

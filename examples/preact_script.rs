@@ -1,5 +1,5 @@
 //! Load an HTML file (by default the Preact TodoMVC example in examples/preact)
-//! in a window with JavaScript enabled, using `boson-vibey-script`'s Boa-based script
+//! in a window with JavaScript enabled, using `strake-vibey-script`'s Boa-based script
 //! engine.
 //!
 //! ```sh
@@ -7,9 +7,9 @@
 //! ```
 
 use anyrender_vello::VelloWindowRenderer as WindowRenderer;
-use boson_dom::DocumentConfig;
-use boson_shell::{BosonApplication, BosonShellProxy, WindowConfig, create_default_event_loop};
-use boson_vibey_script::ScriptDocument;
+use strake_dom::DocumentConfig;
+use strake_shell::{StrakeApplication, StrakeShellProxy, WindowConfig, create_default_event_loop};
+use strake_vibey_script::ScriptDocument;
 
 fn main() {
     let raw_path = std::env::args()
@@ -23,7 +23,7 @@ fn main() {
     let base_url = url::Url::from_file_path(&path).expect("invalid file path");
 
     let event_loop = create_default_event_loop();
-    let (proxy, receiver) = BosonShellProxy::new(event_loop.create_proxy());
+    let (proxy, receiver) = StrakeShellProxy::new(event_loop.create_proxy());
 
     let mut doc = ScriptDocument::from_html(
         &html,
@@ -35,7 +35,7 @@ fn main() {
     doc.execute_scripts();
 
     let window = WindowConfig::new(Box::new(doc) as _, WindowRenderer::new());
-    let mut application = BosonApplication::new(proxy, receiver);
+    let mut application = StrakeApplication::new(proxy, receiver);
     application.add_window(window);
 
     event_loop.run_app(application).unwrap()

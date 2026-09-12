@@ -45,5 +45,5 @@ const HTML: &str = r#"
 "#;
 
 fn main() {
-    boson::launch_static_html(HTML);
+    strake::launch_static_html(HTML);
 }

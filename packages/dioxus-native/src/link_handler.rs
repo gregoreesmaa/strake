@@ -1,4 +1,4 @@
-use boson_traits::{
+use strake_traits::{
     navigation::{NavigationOptions, NavigationProvider},
     net::Method,
 };

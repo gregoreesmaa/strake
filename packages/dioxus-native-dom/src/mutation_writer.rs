@@ -1,7 +1,7 @@
-//! Integration between Dioxus and Boson
+//! Integration between Dioxus and Strake
 use crate::{NodeId, qual_name, trace, write_once_attr::WriteOnceAttr};
-use boson_dom::{BaseDocument, Document, DocumentMutator, Widget};
-use boson_traits::events::DomEventKind;
+use strake_dom::{BaseDocument, Document, DocumentMutator, Widget};
+use strake_traits::events::DomEventKind;
 use dioxus_core::{
     AttributeValue, ElementId, Template, TemplateAttribute, TemplateNode, WriteMutations,
 };

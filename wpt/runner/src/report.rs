@@ -27,7 +27,7 @@ pub fn generate_run_info(wpt_dir: &Path) -> WptRunInfo {
     let os_info = os_info::get();
 
     WptRunInfo {
-        product: String::from("boson"),
+        product: String::from("strake"),
         revision: get_git_hash(wpt_dir),
         browser_version: Some(get_git_hash(&std::env::current_dir().unwrap())),
         automation: true,

@@ -1,7 +1,7 @@
 # AGENTS.md — Autonomous Agent Operational Guide & Architecture Contract
 
 > **Target Audience**: Autonomous AI coding agents (Antigravity, Claude Code, Cursor, Copilot Workspace, Devin).  
-> **Repository**: `gregoreesmaa/boson` (**Boson**).  
+> **Repository**: `gregoreesmaa/strake` (**Strake**).  
 > **Rule of Precedence**: Instructions in this document supersede general world knowledge or default assumptions regarding repository conventions, architectural patterns, and workflow commands.
 
 ---
@@ -19,7 +19,7 @@
 ## 2. Project Vision & North Star
 
 ### Mission
-Boson is a modular, ultra-fast native HTML/CSS/JS runtime and next-generation **Electron alternative** engineered in Rust. It compiles and renders standard web code into true native desktop and mobile applications without embedding a monolithic Chromium browser or Node.js runtime.
+Strake is a modular, ultra-fast native HTML/CSS/JS runtime and next-generation **Electron alternative** engineered in Rust. It compiles and renders standard web code into true native desktop and mobile applications without embedding a monolithic Chromium browser or Node.js runtime.
 
 ### Target Performance Profile
 * **Cold Starts**: Sub-100ms instantaneous application launches.
@@ -32,14 +32,14 @@ Boson is a modular, ultra-fast native HTML/CSS/JS runtime and next-generation **
 Rather than compromising startup speed or waiting years for 100% web spec reimplementation:
 * **Native-First Path**: 80%+ of typical web app surfaces (DOM, CSS Flexbox/Grid, typography, vector paint, event dispatch) are executed natively by the Rust core.
 * **Offscreen Fallback**: Long-tail unhandled browser APIs (WebRTC, Widevine DRM, complex WebGL/WebGPU shaders) are lazily rendered by an offscreen headless Chromium/CEF worker.
-* **Zero-Copy Hardware Compositing**: Fallback frames share native OS GPU surfaces (`IOSurface` on macOS, `DXGI` handles on Windows, `dma-buf` on Linux/Android) and composite directly into Boson's WGPU pipeline.
+* **Zero-Copy Hardware Compositing**: Fallback frames share native OS GPU surfaces (`IOSurface` on macOS, `DXGI` handles on Windows, `dma-buf` on Linux/Android) and composite directly into Strake's WGPU pipeline.
 * **Progressive Discarding**: Chromium dependencies are systematically phased out as native Rust modules mature.
 
-### The Boson Ethos: Compatibility First, Ultra-Optimization Always
+### The Strake Ethos: Compatibility First, Ultra-Optimization Always
 Any autonomous agent or engineer contributing to this repository must uphold two inviolable laws:
 
 1. **The Inviolable Law of Compatibility (Day 1 Drop-in Replacement):**
-   * Boson exists to replace Electron. Existing Electron and standard web applications must run in Boson on Day 1 without requiring code rewrites.
+   * Strake exists to replace Electron. Existing Electron and standard web applications must run in Strake on Day 1 without requiring code rewrites.
    * In the compatibility layer, **all pragmatic hacks, shims, polyfills, monkey-patches, and offscreen Chromium fallbacks are completely acceptable**. If an obscure API or legacy behavior is needed by real-world apps, provide it without hesitation. Compatibility is our adoption vector.
 
 2. **The Inviolable Law of Ultra-Optimization (The End-State Moat):**
@@ -117,29 +117,29 @@ Each tick or frame follows strict deterministic stages:
 The repository is structured as a Cargo workspace:
 
 ```
-boson/
+strake/
 ├── apps/
-│   ├── browser/          # Desktop reference browser (bin: boson / boson)
+│   ├── browser/          # Desktop reference browser (bin: strake / strake)
 │   │   └── persistence/  # SQLite browser history persistence (rusqlite)
 │   ├── bump/             # Workspace semantic release and version bumper tool
 │   └── readme/           # Standalone live-watching markdown viewer (bin: rdme)
 ├── packages/
-│   ├── boson/            # High-level entrypoint and umbrella facade
-│   ├── boson-dom/        # Headless DOM, NodeTree, Stylo/Taffy bridge, events
-│   ├── boson-paint/      # Translates DOM scenes into anyrender draw commands
-│   ├── boson-shell/      # Winit windowing, IME, native clipboard, file dialogs
-│   ├── boson-html/       # HTML5/XHTML parser integration (html5ever, xml5ever)
-│   ├── boson-net/        # Async HTTP client, streaming responses, disk cache
-│   ├── boson-traits/     # Fundamental shared types (NodeId, UiEvent, Viewport)
-│   ├── boson-test-harness/ # Headless test harness for DOM, layout, and events
-│   ├── boson-vibey-script/ # JavaScript runtime integration (Boa -> QuickJS-ng)
+│   ├── strake/            # High-level entrypoint and umbrella facade
+│   ├── strake-dom/        # Headless DOM, NodeTree, Stylo/Taffy bridge, events
+│   ├── strake-paint/      # Translates DOM scenes into anyrender draw commands
+│   ├── strake-shell/      # Winit windowing, IME, native clipboard, file dialogs
+│   ├── strake-html/       # HTML5/XHTML parser integration (html5ever, xml5ever)
+│   ├── strake-net/        # Async HTTP client, streaming responses, disk cache
+│   ├── strake-traits/     # Fundamental shared types (NodeId, UiEvent, Viewport)
+│   ├── strake-test-harness/ # Headless test harness for DOM, layout, and events
+│   ├── strake-vibey-script/ # JavaScript runtime integration (Boa -> QuickJS-ng)
 │   ├── dioxus-native/    # Dioxus reactive UI integration (moving to adapter)
-│   ├── dioxus-native-dom/# Headless core connecting Dioxus VDOM to boson-dom
+│   ├── dioxus-native-dom/# Headless core connecting Dioxus VDOM to strake-dom
 │   ├── stylo_taffy/      # Stylo ComputedValues to Taffy style bridge (MPL-2.0)
 │   ├── accesskit_xplat/  # Cross-platform AccessKit OS accessibility bridge
 │   └── debug_timer/      # Zero-overhead compile-time profiling timers
 ├── tests/
-│   └── boson-tests/      # 45 integration test suites (DOM, layout, events)
+│   └── strake-tests/      # 45 integration test suites (DOM, layout, events)
 └── wpt/
     └── runner/           # Web Platform Tests (WPT) headless reftest runner
 ```
@@ -168,7 +168,7 @@ All commands are executed from the repository root.
 cargo check --workspace
 
 # Check core DOM package
-cargo check -p boson-dom
+cargo check -p strake-dom
 
 # Check with just
 just check
@@ -194,13 +194,13 @@ just fmt
 cargo test --workspace
 
 # Run integration tests
-cargo test -p boson-tests
+cargo test -p strake-tests
 
 # Run a single integration test with stdout logging
-cargo test -p boson-tests --test style_property_invalidation -- --nocapture
+cargo test -p strake-tests --test style_property_invalidation -- --nocapture
 
 # Run headless test harness
-cargo test -p boson-test-harness
+cargo test -p strake-test-harness
 ```
 
 ### D. Running Applications & Demos

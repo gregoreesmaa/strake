@@ -1,19 +1,19 @@
 # Running WPT tests against Parley
 
-Boson uses [Parley](https://github.com/linebender/parley) for all of its text
+Strake uses [Parley](https://github.com/linebender/parley) for all of its text
 layout. Its [Web Platform Tests](https://github.com/web-platform-tests/wpt)
 (WPT) runner makes it possible to test Parley against thousands of real-world
 text layout tests covering line breaking, shaping, bidirectional text, font
 fallback, and font selection.
 
-This document explains how to run the Boson WPT runner against a local Parley
+This document explains how to run the Strake WPT runner against a local Parley
 checkout.
 
 ## Prerequisites
 
-1. **A clone of Boson** (this repository):
+1. **A clone of Strake** (this repository):
    ```sh
-   git clone https://github.com/DioxusLabs/boson.git
+   git clone https://github.com/DioxusLabs/strake.git
    ```
 2. **A clone of Parley**:
    ```sh
@@ -27,7 +27,7 @@ checkout.
 The layout assumed by the rest of this document is sibling directories:
 
 ```text
-~/code/boson
+~/code/strake
 ~/code/parley
 ~/code/wpt
 ```
@@ -39,10 +39,10 @@ You may also find the unofficial
 cargo install wpt --locked
 ```
 
-## Pointing Boson at your local Parley
+## Pointing Strake at your local Parley
 
-Boson normally depends on a released version of Parley from crates.io. To test
-local changes, change the dependency in Boson's root workspace `Cargo.toml` to
+Strake normally depends on a released version of Parley from crates.io. To test
+local changes, change the dependency in Strake's root workspace `Cargo.toml` to
 a local path dependency:
 
 ```toml
@@ -57,12 +57,12 @@ inside the `parley` directory of its repository.
 - It is generally best to remove the `version` specifier from the dependency
   specification, as above. If `version` is present, Cargo will require that
   your local checkout of Parley's version matches it.
-- Boson usually tracks Parley releases, not Parley `main`. If your branch is
-  based on `main` and Parley's API has moved on since the last release, Boson
+- Strake usually tracks Parley releases, not Parley `main`. If your branch is
+  based on `main` and Parley's API has moved on since the last release, Strake
   may fail to compile against it. You can:
-  - fix the usually small API mismatches in Boson locally;
-  - check whether Boson has a branch that already tracks a newer Parley; or
-  - base your Parley branch on the branch or tag matching the release Boson
+  - fix the usually small API mismatches in Strake locally;
+  - check whether Strake has a branch that already tracks a newer Parley; or
+  - base your Parley branch on the branch or tag matching the release Strake
     uses, such as `v0.11.x`.
 
 Verify that the path dependency took effect with:
@@ -77,7 +77,7 @@ The output should include a path, for example:
 ## Running the tests
 
 The runner needs the `WPT_DIR` environment variable pointing at your WPT clone.
-From the Boson repository root:
+From the Strake repository root:
 
 ```sh
 WPT_DIR=../wpt cargo run -rp wpt css/css-text
@@ -125,7 +125,7 @@ Other suites that may be useful:
 | `css/css-text-decor` | Underlines, `text-decoration`, and `text-emphasis` |
 
 Failures in these suites are not necessarily Parley bugs. A test may exercise a
-CSS feature that Boson does not yet implement, or the bug may be in Boson's
+CSS feature that Strake does not yet implement, or the bug may be in Strake's
 inline layout integration rather than in Parley itself.
 
 ### Useful flags and environment variables
@@ -173,15 +173,15 @@ The runner supports four kinds of test:
 - `testharness.js` tests (`HAR`), which require a JavaScript engine.
 
 The single-letter flags after each result (`F`, `I`, `C`, `D`, `W`, `X`, and
-others) mark tests that use features Boson does not fully support, such as
+others) mark tests that use features Strake does not fully support, such as
 floats, intrinsic sizing keywords, `calc()`, direction, writing modes, or
 scripts.
 
 ## Artifacts in `wpt/output/`
 
-Each run wipes and repopulates `wpt/output/` in the Boson repository:
+Each run wipes and repopulates `wpt/output/` in the Strake repository:
 
-- `<test>.html-test.png`: Boson's rendering of the test page
+- `<test>.html-test.png`: Strake's rendering of the test page
 - `<test>.html-ref.png` (or `-ref-N.png`): rendering of the reference pages
 - `<test>.html-diff.png`: pixel diff for failing comparisons
 - `wptreport.json`: standard WPT report format, consumable by WPT tooling and

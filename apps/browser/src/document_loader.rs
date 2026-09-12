@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 
-use boson_dom::{DocumentConfig, FontContext};
-use boson_html::{HtmlDocument, HtmlProvider};
-use boson_traits::{
+use strake_dom::{DocumentConfig, FontContext};
+use strake_html::{HtmlDocument, HtmlProvider};
+use strake_traits::{
     net::{AbortController, AbortSignal, Request, Url},
     shell::ShellProvider,
 };
@@ -69,7 +69,7 @@ impl DocumentLoader {
         let mut font_ctx = FontContext::default();
         font_ctx
             .collection
-            .register_fonts(Blob::new(Arc::new(boson_dom::BULLET_FONT) as _), None);
+            .register_fonts(Blob::new(Arc::new(strake_dom::BULLET_FONT) as _), None);
 
         Self {
             font_ctx,
@@ -215,8 +215,8 @@ async fn build_page_document(
     net_provider: &Arc<StdNetProvider>,
     signal: &AbortSignal,
 ) -> (SubDocumentAttr, String, Option<String>) {
-    use boson_dom::Document as _;
-    use boson_vibey_script::ScriptDocument;
+    use strake_dom::Document as _;
+    use strake_vibey_script::ScriptDocument;
     use std::collections::HashMap;
 
     let document = ScriptDocument::from_html(html, config);
@@ -240,7 +240,7 @@ async fn build_page_document(
     let mut document = document.with_fetcher(PrefetchedScriptFetcher { scripts });
     document.execute_scripts();
     for error in document.take_js_errors() {
-        tracing::error!("boson-vibey-script: {error}");
+        tracing::error!("strake-vibey-script: {error}");
     }
 
     let inner = document.inner();
@@ -254,7 +254,7 @@ async fn build_page_document(
     (SubDocumentAttr::new(document), title, favicon_url)
 }
 
-/// A [`boson_vibey_script::ScriptFetcher`] which serves prefetched script sources from
+/// A [`strake_vibey_script::ScriptFetcher`] which serves prefetched script sources from
 /// memory, falling back to the default fetcher (`file:` and `data:` URLs)
 #[cfg(feature = "javascript")]
 struct PrefetchedScriptFetcher {
@@ -262,11 +262,11 @@ struct PrefetchedScriptFetcher {
 }
 
 #[cfg(feature = "javascript")]
-impl boson_vibey_script::ScriptFetcher for PrefetchedScriptFetcher {
-    fn fetch(&self, url: &Url) -> Result<String, boson_vibey_script::FetchError> {
+impl strake_vibey_script::ScriptFetcher for PrefetchedScriptFetcher {
+    fn fetch(&self, url: &Url) -> Result<String, strake_vibey_script::FetchError> {
         if let Some(source) = self.scripts.get(url) {
             return Ok(source.clone());
         }
-        boson_vibey_script::DefaultScriptFetcher.fetch(url)
+        strake_vibey_script::DefaultScriptFetcher.fetch(url)
     }
 }

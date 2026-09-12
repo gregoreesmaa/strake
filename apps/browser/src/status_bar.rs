@@ -40,7 +40,7 @@ where
 pub fn StatusBar(tabs: Store<Vec<Tab>>, active_tab_id: Signal<TabId>) -> Element {
     let mut hover_url: Signal<String> = use_signal(String::new);
 
-    // Hover state lives inside boson-dom's BaseDocument, not a Dioxus signal,
+    // Hover state lives inside strake-dom's BaseDocument, not a Dioxus signal,
     // so we poll it at ~10 fps (same pattern as FpsOverlay).
     use_hook(move || {
         spawn(async move {

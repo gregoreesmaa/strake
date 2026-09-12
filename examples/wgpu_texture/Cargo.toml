@@ -18,11 +18,11 @@ anyrender = { workspace = true }
 anyrender_vello = { workspace = true, optional = true }
 anyrender_vello_hybrid = { workspace = true, optional = true }
 peniko = { workspace = true }
-boson-traits = { workspace = true}
-boson-dom = { workspace = true, features = ["tracing", "custom-widget"] }
-boson-paint = { workspace = true, features = ["custom-widget"] }
-boson-html = { workspace = true }
-boson-shell = { workspace = true, features = ["tracing"] }
+strake-traits = { workspace = true}
+strake-dom = { workspace = true, features = ["tracing", "custom-widget"] }
+strake-paint = { workspace = true, features = ["custom-widget"] }
+strake-html = { workspace = true }
+strake-shell = { workspace = true, features = ["tracing"] }
 dioxus-native = { workspace = true, features = ["system-fonts", "prelude"] }
 wgpu_context = { workspace = true }
 wgpu = { workspace = true }
