@@ -17,7 +17,7 @@ This product bundles the font file `packages/strake-dom/assets/moz-bullet-font.o
 derived from the Mozilla Gecko project and licensed under the Mozilla Public License 2.0 (MPL-2.0).
 
 Ahem test font (packages/strake-dom/assets/Ahem.ttf): public domain,
-originally by Todd Fahrner, distributed via w3c/csswg-test for CSS
+originally by Todd Fahrner, distributed via web-platform-tests/wpt for CSS
 conformance testing. Test-only asset; never selected outside tests.
 
 Trademarks:
