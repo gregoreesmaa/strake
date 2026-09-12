@@ -10,6 +10,9 @@ clippy:
 fmt:
   cargo fmt --all
 
+bench:
+  cargo run --profile production -p strake-bench
+
 small:
   cargo build --profile small -p counter --no-default-features --features cpu,system-fonts
 
