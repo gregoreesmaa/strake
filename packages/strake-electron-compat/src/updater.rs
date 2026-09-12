@@ -3,8 +3,9 @@
 //! Issue #14 spans the packager CLI (`strake pack`), the auto-updater, and
 //! store installers. This module is the updater's client half — the part
 //! that runs inside every shipped app: parse a `latest.json` manifest,
-//! decide whether an artifact is newer than the running build, verify the
-//! manifest carries a signature envelope, and pick applicable delta
+//! decide whether an artifact is newer than the running build, record the
+//! per-artifact signature envelope for the download/apply flow to verify,
+//! and pick applicable delta
 //! artifacts. Bundle generation (`.app`/`.exe`/`.apk` layout, signing,
 //! notarization) and the download/apply/restart flow bind next. Version
 //! ordering is a minimal semver implementation (no new dependencies).
@@ -25,11 +26,14 @@ impl Version {
     /// accepted, matching update-feed conventions).
     pub fn parse(text: &str) -> Option<Self> {
         let text = text.strip_prefix('v').unwrap_or(text);
+        // Strip `+build` metadata before splitting `-pre`: build metadata
+        // may itself contain `-` (semver §10), which must not be mistaken
+        // for the prerelease separator.
+        let text = text.split('+').next().unwrap_or(text);
         let (core, pre) = match text.split_once('-') {
             Some((core, pre)) => (core, Some(pre.to_string())),
             None => (text, None),
         };
-        let core = core.split('+').next().unwrap_or(core);
         if core.is_empty() {
             return None;
         }
@@ -40,8 +44,10 @@ impl Version {
         Some(Self { release, pre })
     }
 
-    /// Compare per semver: longer release wins on prefix equality, and a
-    /// prerelease sorts below its release.
+    /// Compare per semver: longer release wins on prefix equality, a
+    /// prerelease sorts below its release, and prerelease identifiers
+    /// compare per semver §11 (numeric identifiers numerically, numeric
+    /// below alphanumeric, longer set wins on prefix equality).
     pub fn compare(&self, other: &Self) -> std::cmp::Ordering {
         let width = self.release.len().max(other.release.len());
         for index in 0..width {
@@ -56,8 +62,41 @@ impl Version {
             (None, None) => std::cmp::Ordering::Equal,
             (None, Some(_)) => std::cmp::Ordering::Greater,
             (Some(_), None) => std::cmp::Ordering::Less,
-            (Some(left), Some(right)) => left.cmp(right),
+            (Some(left), Some(right)) => compare_prerelease(left, right),
         }
+    }
+}
+
+/// Compare dot-separated prerelease strings per semver §11: identifiers
+/// compare left to right, and a longer set wins on prefix equality.
+fn compare_prerelease(left: &str, right: &str) -> std::cmp::Ordering {
+    let mut left_ids = left.split('.');
+    let mut right_ids = right.split('.');
+    loop {
+        match (left_ids.next(), right_ids.next()) {
+            (None, None) => return std::cmp::Ordering::Equal,
+            (None, Some(_)) => return std::cmp::Ordering::Less,
+            (Some(_), None) => return std::cmp::Ordering::Greater,
+            (Some(left), Some(right)) => match compare_identifier(left, right) {
+                std::cmp::Ordering::Equal => {}
+                order => return order,
+            },
+        }
+    }
+}
+
+/// Compare one prerelease identifier per semver §11.4: identifiers of only
+/// ASCII digits compare numerically (by length, then lexically, so there is
+/// no overflow limit), numeric identifiers sort below alphanumeric ones,
+/// and alphanumeric identifiers compare lexically in ASCII order.
+fn compare_identifier(left: &str, right: &str) -> std::cmp::Ordering {
+    let left_numeric = !left.is_empty() && left.bytes().all(|byte| byte.is_ascii_digit());
+    let right_numeric = !right.is_empty() && right.bytes().all(|byte| byte.is_ascii_digit());
+    match (left_numeric, right_numeric) {
+        (true, true) => left.len().cmp(&right.len()).then_with(|| left.cmp(right)),
+        (true, false) => std::cmp::Ordering::Less,
+        (false, true) => std::cmp::Ordering::Greater,
+        (false, false) => left.cmp(right),
     }
 }
 
@@ -117,6 +156,21 @@ fn string_field(value: &Value, name: &str) -> Result<String, ManifestError> {
         .ok_or_else(|| ManifestError::InvalidShape(format!("missing string field '{name}'")))
 }
 
+/// Read a `sha256` field, failing fast when it is not a 64-character
+/// lowercase-or-uppercase hex digest. The digest is the trust anchor for
+/// the download-verify step, so a truncated or non-hex feed value must not
+/// parse into an expected digest.
+fn sha256_field(value: &Value) -> Result<String, ManifestError> {
+    let digest = string_field(value, "sha256")?;
+    let valid = digest.len() == 64 && digest.bytes().all(|byte| byte.is_ascii_hexdigit());
+    if !valid {
+        return Err(ManifestError::InvalidShape(format!(
+            "invalid sha256 digest '{digest}'"
+        )));
+    }
+    Ok(digest)
+}
+
 impl UpdateManifest {
     /// Parse `latest.json` text.
     pub fn parse(text: &str) -> Result<Self, ManifestError> {
@@ -147,7 +201,7 @@ impl UpdateManifest {
                 platform: string_field(file, "platform")?,
                 arch: string_field(file, "arch")?,
                 url: string_field(file, "url")?,
-                sha256: string_field(file, "sha256")?,
+                sha256: sha256_field(file)?,
                 signature: file
                     .get("signature")
                     .and_then(Value::as_str)
@@ -169,13 +223,19 @@ impl UpdateManifest {
 
     /// Pick the best artifact for a platform/arch: an applicable delta when
     /// the running version matches `delta_from`, else a full installer.
-    /// Returns `None` when this target is not published.
+    /// Returns `None` when this target is not published, or when `current`
+    /// is already at (or newer than) the manifest version: an updater must
+    /// never offer a downgrade, so callers need no separate
+    /// [`has_update_for`](Self::has_update_for) check.
     pub fn select<'manifest>(
         &'manifest self,
         current: &Version,
         platform: &str,
         arch: &str,
     ) -> Option<&'manifest Artifact> {
+        if !self.has_update_for(current) {
+            return None;
+        }
         let candidates: Vec<&Artifact> = self
             .artifacts
             .iter()
@@ -210,14 +270,14 @@ mod tests {
                 "platform": "darwin",
                 "arch": "arm64",
                 "url": "https://cdn.example.com/app-1.4.0-full.zip",
-                "sha256": "aa",
+                "sha256": "9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08",
                 "signature": "sig-full"
             },
             {
                 "platform": "darwin",
                 "arch": "arm64",
                 "url": "https://cdn.example.com/app-1.3.0-1.4.0.delta",
-                "sha256": "bb",
+                "sha256": "5e884898da28047151d0e56f8dc6292773603d0d6aabbdd62a11ef721d1542d8",
                 "signature": "sig-delta",
                 "deltaFrom": "1.3.0"
             },
@@ -225,7 +285,7 @@ mod tests {
                 "platform": "linux",
                 "arch": "x64",
                 "url": "https://cdn.example.com/app-1.4.0.AppImage",
-                "sha256": "cc"
+                "sha256": "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
             }
         ]
     }"#;
@@ -249,6 +309,52 @@ mod tests {
             "shorter release pads with zeros"
         );
         assert_eq!(Version::parse("not-a-version"), None);
+    }
+
+    #[test]
+    fn build_metadata_with_dash_is_not_a_prerelease() {
+        // `+build-1` metadata must not split into a prerelease: a final
+        // release with metadata compares equal to itself without metadata.
+        let with_meta = Version::parse("1.2.3+build-1").expect("parse");
+        let plain = Version::parse("1.2.3").expect("parse");
+        assert_eq!(with_meta, plain);
+        assert_eq!(
+            with_meta.compare(&plain),
+            std::cmp::Ordering::Equal,
+            "build metadata is ignored in precedence"
+        );
+        assert_eq!(
+            with_meta.compare(&Version::parse("1.2.3-beta").expect("parse")),
+            std::cmp::Ordering::Greater,
+            "a final release with build metadata still beats its prerelease"
+        );
+    }
+
+    #[test]
+    fn prereleases_compare_per_semver_section_11() {
+        let beta2 = Version::parse("1.4.0-beta.2").expect("parse");
+        let beta11 = Version::parse("1.4.0-beta.11").expect("parse");
+        assert_eq!(
+            beta11.compare(&beta2),
+            std::cmp::Ordering::Greater,
+            "numeric identifiers compare numerically, not lexicographically"
+        );
+        assert_eq!(
+            Version::parse("1.4.0-1").expect("parse").compare(&beta2),
+            std::cmp::Ordering::Less,
+            "numeric identifiers sort below alphanumeric ones"
+        );
+        assert_eq!(
+            Version::parse("1.4.0-alpha")
+                .expect("parse")
+                .compare(&Version::parse("1.4.0-alpha.1").expect("parse")),
+            std::cmp::Ordering::Less,
+            "a longer identifier set wins on prefix equality"
+        );
+        assert_eq!(
+            beta2.compare(&Version::parse("1.4.0-beta.2").expect("parse")),
+            std::cmp::Ordering::Equal
+        );
     }
 
     #[test]
@@ -283,6 +389,58 @@ mod tests {
         );
 
         assert_eq!(manifest.select(&older, "windows", "x64"), None);
+
+        let newer = Version::parse("2.0.0").expect("parse");
+        assert_eq!(
+            manifest.select(&newer, "darwin", "arm64"),
+            None,
+            "no artifact — not even the full installer — is offered as a downgrade"
+        );
+        let same = Version::parse("1.4.0").expect("parse");
+        assert_eq!(
+            manifest.select(&same, "darwin", "arm64"),
+            None,
+            "an up-to-date build is offered nothing"
+        );
+    }
+
+    fn manifest_with_digest(digest: &str) -> String {
+        format!(
+            r#"{{
+            "version": "1.4.0",
+            "channel": "stable",
+            "files": [
+                {{
+                    "platform": "darwin",
+                    "arch": "arm64",
+                    "url": "https://cdn.example.com/app-1.4.0-full.zip",
+                    "sha256": "{digest}"
+                }}
+            ]
+        }}"#
+        )
+    }
+
+    #[test]
+    fn truncated_or_non_hex_digests_fail_at_parse() {
+        for digest in [
+            "aa",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85",
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b85500",
+            "zzb0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        ] {
+            assert!(
+                matches!(
+                    UpdateManifest::parse(&manifest_with_digest(digest)),
+                    Err(ManifestError::InvalidShape(_))
+                ),
+                "digest '{digest}' must fail fast at parse time"
+            );
+        }
+        UpdateManifest::parse(&manifest_with_digest(
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        ))
+        .expect("a 64-hex digest parses");
     }
 
     #[test]
