@@ -1252,10 +1252,12 @@ impl<'doc> DocumentMutator<'doc> {
             let value = value.to_string();
             let id = self.create_text_node(&value);
             self.append_children(target_id, &[id]);
-            // No `return`: the `file-input` block below only matches
-            // `type="file"`, disjoint from the button/submit/reset match
-            // above, so fall-through is a no-op with the feature on and the
-            // block is compiled out with it off.
+            // The `return` ends the immutable borrow of `self.doc` (via
+            // `tagname`/`type_attr`) before the `&mut self` calls above can
+            // conflict with their later use in the `file-input` block; it is
+            // only "needless" when that block is compiled out.
+            #[cfg_attr(not(feature = "file-input"), allow(clippy::needless_return))]
+            return;
         }
         #[cfg(feature = "file-input")]
         if let ("input", Some("file")) = (tagname, type_attr) {
