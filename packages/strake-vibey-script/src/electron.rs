@@ -109,6 +109,7 @@ const ELECTRON_BOOTSTRAP_JS: &str = r#"
         }
         on(event, listener) {
             globalThis.__strake_electron_window_on(this.__strakeWindowId, event, listener);
+            return this;
         }
         close() {
             globalThis.__strake_electron_window_close(this.__strakeWindowId);
@@ -821,12 +822,10 @@ fn js_to_display_match_rect(value: &JsValue, context: &mut Context) -> JsResult<
     js_to_bounds(value, context)
 }
 
-/// `win.close()`: destroy the window; the last close fires JS
-/// `window-all-closed` listeners and runs the compat shutdown flow
-/// (Electron's default quit).
 /// `win.on(event, listener)` (issue #84): `closed` fires when this window
 /// closes; any other event name is accepted and never fires, matching the
-/// `app.on` philosophy for unimplemented surfaces.
+/// `app.on` philosophy for unimplemented surfaces. The JS wrapper returns the
+/// window so calls chain like Electron's `EventEmitter.on`.
 fn e_window_on(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let id = window_id_arg(args, context)?;
     let event = require_string_arg(args.get(1..).unwrap_or(&[]), 0, "win.on")?;
@@ -849,6 +848,12 @@ fn e_window_on(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult
     Ok(JsValue::undefined())
 }
 
+/// `win.close()`: destroy the window; the last close fires JS
+/// `window-all-closed` listeners and runs the compat shutdown flow
+/// (Electron's default quit). Closing an unknown or already-destroyed id is
+/// an intentional idempotent silent no-op (no throw, no `window-all-closed`,
+/// no quit) so double-close is safe; contrast `win.on`, which throws
+/// "Object has been destroyed" for such ids like real Electron.
 fn e_window_close(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let id = window_id_arg(args, context)?;
     let shared = electron_state(context)?;

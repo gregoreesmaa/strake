@@ -236,9 +236,11 @@ fn window_geometry_resizable_and_screen_parity() {
 /// (gregoreesmaa/strake-electron-calculator@strake-demo, 62 lines) boots
 /// under the shim — ready → one 365x675 window → loadURL → closed →
 /// window-all-closed → quit. Verbatim except for the Node core stand-ins in
-/// the header (`path`/`url`/`process` are owned by #16) and `var` for the
+/// the header (`path`/`url`/`process` are owned by #16), `var` for the
 /// window handle (the shipped app uses `let`; `var` only exposes the handle
-/// to the test driver). The `activate` re-create handler is registered but
+/// to the test driver), and a `__strake_send_message('demo:closed')` probe
+/// inside the `closed` handler (the assertion mechanism; not in the demo).
+/// The `activate` re-create handler is registered but
 /// not exercised headless, matching the demo's own COMPAT.md.
 #[test]
 fn calculator_demo_boots_and_quits() {
@@ -317,4 +319,60 @@ fn methods_on_destroyed_window_throw() {
         "unexpected error: {}",
         errors[0]
     );
+}
+
+#[test]
+fn close_unknown_or_destroyed_id_is_silent_noop() {
+    // Issue #84 follow-up: `win.close()` on an unknown or already-destroyed
+    // id is an intentional idempotent silent no-op (see `e_window_close`), so
+    // closing id 404 on an empty manager must not fire `window-all-closed`,
+    // must not quit, and must not throw. `win.on` still returns the window
+    // for EventEmitter-style chaining.
+    let host = ElectronHost::new("QuickStart", "1.0.0");
+    let mut doc =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    doc.install_electron(&host);
+    doc.eval(
+        "const e84 = require('electron'); \
+         e84.app.on('window-all-closed', () => __strake_send_message('wac')); \
+         const BW84 = e84.BrowserWindow; \
+         const ghost = Object.create(BW84.prototype); \
+         ghost.__strakeWindowId = 404; \
+         ghost.close(); \
+         __strake_send_message('ghost-survived');",
+    );
+    let js_errors = doc.take_js_errors();
+    assert!(
+        js_errors.is_empty(),
+        "closing an unknown window id must not throw, got {js_errors:?}"
+    );
+    assert_eq!(doc.take_messages(), vec!["ghost-survived"]);
+    assert!(
+        !host.is_quit(),
+        "unknown-id close must not run the quit flow"
+    );
+    assert_eq!(host.window_count(), 0);
+
+    // Live window: `on` chains, the legitimate last close still fires
+    // `window-all-closed` and quits, and the double close after it is silent.
+    doc.eval(
+        "const live = new BW84({ show: false }); \
+         __strake_send_message('chain:' + (live.on('closed', () => {}) === live)); \
+         live.close(); \
+         live.close(); \
+         __strake_send_message('double-survived');",
+    );
+    let js_errors = doc.take_js_errors();
+    assert!(
+        js_errors.is_empty(),
+        "close path must not throw, got {js_errors:?}"
+    );
+    assert_eq!(
+        doc.take_messages(),
+        vec!["chain:true", "wac", "double-survived"]
+    );
+    assert_eq!(host.window_count(), 0);
+    assert!(host.is_quit(), "the one legitimate last-close still quits");
 }

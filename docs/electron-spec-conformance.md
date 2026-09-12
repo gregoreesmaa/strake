@@ -3,8 +3,9 @@
 Increment 1: inventory of Electron's `spec/` against the frozen shim surface
 (`TOP50` in `packages/strake-electron-compat/src/coverage.rs`), the harness
 that boots canary apps, and the first ported batch (lifecycle + windows +
-IPC, then the slice-4 OS bridges). Later increments port `dialog`/`shell`/
-`nativeTheme` once #12 lands.
+IPC; OS bridges such as clipboard/safe-storage/power/`Notification` follow
+with the #12-dependent implementations). Later increments port `dialog`/
+`shell`/`nativeTheme` once #12 lands.
 
 ## Harness
 
@@ -27,11 +28,11 @@ IPC, then the slice-4 OS bridges). Later increments port `dialog`/`shell`/
 | `api-app-spec` lifecycle (`ready`, `window-all-closed`, `activate`, `quit`, `getName`/`getVersion`/`getPath`) | `App`, `app.on/whenReady` | `electron.rs`: quickstart, ready idempotency, quit flow | Ported |
 | `api-browser-window-spec` construction, defaults (800x600, show, resizable), show/hide, bounds, `setTitle`, `closed` | `WindowManager`, `BrowserWindowOptions`, `win.on` | `electron.rs`: geometry parity, canary boot, destroyed-window throws; compat `window_state_transitions`, `closed_listeners_*` | Ported |
 | `api-ipc-main/ipc-renderer-spec` `handle`/`invoke`, `send`/`on`, `webContents.send` | `IpcBus`, `WebContents` outbox, `pump_ipc` | `electron_ipc.rs`: full round-trip suite incl. main→renderer and soft-fail | Ported |
-| `api-clipboard-spec` `readText`/`writeText`/`clear` | `Clipboard` + shim | `os_bridges_*` shim test; compat `memory_clipboard_*` | Ported |
-| `api-safe-storage-spec` | `SafeStorage` + shim | `os_bridges_*`; compat round-trip/decrypt-failure/codec vectors | Ported |
-| `api-power-monitor-spec`, `powerSaveBlocker` | `PowerHub` + shim + dispatch | `os_bridges_*` synthetic probe; compat listener/blocker units | Ported |
+| `api-clipboard-spec` `readText`/`writeText`/`clear` | Deferred: bind strake-shell native clipboard | — | Gap: spec + shim land with the OS-bridge implementation |
+| `api-safe-storage-spec` | Deferred | — | Gap: spec + shim land with the OS-bridge implementation |
+| `api-power-monitor-spec`, `powerSaveBlocker` | Deferred | — | Gap: spec + shim land with the OS-bridge implementation |
 | `api-screen-spec` | `Screen`/`Display` + shim | `window_geometry_*` shim test; compat/placement units | Ported |
-| Web `Notification` | `NotificationCenter` + renderer binding | `notification_click_fires_onclick`; compat recorder units | Ported |
+| Web `Notification` | Deferred: renderer binding | — | Gap: spec + binding land with the OS-bridge implementation |
 | `api-dialog`, `shell`, `nativeTheme`, `Menu`/`Tray`, `globalShortcut` | Deferred (needs #12 / OS bridges) | — | Gap: spec ports land with the implementations |
 | `webContents` (`executeJavaScript`, `openDevTools`, `print`) | Deferred (renderer binding, devtools UI, #12 printing) | — | Gap |
 
