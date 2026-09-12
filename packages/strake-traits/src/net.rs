@@ -20,10 +20,11 @@ pub trait NetProvider: Send + Sync + 'static {
     fn fetch(&self, doc_id: usize, request: Request, handler: Box<dyn NetHandler>);
 
     /// Whether this provider is a no-op (e.g. `DummyNetProvider`) that will never
-    /// deliver resources. When true, callers must NOT register resources as
-    /// "pending critical" — doing so blocks painting forever, since the
-    /// completion callback never fires. Used by integrations that feed a
-    /// pre-rendered DOM and perform no sub-fetches (e.g. aginxbrowser).
+    /// deliver resources. When true, callers should avoid registering resources
+    /// as "pending critical": the provider reports the miss via
+    /// [`NetHandler::error`] instead of delivering bytes. Used by
+    /// integrations that feed a pre-rendered DOM and perform no sub-fetches
+    /// (e.g. aginxbrowser).
     fn is_noop(&self) -> bool {
         false
     }
@@ -33,6 +34,19 @@ pub trait NetProvider: Send + Sync + 'static {
 /// the NetCallack with the result.
 pub trait NetHandler: Send + Sync + 'static {
     fn bytes(self: Box<Self>, resolved_url: String, bytes: Bytes);
+
+    /// Delivery of a transport-level failure (HTTP error status, IO error,
+    /// unsupported scheme, abort). Providers MUST call either this or
+    /// [`NetHandler::bytes`] exactly once per fetch; dropping the handler
+    /// without calling back leaves render-blocking ("critical") resources
+    /// pending forever (issue #65). The default body is a no-op so existing
+    /// third-party handlers keep compiling; recipients that track pending
+    /// work should additionally guard with a drop-backstop (as
+    /// `strake-dom`'s `ResourceHandler` does) for providers that never call
+    /// either method.
+    fn error(self: Box<Self>, resolved_url: String, message: String) {
+        let _ = (resolved_url, message);
+    }
 }
 
 /// A callback which gets called every time a network request completes
@@ -166,7 +180,16 @@ impl From<PathBuf> for EntryValue {
 #[derive(Default)]
 pub struct DummyNetProvider;
 impl NetProvider for DummyNetProvider {
-    fn fetch(&self, _doc_id: usize, _request: Request, _handler: Box<dyn NetHandler>) {}
+    fn fetch(&self, _doc_id: usize, request: Request, handler: Box<dyn NetHandler>) {
+        // Report the miss explicitly so URL-keyed recipients (e.g.
+        // `BaseDocument::pending_images`) drain with the URL intact instead
+        // of stalling on a URL-less drop; handlers keeping the default
+        // no-op `error()` observe no traffic, exactly as before.
+        handler.error(
+            request.url.to_string(),
+            String::from("DummyNetProvider never delivers resources"),
+        );
+    }
     fn is_noop(&self) -> bool {
         true
     }

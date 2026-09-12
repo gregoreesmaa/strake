@@ -7463,6 +7463,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "strake-fallback-supervisor"
+version = "0.3.0-beta.2"
+dependencies = [
+ "anyrender",
+ "linebender_resource_handle",
+ "peniko",
+ "strake-dom",
+]
+
+[[package]]
 name = "strake-html"
 version = "0.3.0-beta.2"
 dependencies = [
@@ -7560,8 +7570,10 @@ dependencies = [
  "keyboard-types 0.7.0",
  "markup5ever",
  "strake-dom",
+ "strake-fallback-supervisor",
  "strake-html",
  "strake-paint",
+ "strake-shell",
  "strake-test-harness",
  "strake-traits",
  "stylo",

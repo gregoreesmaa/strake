@@ -1094,6 +1094,7 @@ impl<'doc> DocumentMutator<'doc> {
             self.doc.id(),
             Some(node.id),
             self.doc.shell_provider.clone(),
+            url.as_str().to_string(),
             StylesheetHandler {
                 source_url: url.clone(),
                 guard: self.doc.guard.clone(),
@@ -1167,6 +1168,7 @@ impl<'doc> DocumentMutator<'doc> {
                     .pending_images
                     .insert(src_string.to_string(), vec![(target_id, ImageType::Image)]);
 
+                let request_url = src.as_str().to_string();
                 self.doc.net_provider.fetch(
                     self.doc.id(),
                     self.doc.build_request(src),
@@ -1175,6 +1177,7 @@ impl<'doc> DocumentMutator<'doc> {
                         self.doc.id(),
                         None, // Don't pass node_id, we'll handle it via pending_images
                         self.doc.shell_provider.clone(),
+                        request_url,
                         ImageHandler::new(ImageType::Image),
                     ),
                 );

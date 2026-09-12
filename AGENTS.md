@@ -13,6 +13,7 @@
 3. **No Speculative Dependencies**: NEVER add new external crates to `Cargo.toml` without explicit user permission or an established architectural mandate.
 4. **Non-Interactive Execution**: NEVER run interactive commands (e.g. `cargo run -rp browser` without exit flags) in automated scripts; desktop windows block execution indefinitely.
 5. **Preserve Soundness**: Zero tolerance for unvalidated `unsafe` blocks or hidden panics (`.unwrap()`) in core library crates.
+6. **File Follow-Up Issues for Narrowed Scope**: Whenever a PR deliberately narrows scope or leaves a discovered-but-unresolved bug, file a GitHub follow-up issue before declaring done: link the parent PR/issue, describe the gap with a repro plus `file:line` evidence and acceptance criteria, and apply the correct `priority: ...` label (`critical` = hang/crash/data-loss class; `high` = visible misbehavior on real pages; `medium`/`low` = polish/debt). Open follow-ups are part of the deliverable, not optional hygiene.
 
 ---
 
