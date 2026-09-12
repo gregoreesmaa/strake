@@ -1,7 +1,7 @@
 {
-  "name": "@strake-dev/strake",
+  "name": "@strake-dev/cli",
   "version": "0.0.1",
-  "description": "Strake: Ultra-fast, lightweight native application runtime and Electron alternative in Rust.",
+  "description": "CLI developer tooling for Strake native application runtime.",
   "main": "index.js",
   "repository": {
     "type": "git",
@@ -9,11 +9,10 @@
   },
   "keywords": [
     "strake",
+    "strake-cli",
     "electron-alternative",
     "rust",
-    "native",
-    "desktop",
-    "gui"
+    "native"
   ],
   "author": "Gregor Eesmaa",
   "license": "MIT OR Apache-2.0",
