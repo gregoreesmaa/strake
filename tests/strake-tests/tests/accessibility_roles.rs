@@ -7,11 +7,11 @@
 //! <https://www.w3.org/TR/html-aam-1.0/>
 
 use accesskit::{NodeId, Role};
+use std::collections::HashMap;
+use std::sync::Arc;
 use strake_dom::DocumentConfig;
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::collections::HashMap;
-use std::sync::Arc;
 
 /// The `html_tag` of every element that still maps to [`Role::Unknown`].
 fn unknown_tags(html: &str) -> Vec<String> {

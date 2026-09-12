@@ -4,14 +4,14 @@
 //! complete interactions (click, tap, drag, typing) and dispatch them through the
 //! document's real event pipeline.
 
-use strake_dom::Document;
-use strake_traits::events::{
-    StrakeImeEvent, StrakeKeyEvent, StrakePointerEvent, StrakePointerId, StrakeWheelDelta,
-    StrakeWheelEvent, KeyState, MouseEventButton, MouseEventButtons, Point, PointerCoords,
-    PointerDetails, UiEvent,
-};
 use keyboard_types::{Code, Key, Location, Modifiers};
 use smol_str::SmolStr;
+use strake_dom::Document;
+use strake_traits::events::{
+    KeyState, MouseEventButton, MouseEventButtons, Point, PointerCoords, PointerDetails,
+    StrakeImeEvent, StrakeKeyEvent, StrakePointerEvent, StrakePointerId, StrakeWheelDelta,
+    StrakeWheelEvent, UiEvent,
+};
 
 use crate::Harness;
 

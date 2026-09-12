@@ -1,7 +1,7 @@
 //! Resolve style and layout
 
-use strake_traits::node_id::NodeId;
 use std::cell::RefCell;
+use strake_traits::node_id::NodeId;
 
 use debug_timer::debug_timer;
 use kurbo::{Affine, Rect};

@@ -1,9 +1,9 @@
 //! Utility functions for capturing screenshots
 
 use anyrender::PaintScene;
-use strake_paint::paint_scene;
 use peniko::Fill;
 use peniko::kurbo::Rect;
+use strake_paint::paint_scene;
 
 use anyrender::render_to_buffer;
 #[cfg(feature = "screenshot")]

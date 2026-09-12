@@ -1,6 +1,6 @@
-use strake_traits::net::Url;
 use dioxus_native::prelude::*;
 use dioxus_native::use_window_event;
+use strake_traits::net::Url;
 use winit::event::WindowEvent;
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 

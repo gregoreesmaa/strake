@@ -2,16 +2,16 @@
 //! element. `none` blocks panning on both axes, `pan-x`/`pan-y` restrict it to a single axis, and
 //! `auto`/`manipulation` permit panning on both axes. Mouse input is unaffected.
 
+use std::sync::Arc;
 use strake_dom::{Document, DocumentConfig};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::{
     events::{
-        StrakePointerEvent, StrakePointerId, MouseEventButton, MouseEventButtons, Point,
-        PointerCoords, PointerDetails, UiEvent,
+        MouseEventButton, MouseEventButtons, Point, PointerCoords, PointerDetails,
+        StrakePointerEvent, StrakePointerId, UiEvent,
     },
     shell::{ColorScheme, Viewport},
 };
-use std::sync::Arc;
 
 fn doc(html: &str) -> HtmlDocument {
     let mut doc = HtmlDocument::from_html(

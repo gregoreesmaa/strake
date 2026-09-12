@@ -1,6 +1,6 @@
 //! Conversion functions from Stylo types to Parley types
-use strake_traits::node_id::NodeId;
 use std::borrow::Cow;
+use strake_traits::node_id::NodeId;
 
 use style::values::computed::Length;
 

@@ -7,9 +7,9 @@
 use std::sync::{Arc, Mutex};
 
 use bitflags::bitflags;
-use strake_traits::shell::{ColorScheme, Viewport};
 use parley::FontContext;
 use selectors::matching::QuirksMode;
+use strake_traits::shell::{ColorScheme, Viewport};
 use style::device::Device;
 use style::media_queries::MediaType;
 use style::properties::ComputedValues;

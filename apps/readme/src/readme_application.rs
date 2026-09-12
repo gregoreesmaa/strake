@@ -16,7 +16,7 @@ use winit::platform::macos::ApplicationHandlerExtMacOS;
 use winit::window::{Theme, WindowId};
 
 use crate::fetch;
-use crate::markdown::{STRAKE_MD_STYLES, GITHUB_MD_STYLES, markdown_to_html};
+use crate::markdown::{GITHUB_MD_STYLES, STRAKE_MD_STYLES, markdown_to_html};
 
 pub struct ReadmeEvent;
 

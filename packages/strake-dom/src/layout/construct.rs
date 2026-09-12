@@ -1,6 +1,6 @@
-use strake_traits::node_id::NodeId;
 use core::str;
 use std::sync::Arc;
+use strake_traits::node_id::NodeId;
 
 use markup5ever::{QualName, local_name, ns};
 use parley::{

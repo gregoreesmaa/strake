@@ -3,12 +3,12 @@ use std::sync::LazyLock;
 use std::time::Duration;
 use std::{fs, sync::Arc, time::Instant};
 
+use log::{debug, warn};
+use regex::Regex;
 use strake_dom::traversal::TreeTraverser;
 use strake_dom::{BaseDocument, Document as _, DocumentConfig};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_vibey_script::ScriptDocument;
-use log::{debug, warn};
-use regex::Regex;
 
 use harness_test::WptScriptFetcher;
 

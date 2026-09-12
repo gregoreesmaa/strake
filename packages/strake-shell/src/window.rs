@@ -1,16 +1,16 @@
 use crate::StrakeShellProvider;
 use crate::convert_events::{
-    button_source_to_strake, color_scheme_to_theme, pointer_kind_to_strake, pointer_source_to_strake,
-    pointer_source_to_strake_details, theme_to_color_scheme, winit_ime_to_strake,
-    winit_key_event_to_strake, winit_modifiers_to_kbt_modifiers,
+    button_source_to_strake, color_scheme_to_theme, pointer_kind_to_strake,
+    pointer_source_to_strake, pointer_source_to_strake_details, theme_to_color_scheme,
+    winit_ime_to_strake, winit_key_event_to_strake, winit_modifiers_to_kbt_modifiers,
 };
 use crate::event::{StrakeShellEvent, StrakeShellProxy, create_waker};
 use anyrender::WindowRenderer;
 use strake_dom::Document;
 use strake_paint::paint_scene;
 use strake_traits::events::{
-    StrakePointerEvent, StrakePointerId, StrakeWheelDelta, StrakeWheelEvent, MouseEventButton,
-    MouseEventButtons, PointerCoords, PointerDetails, UiEvent,
+    MouseEventButton, MouseEventButtons, PointerCoords, PointerDetails, StrakePointerEvent,
+    StrakePointerId, StrakeWheelDelta, StrakeWheelEvent, UiEvent,
 };
 use strake_traits::shell::Viewport;
 use winit::dpi::{LogicalPosition, PhysicalInsets, PhysicalPosition};

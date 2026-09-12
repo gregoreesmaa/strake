@@ -3,10 +3,10 @@
 //! their own), and `get_client_bounding_rect` must return the union of those
 //! fragments instead of a zero-sized rect.
 
+use std::sync::Arc;
 use strake_dom::{BaseDocument, DocumentConfig, NodeId};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 
 const HTML: &str = r#"<!DOCTYPE html>
 <html><head><style>

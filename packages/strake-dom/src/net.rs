@@ -1,10 +1,10 @@
-use strake_traits::node_id::NodeId;
 use selectors::context::QuirksMode;
 use std::sync::atomic::Ordering as Ao;
 use std::{
     io::Cursor,
     sync::{Arc, atomic::AtomicUsize, mpsc::Sender},
 };
+use strake_traits::node_id::NodeId;
 use style::{
     font_face::{FontFaceSourceFormat, FontFaceSourceFormatKeyword, FontStyleRange, Source},
     media_queries::MediaList,

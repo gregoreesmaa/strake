@@ -6,10 +6,10 @@
 //! reconstructed a fresh anonymous block was created without freeing the
 //! previous one, leaking a slab entry per reconstruction.
 
+use std::sync::Arc;
 use strake_dom::DocumentConfig;
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 
 // A block container ("outer") whose children are a bare text node and a block
 // element. The text node must be wrapped in an anonymous block.

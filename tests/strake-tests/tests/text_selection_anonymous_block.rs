@@ -7,16 +7,16 @@
 //! pointer event's target is the canonicalized DOM node (the body). The
 //! selection drag path must not require these to be the same node.
 
+use std::sync::Arc;
 use strake_dom::{Document, DocumentConfig, NodeId};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::{
     events::{
-        StrakePointerEvent, StrakePointerId, MouseEventButton, MouseEventButtons, Point,
-        PointerCoords, PointerDetails, UiEvent,
+        MouseEventButton, MouseEventButtons, Point, PointerCoords, PointerDetails,
+        StrakePointerEvent, StrakePointerId, UiEvent,
     },
     shell::{ColorScheme, Viewport},
 };
-use std::sync::Arc;
 
 const HTML: &str = r#"<!DOCTYPE html>
 <html><head><style> body { margin: 0; } </style></head>

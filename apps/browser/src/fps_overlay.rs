@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-use strake_dom::Widget;
 use dioxus_native::{CustomWidgetAttr, prelude::*};
+use strake_dom::Widget;
 
 const RING_LEN: usize = 60;
 

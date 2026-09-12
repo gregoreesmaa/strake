@@ -9,10 +9,10 @@
 //! to CSS. Layout fell back to usvg's tree size, where `em` resolves against
 //! usvg's default font-size (12px) instead of the element's font-size.
 
+use std::sync::Arc;
 use strake_dom::DocumentConfig;
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 
 fn layout_doc(html: &str) -> HtmlDocument {
     let mut doc = HtmlDocument::from_html(

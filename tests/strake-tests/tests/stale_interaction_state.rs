@@ -13,17 +13,17 @@
 //! originating element), whose id is stable across box-tree reconstruction.
 //! State referencing genuinely removed DOM nodes is cleared.
 
+use markup5ever::{QualName, local_name, ns};
+use std::sync::Arc;
 use strake_dom::{Document, DocumentConfig};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::{
     events::{
-        StrakePointerEvent, StrakePointerId, MouseEventButton, MouseEventButtons, Point,
-        PointerCoords, PointerDetails, UiEvent,
+        MouseEventButton, MouseEventButtons, Point, PointerCoords, PointerDetails,
+        StrakePointerEvent, StrakePointerId, UiEvent,
     },
     shell::{ColorScheme, Viewport},
 };
-use markup5ever::{QualName, local_name, ns};
-use std::sync::Arc;
 
 fn pointer_event(x: f32, y: f32, buttons: MouseEventButtons) -> StrakePointerEvent {
     StrakePointerEvent {

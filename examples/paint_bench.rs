@@ -11,15 +11,15 @@ use anyrender::PaintScene as _;
 use anyrender_vello::VelloScenePainter;
 use anyrender_vello_cpu::VelloCpuImageRenderer;
 use anyrender_vello_hybrid::{ImageManager, VelloHybridScenePainter};
+use reqwest::Url;
+use rustc_hash::FxHashMap;
+use std::sync::Arc;
+use std::time::Instant;
 use strake_dom::DocumentConfig;
 use strake_html::HtmlDocument;
 use strake_net::Provider;
 use strake_paint::paint_scene;
 use strake_traits::shell::{ColorScheme, Viewport};
-use reqwest::Url;
-use rustc_hash::FxHashMap;
-use std::sync::Arc;
-use std::time::Instant;
 
 const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/81.0";
 

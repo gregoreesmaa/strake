@@ -3,8 +3,8 @@
 use strake_dom::{DocumentConfig, EventDriver, NodeId, NoopEventHandler, ScrollBehavior};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::events::{
-    StrakePointerEvent, StrakePointerId, MouseEventButton, MouseEventButtons, Point, PointerCoords,
-    PointerDetails, UiEvent,
+    MouseEventButton, MouseEventButtons, Point, PointerCoords, PointerDetails, StrakePointerEvent,
+    StrakePointerId, UiEvent,
 };
 use strake_traits::shell::{ColorScheme, Viewport};
 

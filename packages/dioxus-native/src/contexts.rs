@@ -1,5 +1,5 @@
-use strake_shell::{StrakeShellEvent, StrakeShellProxy};
 use dioxus_document::{Document, NoOpDocument};
+use strake_shell::{StrakeShellEvent, StrakeShellProxy};
 use winit::window::WindowId;
 
 use crate::DioxusNativeEvent;

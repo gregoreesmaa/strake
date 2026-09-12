@@ -1,12 +1,12 @@
 use std::sync::Arc;
 
+use dioxus_core::{Element, VirtualDom};
+use dioxus_native_dom::DioxusDocument;
 use strake_dom::{DocGuard, DocGuardMut, Document, DocumentConfig};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::events::UiEvent;
 use strake_traits::net::NetProvider;
 use strake_traits::shell::{ColorScheme, Viewport};
-use dioxus_core::{Element, VirtualDom};
-use dioxus_native_dom::DioxusDocument;
 
 /// Options controlling document construction for a [`Harness`].
 pub struct HarnessOptions {
@@ -136,10 +136,10 @@ impl<D: Document> Harness<D> {
     /// so document-specific event handling (e.g. forwarding to a Dioxus VirtualDom) is
     /// bypassed. Does not [`pump`](Self::pump).
     pub fn dispatch_recorded(&mut self, events: impl IntoIterator<Item = UiEvent>) -> Vec<String> {
-        use strake_dom::{EventDriver, EventHandler};
-        use strake_traits::events::{DomEvent, EventState};
         use std::cell::RefCell;
         use std::rc::Rc;
+        use strake_dom::{EventDriver, EventHandler};
+        use strake_traits::events::{DomEvent, EventState};
 
         #[derive(Clone, Default)]
         struct RecordingHandler {

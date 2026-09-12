@@ -1,10 +1,10 @@
 //! display:contents — children must lay out as if they were children of the
 //! contents element's parent.
 
+use std::sync::Arc;
 use strake_dom::DocumentConfig;
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 
 fn layout_doc(html: &str) -> HtmlDocument {
     let mut doc = HtmlDocument::from_html(

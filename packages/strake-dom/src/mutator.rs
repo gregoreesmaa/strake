@@ -1,7 +1,7 @@
-use strake_traits::node_id::NodeId;
 use std::collections::HashSet;
 use std::mem;
 use std::ops::{Deref, DerefMut};
+use strake_traits::node_id::NodeId;
 
 use crate::layout::damage::ALL_DAMAGE;
 use crate::net::{ImageHandler, ResourceHandler, StylesheetHandler};

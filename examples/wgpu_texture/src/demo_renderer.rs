@@ -2,12 +2,12 @@
 // SPDX-License-Identifier: MIT
 use crate::Color;
 use anyrender::{PaintRef, PaintScene, ResourceId};
-use strake_dom::node::ComputedStyles;
-use strake_dom::Widget;
 use peniko::kurbo::{Affine, Rect};
 use peniko::{Fill, ImageBrush, ImageSampler};
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::time::Instant;
+use strake_dom::node::ComputedStyles;
+use strake_dom::Widget;
 use wgpu_context::DeviceHandle;
 
 pub struct DemoWidget {

@@ -2,11 +2,6 @@
 
 use anyrender::{PaintScene as _, render_to_buffer};
 use anyrender_vello_cpu::VelloCpuImageRenderer;
-use strake_dom::{DocumentConfig, util::Color};
-use strake_html::HtmlDocument;
-use strake_net::Provider;
-use strake_paint::paint_scene;
-use strake_traits::shell::{ColorScheme, Viewport};
 use peniko::Fill;
 use peniko::kurbo::Rect;
 use reqwest::Url;
@@ -17,6 +12,11 @@ use std::{
     path::{Path, PathBuf},
     time::Instant,
 };
+use strake_dom::{DocumentConfig, util::Color};
+use strake_html::HtmlDocument;
+use strake_net::Provider;
+use strake_paint::paint_scene;
+use strake_traits::shell::{ColorScheme, Viewport};
 
 const USER_AGENT: &str = "Mozilla/5.0 (X11; Linux x86_64; rv:60.0) Gecko/20100101 Firefox/81.0";
 

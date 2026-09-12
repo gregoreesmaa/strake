@@ -1,5 +1,5 @@
-use strake_traits::node_id::NodeId;
 use parley::{AlignmentOptions, IndentOptions};
+use strake_traits::node_id::NodeId;
 use style::values::specified::box_::DisplayOutside;
 use style::values::{computed::CSSPixelLength, generics::text::GenericTextIndent};
 use taffy::{

@@ -1,5 +1,5 @@
-use strake_traits::node_id::NodeId;
 use parley::layout::PositionedLayoutItem;
+use strake_traits::node_id::NodeId;
 
 use crate::BaseDocument;
 

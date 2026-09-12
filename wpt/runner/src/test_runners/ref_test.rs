@@ -1,7 +1,4 @@
 use anyrender::{ImageRenderer as _, PaintScene as _};
-use strake_dom::util::Color;
-use strake_dom::{BaseDocument, Document as _};
-use strake_paint::paint_scene;
 use image::{ImageBuffer, ImageFormat};
 use log::warn;
 use peniko::Fill;
@@ -10,6 +7,9 @@ use std::fs;
 use std::fs::File;
 use std::io::Write;
 use std::path::Path;
+use strake_dom::util::Color;
+use strake_dom::{BaseDocument, Document as _};
+use strake_paint::paint_scene;
 use url::Url;
 
 use super::fuzzy::{FuzzySpec, fuzzy_buffer_diff, parse_fuzzy_metas, tolerance_for_reference};

@@ -1,9 +1,9 @@
 use std::{cell::RefCell, rc::Rc, sync::Arc};
 
+use dioxus_native::{NodeHandle, SubDocumentAttr, prelude::*};
 use strake_dom::{BaseDocument, DocumentConfig};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::net::{Request, Url};
-use dioxus_native::{NodeHandle, SubDocumentAttr, prelude::*};
 
 use crate::about_pages::AboutPage;
 use crate::history::HistoryNav;

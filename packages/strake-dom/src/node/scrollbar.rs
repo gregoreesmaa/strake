@@ -2,8 +2,8 @@
 //! [`Node`]. Geometry is shared between painting (strake-paint) and thumb
 //! hit-testing so the two cannot drift.
 
-use strake_traits::node_id::NodeId;
 use kurbo::Rect as KurboRect;
+use strake_traits::node_id::NodeId;
 use taffy::AbsoluteAxis;
 use web_time::Duration;
 

@@ -1,5 +1,5 @@
-use strake_traits::node_id::NodeId;
 use std::{ops::Range, sync::Arc};
+use strake_traits::node_id::NodeId;
 
 use atomic_refcell::AtomicRefCell;
 use markup5ever::local_name;

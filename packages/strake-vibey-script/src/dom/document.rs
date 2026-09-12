@@ -1,10 +1,10 @@
 //! The `Document` prototype: node creation and lookup.
 
-use strake_dom::NodeId;
 use boa_engine::object::JsObject;
 use boa_engine::object::builtins::JsArray;
 use boa_engine::value::JsValue;
 use boa_engine::{Context, JsResult};
+use strake_dom::NodeId;
 
 use super::{
     define_accessor, define_method, dom_ctx, node_or_null, node_wrapper, qual_name, qual_name_ns,

@@ -1,17 +1,17 @@
 //! Fragment navigation: resolving a URL fragment (the `#...` part) to an element
 //! and scrolling the viewport to it.
 
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 use strake_dom::{Document, DocumentConfig, FontContext, ScrollBehavior, ScrollLogicalPosition};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::{
     events::{
-        StrakePointerEvent, StrakePointerId, StrakeWheelDelta, StrakeWheelEvent, MouseEventButton,
-        MouseEventButtons, Point, PointerCoords, PointerDetails, UiEvent,
+        MouseEventButton, MouseEventButtons, Point, PointerCoords, PointerDetails,
+        StrakePointerEvent, StrakePointerId, StrakeWheelDelta, StrakeWheelEvent, UiEvent,
     },
     shell::{ColorScheme, Viewport},
 };
-use std::sync::Arc;
-use std::time::{Duration, Instant};
 
 fn layout_doc(html: &str) -> HtmlDocument {
     let mut doc = HtmlDocument::from_html(

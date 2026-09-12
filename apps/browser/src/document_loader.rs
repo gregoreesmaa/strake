@@ -1,13 +1,13 @@
 use std::sync::{Arc, Mutex};
 
+use dioxus_native::{SubDocumentAttr, prelude::*};
+use linebender_resource_handle::Blob;
 use strake_dom::{DocumentConfig, FontContext};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::{
     net::{AbortController, AbortSignal, Request, Url},
     shell::ShellProvider,
 };
-use dioxus_native::{SubDocumentAttr, prelude::*};
-use linebender_resource_handle::Blob;
 
 use crate::StdNetProvider;
 use crate::favicon::favicon_candidate;
@@ -215,9 +215,9 @@ async fn build_page_document(
     net_provider: &Arc<StdNetProvider>,
     signal: &AbortSignal,
 ) -> (SubDocumentAttr, String, Option<String>) {
+    use std::collections::HashMap;
     use strake_dom::Document as _;
     use strake_vibey_script::ScriptDocument;
-    use std::collections::HashMap;
 
     let document = ScriptDocument::from_html(html, config);
 

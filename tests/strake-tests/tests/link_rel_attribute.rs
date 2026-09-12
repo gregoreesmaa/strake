@@ -6,10 +6,10 @@
 //! `href` did, and a link given its `href` first and its `rel` second was never
 //! fetched.
 
+use std::sync::{Arc, Mutex};
 use strake_dom::{DocumentConfig, QualName, local_name, ns};
 use strake_html::HtmlDocument;
 use strake_traits::net::{NetHandler, NetProvider, Request};
-use std::sync::{Arc, Mutex};
 
 /// A `NetProvider` which records the urls it is asked for.
 #[derive(Default)]

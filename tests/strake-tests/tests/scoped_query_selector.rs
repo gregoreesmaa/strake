@@ -1,7 +1,7 @@
+use std::sync::Arc;
 use strake_dom::{DocumentConfig, NodeData, NodeId};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 
 fn document() -> HtmlDocument {
     HtmlDocument::from_html(

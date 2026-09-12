@@ -1,4 +1,4 @@
-use strake_traits::events::{StrakeImeEvent, DomEvent};
+use strake_traits::events::{DomEvent, StrakeImeEvent};
 
 use crate::BaseDocument;
 

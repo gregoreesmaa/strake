@@ -1,11 +1,11 @@
 use crate::{BaseDocument, node::GeneratedTextInputEvent, util::ACTION_MOD};
+use keyboard_types::{Key, Modifiers};
+use markup5ever::local_name;
 use strake_traits::node_id::NodeId;
 use strake_traits::{
     SmolStr,
-    events::{StrakeInputEvent, StrakeKeyEvent, DomEvent, DomEventData},
+    events::{DomEvent, DomEventData, StrakeInputEvent, StrakeKeyEvent},
 };
-use keyboard_types::{Key, Modifiers};
-use markup5ever::local_name;
 
 pub(super) enum KeyboardOrTextInputEvent {
     KeyPress(StrakeKeyEvent),

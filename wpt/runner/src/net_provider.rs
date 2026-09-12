@@ -1,4 +1,3 @@
-use strake_traits::net::{Bytes, NetHandler, NetProvider, Request};
 use data_url::DataUrl;
 use log::{debug, warn};
 use std::{
@@ -10,6 +9,7 @@ use std::{
         atomic::{AtomicUsize, Ordering},
     },
 };
+use strake_traits::net::{Bytes, NetHandler, NetProvider, Request};
 
 static REQUEST_ID: AtomicUsize = AtomicUsize::new(0);
 

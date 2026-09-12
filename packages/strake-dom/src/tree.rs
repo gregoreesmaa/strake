@@ -2,8 +2,8 @@
 
 use std::ops::{Index, IndexMut};
 
-use strake_traits::node_id::NodeId;
 use slotmap::{Key as _, KeyData, SlotMap};
+use strake_traits::node_id::NodeId;
 
 use crate::Node;
 

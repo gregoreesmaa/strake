@@ -1,16 +1,16 @@
-use strake_traits::node_id::NodeId;
 use markup5ever::{LocalName, local_name};
+use strake_traits::node_id::NodeId;
 
 use crate::{
     BaseDocument, ElementData,
     traversal::{AncestorTraverser, TreeTraverser},
 };
+use core::str::FromStr;
+use std::fmt::Display;
 use strake_traits::{
     navigation::NavigationOptions,
     net::{Body, Entry, EntryValue, FormData, Method},
 };
-use core::str::FromStr;
-use std::fmt::Display;
 
 /// https://url.spec.whatwg.org/#default-encode-set
 const DEFAULT_ENCODE_SET: percent_encoding::AsciiSet = percent_encoding::CONTROLS

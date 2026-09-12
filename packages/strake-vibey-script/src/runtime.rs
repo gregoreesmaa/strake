@@ -6,8 +6,6 @@ use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
 
-use strake_dom::{BaseDocument, NodeId};
-use strake_traits::events::{DomEvent, DomEventData, EventState};
 use boa_engine::builtins::promise::PromiseState;
 use boa_engine::module::{Module, ModuleLoader, ModuleRequest, Referrer};
 use boa_engine::object::{JsObject, ObjectInitializer};
@@ -19,6 +17,8 @@ use boa_engine::{
 use boa_engine::{Finalize, Trace};
 use boa_runtime::Console;
 use boa_runtime::console::{ConsoleState, Logger};
+use strake_dom::{BaseDocument, NodeId};
+use strake_traits::events::{DomEvent, DomEventData, EventState};
 use url::Url;
 use web_time::{Duration, Instant};
 

@@ -1,8 +1,8 @@
+use keyboard_types::{Code, Key, Location, Modifiers};
 use strake_traits::events::{
-    StrakeImeEvent, StrakeKeyEvent, StrakePointerId, KeyState, PointerDetails,
+    KeyState, PointerDetails, StrakeImeEvent, StrakeKeyEvent, StrakePointerId,
 };
 use strake_traits::shell::ColorScheme;
-use keyboard_types::{Code, Key, Location, Modifiers};
 use winit::event::KeyEvent as WinitKeyEvent;
 use winit::event::{ButtonSource, ElementState};
 use winit::event::{Ime, PointerKind, PointerSource};

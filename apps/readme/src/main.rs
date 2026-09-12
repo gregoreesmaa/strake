@@ -2,7 +2,8 @@ mod readme_application;
 
 mod markdown {
     pub(crate) const GITHUB_MD_STYLES: &str = include_str!("../assets/github-markdown.css");
-    pub(crate) const STRAKE_MD_STYLES: &str = include_str!("../assets/strake-markdown-overrides.css");
+    pub(crate) const STRAKE_MD_STYLES: &str =
+        include_str!("../assets/strake-markdown-overrides.css");
 
     #[cfg(feature = "comrak")]
     mod comrak;
@@ -28,20 +29,20 @@ use anyrender_vello_cpu::VelloCpuWindowRenderer as WindowRenderer;
 #[cfg(feature = "hybrid")]
 use anyrender_vello_hybrid::VelloHybridWindowRenderer as WindowRenderer;
 
+use markdown::{GITHUB_MD_STYLES, STRAKE_MD_STYLES, markdown_to_html};
+use notify::{Error as NotifyError, Event as NotifyEvent, RecursiveMode, Watcher as _};
+use readme_application::{ReadmeApplication, ReadmeEvent};
 use strake_dom::DocumentConfig;
 use strake_html::HtmlDocument;
 use strake_net::Provider;
 use strake_traits::navigation::{NavigationOptions, NavigationProvider};
 use strake_traits::net::Request;
-use markdown::{STRAKE_MD_STYLES, GITHUB_MD_STYLES, markdown_to_html};
-use notify::{Error as NotifyError, Event as NotifyEvent, RecursiveMode, Watcher as _};
-use readme_application::{ReadmeApplication, ReadmeEvent};
 
-use strake_shell::{StrakeShellEvent, StrakeShellProxy, WindowConfig, create_default_event_loop};
 use std::env::current_dir;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use strake_shell::{StrakeShellEvent, StrakeShellProxy, WindowConfig, create_default_event_loop};
 use tokio::sync::oneshot;
 use url::Url;
 use winit::window::WindowAttributes;

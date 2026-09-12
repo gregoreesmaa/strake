@@ -1,8 +1,8 @@
 use anyrender::PaintScene;
-use strake_dom::node::SpecialElementData;
 use kurbo::{BezPath, Cap, Circle, Insets, Join, PathEl, Point, Rect, Shape as _, Stroke, Vec2};
 use peniko::{Color, Fill};
 use smallvec::SmallVec;
+use strake_dom::node::SpecialElementData;
 use style::{
     computed_values::border_collapse::T as BorderCollapse,
     values::computed::{BorderStyle, OutlineStyle},

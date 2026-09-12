@@ -19,12 +19,6 @@ use crate::{
     EventDriver, HtmlParserProvider, Node, NodeData, NoopEventHandler, StyleThreading,
     TextNodeData,
 };
-use strake_traits::devtools::DevtoolSettings;
-use strake_traits::events::{DomEvent, HitResult, UiEvent};
-use strake_traits::navigation::{DummyNavigationProvider, NavigationProvider};
-use strake_traits::net::{AbortSignal, DummyNetProvider, NetProvider, Request};
-use strake_traits::node_id::NodeId;
-use strake_traits::shell::{DummyShellProvider, ShellProvider, Viewport};
 use cursor_icon::CursorIcon;
 use linebender_resource_handle::Blob;
 use markup5ever::{LocalName, local_name};
@@ -41,6 +35,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, RwLockReadGuard, RwLockWriteGuard};
 use std::task::{Context as TaskContext, Waker};
+use strake_traits::devtools::DevtoolSettings;
+use strake_traits::events::{DomEvent, HitResult, UiEvent};
+use strake_traits::navigation::{DummyNavigationProvider, NavigationProvider};
+use strake_traits::net::{AbortSignal, DummyNetProvider, NetProvider, Request};
+use strake_traits::node_id::NodeId;
+use strake_traits::shell::{DummyShellProvider, ShellProvider, Viewport};
 use style::Atom;
 use style::animation::DocumentAnimationSet;
 use style::attr::{AttrIdentifier, AttrValue};
@@ -2739,8 +2739,8 @@ impl AsMut<BaseDocument> for BaseDocument {
 #[cfg(test)]
 mod zoom_tests {
     use super::*;
-    use strake_traits::shell::ColorScheme;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use strake_traits::shell::ColorScheme;
 
     #[derive(Default)]
     struct CountingShellProvider {

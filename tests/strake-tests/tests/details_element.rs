@@ -2,17 +2,17 @@
 //! child toggles the `open` attribute of its <details> ancestor, and the
 //! user-agent stylesheet hides everything except that summary while closed.
 
+use markup5ever::local_name;
+use std::sync::Arc;
 use strake_dom::{Document, DocumentConfig, NodeId};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::{
     events::{
-        StrakePointerEvent, StrakePointerId, MouseEventButton, MouseEventButtons, Point,
-        PointerCoords, PointerDetails, UiEvent,
+        MouseEventButton, MouseEventButtons, Point, PointerCoords, PointerDetails,
+        StrakePointerEvent, StrakePointerId, UiEvent,
     },
     shell::{ColorScheme, Viewport},
 };
-use markup5ever::local_name;
-use std::sync::Arc;
 
 fn doc(html: &str) -> HtmlDocument {
     doc_scaled(html, 1.0)

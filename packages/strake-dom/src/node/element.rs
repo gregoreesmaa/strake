@@ -1,4 +1,3 @@
-use strake_traits::node_id::NodeId;
 use cssparser::ParserInput;
 use kurbo::{Affine, Rect as KurboRect};
 use linebender_resource_handle::Blob;
@@ -8,6 +7,7 @@ use std::cell::Cell;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
+use strake_traits::node_id::NodeId;
 use style::Atom;
 use style::parser::ParserContext;
 use style::properties::{Importance, PropertyDeclaration, PropertyId, SourcePropertyDeclaration};

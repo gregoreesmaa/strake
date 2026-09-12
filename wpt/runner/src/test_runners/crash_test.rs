@@ -1,11 +1,11 @@
 use std::time::Duration;
 
 use anyrender::{ImageRenderer as _, PaintScene as _};
+use peniko::Fill;
+use peniko::kurbo::Rect;
 use strake_dom::util::Color;
 use strake_dom::{BaseDocument, Document as _};
 use strake_paint::paint_scene;
-use peniko::Fill;
-use peniko::kurbo::Rect;
 
 use super::{parse_and_resolve_document, pump_net_provider, pump_timers, run_document_scripts};
 use crate::{BufferKind, HEIGHT, SCALE, SubtestCounts, TestFlags, ThreadCtx, WIDTH};

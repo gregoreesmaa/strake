@@ -5,9 +5,9 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-use strake_dom::{BaseDocument, NodeId};
 use boa_engine::object::JsObject;
 use boa_engine::{Finalize, JsData, Trace};
+use strake_dom::{BaseDocument, NodeId};
 
 use crate::clock::ScriptClock;
 use crate::timers::TimerQueue;

@@ -1,5 +1,5 @@
-use strake_shell::StrakeShellProxy;
 use std::sync::Arc;
+use strake_shell::StrakeShellProxy;
 
 use strake_traits::net::{NetHandler, NetProvider, Request};
 

@@ -1,12 +1,12 @@
 //! The `Node` (and `CharacterData`) prototypes: tree structure, tree mutation,
 //! text content and event listener registration.
 
-use strake_dom::NodeId;
-use strake_dom::node::NodeData;
 use boa_engine::object::JsObject;
 use boa_engine::object::builtins::JsArray;
 use boa_engine::value::JsValue;
 use boa_engine::{Context, JsNativeError, JsResult};
+use strake_dom::NodeId;
+use strake_dom::node::NodeData;
 
 use super::{
     define_accessor, define_method, dom_ctx, js_str, node_id_of_value, node_or_null, node_wrapper,

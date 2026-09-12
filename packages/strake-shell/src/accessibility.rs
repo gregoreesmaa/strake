@@ -1,8 +1,8 @@
 use crate::{StrakeShellEvent, event::StrakeShellProxy};
 use accesskit::Rect;
 use accesskit_xplat::{Adapter, EventHandler, WindowEvent as AccessKitEvent};
-use strake_dom::BaseDocument;
 use std::sync::Arc;
+use strake_dom::BaseDocument;
 use winit::{
     event::WindowEvent,
     raw_window_handle::HasWindowHandle,

@@ -2,12 +2,12 @@
 
 use anyrender::render_to_buffer;
 use anyrender_vello_cpu::VelloCpuImageRenderer;
+use std::sync::Arc;
 use strake_dom::DocumentConfig;
 use strake_dom::node::{ImageData, RasterImageData};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_paint::paint_scene;
 use strake_traits::shell::{ColorScheme, Viewport};
-use std::sync::Arc;
 
 /// Renders a 100x100 div with the given background shorthand, injecting a
 /// 200x100 solid-red image as the loaded background, and returns the pixel

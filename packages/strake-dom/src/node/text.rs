@@ -1,10 +1,10 @@
+use keyboard_types::{Key, Modifiers};
+use parley::{ContentWidths, FontContext, LayoutContext};
 use strake_traits::{
     events::{StrakeImeEvent, StrakeKeyEvent},
     node_id::NodeId,
     shell::ShellProvider,
 };
-use keyboard_types::{Key, Modifiers};
-use parley::{ContentWidths, FontContext, LayoutContext};
 
 use crate::util::ACTION_MOD;
 

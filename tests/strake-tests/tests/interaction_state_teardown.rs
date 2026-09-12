@@ -13,16 +13,16 @@
 //! - focus: resets to the body (encoded as `None`), running blur side-effects
 //!   (in particular disabling IME for text inputs).
 
+use std::sync::{Arc, Mutex};
 use strake_dom::{Document, DocumentConfig, NodeId};
 use strake_html::{HtmlDocument, HtmlProvider};
 use strake_traits::{
     events::{
-        StrakePointerEvent, StrakePointerId, MouseEventButton, MouseEventButtons, Point,
-        PointerCoords, PointerDetails, UiEvent,
+        MouseEventButton, MouseEventButtons, Point, PointerCoords, PointerDetails,
+        StrakePointerEvent, StrakePointerId, UiEvent,
     },
     shell::{ColorScheme, ShellProvider, Viewport},
 };
-use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
 struct RecordingShell {

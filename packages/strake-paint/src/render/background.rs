@@ -2,9 +2,9 @@ use super::{ElementCx, PhysicalTracks, to_image_quality, to_peniko_image};
 use crate::color::{Color, ToColorColor};
 use crate::gradient::to_peniko_gradient;
 use anyrender::PaintScene;
-use strake_dom::node::{ImageData, ImageResourceData, SpecialElementData};
 use kurbo::{self, Affine, BezPath, Point, Rect, Shape, Size, Vec2};
 use peniko::{self, Fill};
+use strake_dom::node::{ImageData, ImageResourceData, SpecialElementData};
 use style::{
     properties::{
         generated::longhands::{

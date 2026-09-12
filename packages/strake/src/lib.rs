@@ -17,7 +17,7 @@ use anyrender_vello::VelloWindowRenderer as WindowRenderer;
 use strake_dom::DocumentConfig;
 use strake_html::HtmlDocument;
 use strake_shell::{
-    StrakeApplication, StrakeShellProxy, Config, EventLoop, WindowConfig, create_default_event_loop,
+    Config, EventLoop, StrakeApplication, StrakeShellProxy, WindowConfig, create_default_event_loop,
 };
 use strake_traits::net::NetProvider;
 

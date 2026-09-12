@@ -1,9 +1,9 @@
 //! A minimal `CSSStyleDeclaration` binding (`element.style`).
 
-use strake_dom::NodeId;
 use boa_engine::object::JsObject;
 use boa_engine::value::JsValue;
 use boa_engine::{Context, JsResult};
+use strake_dom::NodeId;
 
 use super::element::attr_name;
 use super::{define_accessor, define_method, dom_ctx, js_str, this_node_id, to_rust_string};

@@ -1,7 +1,7 @@
 use std::{cell::RefCell, rc::Rc, sync::atomic::AtomicUsize};
 
-use strake_dom::{Document, Widget};
 use dioxus_core::{AttributeValue, IntoAttributeValue};
+use strake_dom::{Document, Widget};
 
 #[derive(Clone, PartialEq)]
 pub struct SubDocumentAttr(WriteOnceAttr<Box<dyn Document>>);
