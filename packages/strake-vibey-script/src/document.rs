@@ -243,8 +243,9 @@ impl ScriptDocument {
     /// The document's JavaScript engine behind the [`ScriptEngine`] seam.
     ///
     /// Embedders drive evaluation, microtask checkpoints, and timers through
-    /// this object so a future engine backend can substitute without
-    /// touching embedder code.
+    /// this object so a future engine backend can substitute for those paths
+    /// without touching embedder code. (Event-listener dispatch stays on the
+    /// concrete runtime in Phase 0; see the scope note in `engine.rs`.)
     pub fn engine_mut(&mut self) -> &mut dyn ScriptEngine {
         &mut self.runtime
     }

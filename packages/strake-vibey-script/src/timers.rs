@@ -1,5 +1,7 @@
 //! Timer support (`setTimeout` / `setInterval` / `requestAnimationFrame`)
 
+use std::collections::HashSet;
+
 use boa_engine::JsValue;
 use boa_engine::object::JsObject;
 use web_time::{Duration, Instant};
@@ -17,6 +19,14 @@ pub(crate) struct Timer {
 pub(crate) struct TimerQueue {
     next_id: u64,
     timers: Vec<Timer>,
+    /// Ids cancelled via `clearTimeout`/`clearInterval`/`cancelAnimationFrame`.
+    ///
+    /// `take_due` snapshots the due batch up front, so a timer cancelled from
+    /// an earlier callback in the same batch is no longer in `timers` for
+    /// `remove` to find. `run_due_timers` therefore consults this set at fire
+    /// time (via [`take_cancelled`](Self::take_cancelled)) before invoking
+    /// each due timer (issue #4, PR #78).
+    cancelled: HashSet<u64>,
 }
 
 impl TimerQueue {
@@ -42,6 +52,18 @@ impl TimerQueue {
 
     pub fn remove(&mut self, id: u64) {
         self.timers.retain(|timer| timer.id != id);
+        // Also record the cancellation for timers already extracted by
+        // `take_due`: the fire-time check in `run_due_timers` consults this.
+        // Stale marks (ids neither queued nor in the current batch) are
+        // pruned by `take_due`, so the set stays bounded.
+        self.cancelled.insert(id);
+    }
+
+    /// Fire-time cancellation check for one due timer: returns `true` (and
+    /// consumes the mark) if the id was cancelled after `take_due` extracted
+    /// it — e.g. by `clearTimeout` from an earlier same-batch callback.
+    pub fn take_cancelled(&mut self, id: u64) -> bool {
+        self.cancelled.remove(&id)
     }
 
     /// The deadline of the timer which is due soonest (if any)
@@ -51,6 +73,16 @@ impl TimerQueue {
 
     /// Remove and return all timers that are due at `now`, soonest first.
     /// Interval timers are rescheduled.
+    ///
+    /// Interval rescheduling is anchored to poll time (`now + interval`), not
+    /// to the missed deadline: a late `poll` shifts the interval phase rather
+    /// than producing catch-up ticks (pinned by
+    /// `interval_reschedule_anchors_to_poll_time` in `tests/event_loop.rs`).
+    ///
+    /// The returned batch is a snapshot: timers scheduled from inside a
+    /// callback (including zero-delay nested timeouts, whose deadline is
+    /// `now`) wait for the next `poll`, after already-queued same-deadline
+    /// siblings (pinned by `nested_zero_delay_timer_waits_for_next_poll`).
     pub fn take_due(&mut self, now: Instant) -> Vec<Timer> {
         let mut due: Vec<Timer> = Vec::new();
         let mut idx = 0;
@@ -74,6 +106,16 @@ impl TimerQueue {
                 });
             }
         }
+
+        // Drop stale cancellation marks: a mark implies the id was removed
+        // from the queue, so no id extracted into `due` above can be marked
+        // yet (ids are never reused, and interval reschedules keep the id of
+        // their unmarked `due` entry). Same-batch cancels mark their ids
+        // after this point, and those marks are consumed at fire time by
+        // `take_cancelled`. Retaining only still-queued ids keeps the set
+        // bounded across polls that never touch those ids again.
+        self.cancelled
+            .retain(|id| self.timers.iter().any(|timer| timer.id == *id));
 
         // Order by deadline, breaking ties by schedule order (timer ids grow
         // monotonically). `swap_remove` above scrambles arrival order, and a

@@ -2,9 +2,19 @@
 //!
 //! The Boa backend implements this trait today; the Phase-1 QuickJS-ng
 //! migration implements the same trait behind the same conformance suite
-//! (`tests/event_loop.rs`), so embedders (`ScriptDocument`, the WPT runner,
-//! …) never touch engine specifics. Only engine-agnostic behavior belongs
-//! here: evaluation, microtask checkpoints, timers, and deadlines.
+//! (`tests/event_loop.rs`), so embedders drive evaluation, microtask
+//! checkpoints, and timers through this trait without touching engine
+//! specifics. Only engine-agnostic behavior belongs here: evaluation,
+//! microtask checkpoints, timers, and deadlines.
+//!
+//! Scope note (PR #78): event-listener dispatch is NOT behind this seam in
+//! Phase 0. `dispatch_dom_event` / `dispatch_document_event` /
+//! `dispatch_window_event` (runtime.rs) invoke the concrete `run_jobs`, and
+//! `ScriptEventHandler` (event_handler.rs) holds `&mut ScriptRuntime`
+//! directly, so a mock `ScriptEngine` cannot observe or replace event
+//! microtasks today. A backend swap must port the event path (dispatch,
+//! `sync_named_element_globals`, ready-state setters, direct `ctx.state`
+//! accesses) along with this trait.
 
 use url::Url;
 use web_time::Instant;

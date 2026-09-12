@@ -773,6 +773,18 @@ impl crate::engine::ScriptEngine for ScriptRuntime {
     }
 
     /// Run pending promise jobs (microtasks)
+    ///
+    /// Known Phase-0 divergence, scoped explicitly (issue #4, PR #78): Boa
+    /// 0.22's `SimpleJobExecutor` aborts the whole promise-job batch on the
+    /// first failure (`src/job.rs`: `mem::take` of the queue, then
+    /// `self.clear(); return Err(err)`), so microtasks queued behind a
+    /// thrower are dropped — never run, never reported — while the HTML
+    /// "perform a microtask checkpoint" loop would report each error and
+    /// continue. Only the first error reaches the sink here. Pinned by
+    /// `throwing_microtask_drops_later_siblings_known_gap` in
+    /// `tests/event_loop.rs`; the Phase-1 QuickJS-ng backend must make a
+    /// deliberate continue-and-report-each choice instead of inheriting this
+    /// silently.
     fn run_jobs(&mut self, description: &str) {
         if let Err(error) = self.context.run_jobs() {
             report_js_error(&self.ctx, description, &error);
@@ -828,6 +840,14 @@ impl crate::engine::ScriptEngine for ScriptRuntime {
             return false;
         }
         for timer in due {
+            // Same-batch cancellation (issue #4, PR #78): `take_due`
+            // snapshots the batch up front, so `clearTimeout`/`clearInterval`
+            // from an earlier callback in this batch cannot pull a later
+            // timer out of `due`. Re-check the cancelled-id set at fire time.
+            let cancelled = self.ctx.state.borrow_mut().timers.take_cancelled(timer.id);
+            if cancelled {
+                continue;
+            }
             if let Err(error) =
                 timer
                     .callback
