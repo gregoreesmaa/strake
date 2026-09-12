@@ -23,9 +23,11 @@
 mod app;
 mod coverage;
 mod ipc;
+mod shell;
 mod window;
 
 pub use app::{App, AppEventKind, AppPath};
 pub use coverage::{ApiEntry, SupportStatus, TOP50};
 pub use ipc::{IpcBus, IpcError, ListenerId};
+pub use shell::{ShellError, ShellWindow};
 pub use window::{BrowserWindow, BrowserWindowOptions, TitleBarStyle, WebContents, WindowManager};

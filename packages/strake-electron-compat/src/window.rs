@@ -352,6 +352,17 @@ impl WindowManager {
         self.mutate(id, |win| win.title = title.to_string())
     }
 
+    /// `win.setSize`: update the content size stored on the window options.
+    /// The embedder mirrors this into the page viewport and the OS window
+    /// (see `ShellWindow::resize`); unknown ids fail softly like the other
+    /// state transitions.
+    pub fn resize(&mut self, id: u32, width: u32, height: u32) -> bool {
+        self.mutate(id, |win| {
+            win.options.width = width;
+            win.options.height = height;
+        })
+    }
+
     fn mutate(&mut self, id: u32, f: impl FnOnce(&mut BrowserWindow)) -> bool {
         match self.windows.get_mut(&id) {
             Some(win) => {
