@@ -731,7 +731,10 @@ impl BaseDocument {
         self.shell_provider.request_redraw();
     }
 
-    pub fn set_style_property(&mut self, node_id: NodeId, name: &str, value: &str) {
+    /// Set one inline-style declaration. Returns whether a declaration was
+    /// actually parsed and stored; callers (notably the mutation hooks) use
+    /// this to skip no-op edits of unknown properties or invalid values.
+    pub fn set_style_property(&mut self, node_id: NodeId, name: &str, value: &str) -> bool {
         let node = &mut self.nodes[node_id];
         let did_change = node.element_data_mut().unwrap().set_style_property(
             name,
@@ -742,9 +745,12 @@ impl BaseDocument {
         if did_change {
             node.set_restyle_hint(RestyleHint::RESTYLE_STYLE_ATTRIBUTE);
         }
+        did_change
     }
 
-    pub fn remove_style_property(&mut self, node_id: NodeId, name: &str) {
+    /// Remove one inline-style declaration. Returns whether a declaration
+    /// was actually dropped.
+    pub fn remove_style_property(&mut self, node_id: NodeId, name: &str) -> bool {
         let node = &mut self.nodes[node_id];
         let did_change = node.element_data_mut().unwrap().remove_style_property(
             name,
@@ -754,6 +760,7 @@ impl BaseDocument {
         if did_change {
             node.set_restyle_hint(RestyleHint::RESTYLE_STYLE_ATTRIBUTE);
         }
+        did_change
     }
 
     pub fn sub_document_node_ids(&self) -> Vec<NodeId> {

@@ -36,12 +36,17 @@ pub enum MutationRecord {
         /// Detached children, in detachment order.
         removed: Vec<NodeId>,
     },
-    /// An attribute was set or removed on `target`.
+    /// An attribute was set or removed on `target`. Edits through a
+    /// `CSSStyleDeclaration` surface here as a `style` attribute mutation.
     Attributes {
         /// The element whose attribute changed.
         target: NodeId,
         /// Local attribute name.
         name: String,
+        /// Attribute namespace URI (the DOM record's `attributeNamespace`):
+        /// `None` for the empty (null) namespace, so a plain `href` reports
+        /// `None` while `xlink:href` reports the XLink namespace URI.
+        namespace: Option<String>,
     },
     /// Character data changed inside `target` (a text node).
     CharacterData {
@@ -65,6 +70,15 @@ pub trait MutationHooks: Send + Sync {
     fn node_removed(&self, parent: NodeId, child: NodeId);
 
     /// Queue one tree-mutation record for observer dispatch.
+    ///
+    /// Record granularity is caller-dependent, matching the DOM standard's
+    /// per-operation batching: single-node ops (`remove_node`, and each
+    /// detach inside `add_children_to_parent`) queue one record per node,
+    /// while bulk ops (`remove_and_drop_all_children`, `replace_children`,
+    /// and the insert side of `add_children_to_parent`) fold the whole
+    /// operation into a single `ChildList` record. Embedders synthesizing
+    /// spec `MutationObserver` records must preserve record boundaries
+    /// rather than assume one record per node.
     fn queue_mutation_record(&self, record: MutationRecord);
 }
 
