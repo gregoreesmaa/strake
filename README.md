@@ -139,7 +139,7 @@ cargo run -rp rdme ./README.md
 
 ## License & Attribution
 
-Boson is an open-source project originally derived from [Boson](https://github.com/DioxusLabs/boson) by DioxusLabs.
+Boson is an open-source project originally derived from [Blitz](https://github.com/DioxusLabs/blitz) by DioxusLabs.
 
 This project is dual-licensed under:
 * **[Apache License, Version 2.0](LICENSE-APACHE)** ([http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0))

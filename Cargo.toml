@@ -237,7 +237,7 @@ opt-level = 3
 [package]
 name = "boson-examples"
 version = "0.0.1"
-authors = ["Jonathan Kelley"]
+authors = ["Jonathan Kelley", "Gregor Eesmaa"]
 edition = "2024"
 description = "Top level crate for Boson"
 license = "MIT OR Apache-2.0"
