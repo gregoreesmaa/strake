@@ -7566,6 +7566,7 @@ dependencies = [
  "strake-fallback-supervisor",
  "strake-html",
  "strake-paint",
+ "strake-shell",
  "strake-test-harness",
  "strake-traits",
  "stylo",

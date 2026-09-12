@@ -2,7 +2,11 @@ use selectors::context::QuirksMode;
 use std::sync::atomic::Ordering as Ao;
 use std::{
     io::Cursor,
-    sync::{Arc, atomic::AtomicUsize, mpsc::Sender},
+    sync::{
+        Arc,
+        atomic::{AtomicBool, AtomicUsize},
+        mpsc::Sender,
+    },
 };
 use strake_traits::node_id::NodeId;
 use style::{
@@ -72,7 +76,15 @@ pub(crate) struct ResourceHandler<T: Send + Sync + 'static> {
     node_id: Option<NodeId>,
     tx: Sender<DocumentEvent>,
     shell_provider: Arc<dyn ShellProvider>,
+    /// The request URL this handler was created for. Reported by the
+    /// [`Drop`] backstop so a dropped fetch drains URL-keyed state (e.g.
+    /// `pending_images`) exactly like the explicit `error()` path does.
+    request_url: String,
     data: T,
+    /// Whether [`ResourceHandler::respond`] already delivered a result.
+    /// Consulted by the [`Drop`] backstop so a handler dropped by its
+    /// provider without any callback still unblocks the document (issue #65).
+    responded: AtomicBool,
 }
 
 impl<T: Send + Sync + 'static> ResourceHandler<T> {
@@ -81,6 +93,7 @@ impl<T: Send + Sync + 'static> ResourceHandler<T> {
         doc_id: usize,
         node_id: Option<NodeId>,
         shell_provider: Arc<dyn ShellProvider>,
+        request_url: String,
         data: T,
     ) -> Self {
         static REQUEST_ID_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -90,7 +103,9 @@ impl<T: Send + Sync + 'static> ResourceHandler<T> {
             node_id,
             tx,
             shell_provider,
+            request_url,
             data,
+            responded: AtomicBool::new(false),
         }
     }
 
@@ -99,12 +114,20 @@ impl<T: Send + Sync + 'static> ResourceHandler<T> {
         doc_id: usize,
         node_id: Option<NodeId>,
         shell_provider: Arc<dyn ShellProvider>,
+        request_url: String,
         data: T,
     ) -> Box<dyn NetHandler>
     where
         ResourceHandler<T>: NetHandler,
     {
-        Box::new(Self::new(tx, doc_id, node_id, shell_provider, data)) as _
+        Box::new(Self::new(
+            tx,
+            doc_id,
+            node_id,
+            shell_provider,
+            request_url,
+            data,
+        )) as _
     }
 
     pub(crate) fn request_id(&self) -> usize {
@@ -112,6 +135,7 @@ impl<T: Send + Sync + 'static> ResourceHandler<T> {
     }
 
     fn respond(&self, resolved_url: String, result: Result<Resource, String>) {
+        self.responded.store(true, Ao::Relaxed);
         let response = ResourceLoadResponse {
             request_id: self.request_id,
             node_id: self.node_id,
@@ -120,6 +144,35 @@ impl<T: Send + Sync + 'static> ResourceHandler<T> {
         };
         let _ = self.tx.send(DocumentEvent::ResourceLoad(response));
         self.shell_provider.request_redraw();
+    }
+
+    /// Explicit transport-failure delivery. Unblocks render-blocking
+    /// resources exactly like a failed parse: browsers treat the resource
+    /// as "loaded with zero rules".
+    fn fail(&self, resolved_url: String, message: String) {
+        self.respond(resolved_url, Err(message));
+    }
+}
+
+impl<T: Send + Sync + 'static> Drop for ResourceHandler<T> {
+    fn drop(&mut self) {
+        // Belt-and-braces for issue #65: providers that drop the handler
+        // without calling `bytes`/`error` (transport failure, abort, or a
+        // third-party `NetProvider` that never calls back) must still drain
+        // the request id from `pending_critical_resources` — otherwise the
+        // critical-resource gate blocks rendering forever — and the request
+        // URL from `pending_images`, so a later same-URL image load issues a
+        // new fetch instead of queueing onto the dead entry.
+        if !self.responded.swap(true, Ao::Relaxed) {
+            let response = ResourceLoadResponse {
+                request_id: self.request_id,
+                node_id: self.node_id,
+                resolved_url: Some(self.request_url.clone()),
+                result: Err(String::from("network request dropped without a response")),
+            };
+            let _ = self.tx.send(DocumentEvent::ResourceLoad(response));
+            self.shell_provider.request_redraw();
+        }
     }
 }
 
@@ -171,6 +224,10 @@ impl NetHandler for ResourceHandler<StylesheetHandler> {
             Ok(Resource::Css(DocumentStyleSheet(ServoArc::new(sheet)))),
         );
     }
+
+    fn error(self: Box<Self>, resolved_url: String, message: String) {
+        self.fail(resolved_url, message);
+    }
 }
 
 /// Maximum depth of nested `@import` rules. Imports nested deeper than this
@@ -220,6 +277,7 @@ impl ServoStylesheetLoader for StylesheetLoader {
 
         let url = import.url.url().unwrap().clone();
         let import = ServoArc::new(lock.wrap(import));
+        let request_url = url.as_ref().as_str().to_string();
         self.net_provider.fetch(
             self.doc_id,
             stamped_request(url.as_ref().clone(), self.abort_signal.as_ref()),
@@ -228,6 +286,7 @@ impl ServoStylesheetLoader for StylesheetLoader {
                 self.doc_id,
                 None, // node_id
                 self.shell_provider.clone(),
+                request_url,
                 NestedStylesheetHandler {
                     url: url.clone(),
                     loader: StylesheetLoader {
@@ -294,6 +353,10 @@ impl NetHandler for ResourceHandler<NestedStylesheetHandler> {
 
         self.respond(resolved_url, Ok(Resource::None))
     }
+
+    fn error(self: Box<Self>, resolved_url: String, message: String) {
+        self.fail(resolved_url, message);
+    }
 }
 
 struct FontFaceHandler {
@@ -304,6 +367,10 @@ impl NetHandler for ResourceHandler<FontFaceHandler> {
     fn bytes(mut self: Box<Self>, resolved_url: String, bytes: Bytes) {
         let result = self.data.parse(bytes);
         self.respond(resolved_url, result)
+    }
+
+    fn error(self: Box<Self>, resolved_url: String, message: String) {
+        self.fail(resolved_url, message);
     }
 }
 impl FontFaceHandler {
@@ -479,6 +546,7 @@ pub(crate) fn fetch_font_face(
                 });
 
             if let Some((url, format)) = preferred_source {
+                let request_url = url.as_str().to_string();
                 network_provider.fetch(
                     doc_id,
                     stamped_request(url, abort_signal),
@@ -487,6 +555,7 @@ pub(crate) fn fetch_font_face(
                         doc_id,
                         node_id,
                         shell_provider.clone(),
+                        request_url,
                         FontFaceHandler { format, overrides },
                     ),
                 );
@@ -525,6 +594,10 @@ impl NetHandler for ResourceHandler<DocumentSrcHandler> {
         let html = String::from_utf8_lossy(&bytes).into_owned();
         self.respond(resolved_url, Ok(Resource::DocumentSrc(html)));
     }
+
+    fn error(self: Box<Self>, resolved_url: String, message: String) {
+        self.fail(resolved_url, message);
+    }
 }
 
 pub struct ImageHandler {
@@ -540,6 +613,10 @@ impl NetHandler for ResourceHandler<ImageHandler> {
     fn bytes(self: Box<Self>, resolved_url: String, bytes: Bytes) {
         let result = self.data.parse(bytes);
         self.respond(resolved_url, result)
+    }
+
+    fn error(self: Box<Self>, resolved_url: String, message: String) {
+        self.fail(resolved_url, message);
     }
 }
 
