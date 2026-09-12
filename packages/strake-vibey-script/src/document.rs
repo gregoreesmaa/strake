@@ -250,6 +250,20 @@ impl ScriptDocument {
         &mut self.runtime
     }
 
+    /// Install an [`ElectronHost`](crate::ElectronHost): exposes
+    /// `require('electron')` (`{ app, BrowserWindow, ipcMain }`) to scripts in
+    /// this document. Intended for Electron main-process scripts (issue #81).
+    pub fn install_electron(&mut self, host: &crate::ElectronHost) {
+        self.runtime.install_electron_host(&host.shared());
+    }
+
+    /// Runtime initialisation finished: resolve `app.whenReady()`, fire `app`
+    /// `ready` listeners, then drain microtasks. See
+    /// [`ElectronHost`](crate::ElectronHost) for the Slice 1 contract.
+    pub fn mark_electron_ready(&mut self) {
+        self.runtime.mark_electron_ready();
+    }
+
     /// Drain messages sent from JavaScript via the global
     /// `__strake_send_message(message)` native function.
     ///

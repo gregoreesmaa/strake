@@ -32,6 +32,7 @@
 mod clock;
 mod document;
 mod dom;
+pub mod electron;
 mod engine;
 mod event_handler;
 mod fetch;
@@ -40,5 +41,6 @@ mod state;
 mod timers;
 
 pub use document::ScriptDocument;
+pub use electron::ElectronHost;
 pub use engine::ScriptEngine;
 pub use fetch::{DefaultScriptFetcher, FetchError, ScriptFetcher};

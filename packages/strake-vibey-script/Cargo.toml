@@ -17,8 +17,10 @@ tracing = ["dep:tracing", "strake-dom/tracing"]
 [dependencies]
 # Strake dependencies
 strake-dom = { workspace = true, features = ["autofocus"] }
+strake-electron-compat = { workspace = true }
 strake-html = { workspace = true }
 strake-traits = { workspace = true }
+
 
 # Boa (JavaScript engine)
 # `annex-b` enables the Annex B (web-compatibility) ECMAScript features
