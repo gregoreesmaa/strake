@@ -264,6 +264,24 @@ impl ScriptDocument {
         self.runtime.mark_electron_ready();
     }
 
+    /// Install an [`ElectronHost`](crate::ElectronHost) in renderer mode:
+    /// exposes `require('electron').ipcRenderer` (`invoke`/`send`/`on`) to
+    /// this page document. The same host backs the main-process document;
+    /// renderer calls queue until [`ScriptDocument::pump_ipc`] runs them
+    /// through main-process handlers (issue #83).
+    pub fn install_electron_renderer(&mut self, host: &crate::ElectronHost) {
+        self.runtime.install_electron_renderer_host(&host.shared());
+    }
+
+    /// Pump queued renderer IPC from `renderer` through this main-process
+    /// document's `ipcMain` handlers: `invoke` round-trips settle renderer
+    /// promises, `send` broadcasts fan out to main listeners. Returns the
+    /// number of pumped calls. No-op (returns 0) when this document has no
+    /// Electron host installed.
+    pub fn pump_ipc(&mut self, renderer: &mut ScriptDocument) -> usize {
+        self.runtime.pump_ipc_to(&mut renderer.runtime)
+    }
+
     /// Drain messages sent from JavaScript via the global
     /// `__strake_send_message(message)` native function.
     ///

@@ -1,4 +1,5 @@
-//! `require('electron')` for main-process scripts (issue #81, Slice 1).
+//! `require('electron')` for main-process scripts (issue #81, Slice 1) and
+//! renderer pages (issue #83, Slice 3).
 //!
 //! Binds an Electron `main.js` onto [`strake_electron_compat`](https://github.com/gregoreesmaa/strake/issues/21):
 //! an [`ElectronHost`] owns the compat core (`App`, `WindowManager`) plus the
@@ -26,11 +27,23 @@
 //! * Closing the last window fires JS `window-all-closed` listeners and feeds
 //!   the count into `App` (Electron's default quit).
 //!
+//! Renderer scope (Slice 3): [`ScriptDocument::install_electron_renderer`](crate::ScriptDocument::install_electron_renderer)
+//! exposes `require('electron').ipcRenderer` (`invoke`/`send`/`on`) to a page
+//! document sharing the same [`ElectronHost`]. Renderer calls queue JSON
+//! payloads; the embedder runs [`ScriptDocument::pump_ipc`](crate::ScriptDocument::pump_ipc)
+//! to invoke main-process handlers and settle renderer promises — the
+//! headless analogue of Electron's cross-process IPC round-trip. Payloads
+//! follow `JSON.stringify` loosely (functions/`undefined`/symbols vanish,
+//! non-finite numbers become `null`); handler errors reject with Electron's
+//! `No handler registered for '<channel>'` message for unknown channels.
+
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::rc::Rc;
 
-use boa_engine::object::builtins::{JsFunction, JsPromise};
+use boa_engine::object::ObjectInitializer;
+use boa_engine::object::builtins::{JsArray, JsFunction, JsPromise};
+use boa_engine::property::Attribute;
 use boa_engine::{
     Context, JsError, JsNativeError, JsObject, JsResult, JsString, JsValue, NativeFunction,
     js_string,
@@ -118,6 +131,29 @@ struct ElectronHostState {
     ipc_listeners: HashMap<String, Vec<JsObject>>,
     /// Compat window ids in creation order, for embedder observation.
     created_window_ids: Vec<u32>,
+    /// The renderer `{ ipcRenderer }` module object (per-context twin of
+    /// [`ElectronHostState::module`]; contexts cannot share JS objects).
+    renderer_module: Option<JsObject>,
+    /// `ipcRenderer.on` registrations (channel -> renderer JS listeners).
+    renderer_listeners: HashMap<String, Vec<JsObject>>,
+    /// `ipcRenderer.invoke` calls awaiting the main-process pump.
+    invoke_queue: VecDeque<PendingInvoke>,
+    /// `ipcRenderer.send` broadcasts awaiting the main-process pump.
+    send_queue: VecDeque<PendingSend>,
+}
+
+/// One `ipcRenderer.invoke` awaiting [`ScriptDocument::pump_ipc`](crate::ScriptDocument::pump_ipc).
+struct PendingInvoke {
+    channel: String,
+    args: Vec<serde_json::Value>,
+    resolve: JsFunction,
+    reject: JsFunction,
+}
+
+/// One `ipcRenderer.send` awaiting [`ScriptDocument::pump_ipc`](crate::ScriptDocument::pump_ipc).
+struct PendingSend {
+    channel: String,
+    args: Vec<serde_json::Value>,
 }
 
 /// Shareable handle to [`ElectronHostState`], stored in the Boa context's
@@ -148,6 +184,10 @@ impl ElectronHost {
                 ipc_handlers: HashMap::new(),
                 ipc_listeners: HashMap::new(),
                 created_window_ids: Vec::new(),
+                renderer_module: None,
+                renderer_listeners: HashMap::new(),
+                invoke_queue: VecDeque::new(),
+                send_queue: VecDeque::new(),
             }))),
         }
     }
@@ -199,6 +239,13 @@ impl ElectronHost {
             .collect();
         channels.sort();
         channels
+    }
+
+    /// Queued `invoke` + `send` calls awaiting
+    /// [`ScriptDocument::pump_ipc`](crate::ScriptDocument::pump_ipc).
+    pub fn pending_ipc_count(&self) -> usize {
+        let state = self.shared.0.borrow();
+        state.invoke_queue.len() + state.send_queue.len()
     }
 
     /// Channels with at least one `ipcMain.on` listener, sorted.
@@ -675,5 +722,411 @@ impl crate::runtime::ScriptRuntime {
             }
         }
         self.run_jobs("electron ready");
+    }
+}
+
+// === Slice 3: renderer `ipcRenderer` (issue #83) ===
+
+/// JS bootstrap for renderer pages: `ipcRenderer` over the native queueing
+/// primitives. The module intentionally exposes nothing else: renderers get
+/// no `app`, `BrowserWindow`, or `ipcMain` (matching Electron without
+/// `nodeIntegration`).
+const RENDERER_BOOTSTRAP_JS: &str = r#"
+(function () {
+    const ipcRenderer = {
+        invoke(channel, ...args) {
+            return globalThis.__strake_ipc_renderer_invoke(channel, ...args);
+        },
+        send(channel, ...args) {
+            globalThis.__strake_ipc_renderer_send(channel, ...args);
+        },
+        on(channel, listener) {
+            globalThis.__strake_ipc_renderer_on(channel, listener);
+        },
+    };
+    globalThis.__strake_electron_renderer_module = { ipcRenderer };
+})();
+"#;
+
+/// Marshal a JS value into JSON for the trip across the main/renderer context
+/// boundary. Follows `JSON.stringify` loosely (see module docs).
+fn js_to_json(value: &JsValue, context: &mut Context) -> JsResult<serde_json::Value> {
+    if value.is_null() || value.is_undefined() {
+        return Ok(serde_json::Value::Null);
+    }
+    if let Some(flag) = value.as_boolean() {
+        return Ok(serde_json::Value::Bool(flag));
+    }
+    if let Some(number) = value.as_number() {
+        return Ok(serde_json::Number::from_f64(number)
+            .map(serde_json::Value::Number)
+            .unwrap_or(serde_json::Value::Null));
+    }
+    if let Some(text) = value.as_string() {
+        return Ok(serde_json::Value::String(text.to_std_string_escaped()));
+    }
+    if let Some(obj) = value.as_object() {
+        if obj.is_callable() {
+            return Ok(serde_json::Value::Null);
+        }
+        if obj.is_array() {
+            let len = obj
+                .get(JsString::from("length"), context)?
+                .to_number(context)
+                .unwrap_or(0.0);
+            let len = if len.is_finite() && len > 0.0 {
+                (len as usize).min(1 << 20)
+            } else {
+                0
+            };
+            let mut items = Vec::with_capacity(len.min(64));
+            for index in 0..len {
+                items.push(js_to_json(&obj.get(index as u32, context)?, context)?);
+            }
+            return Ok(serde_json::Value::Array(items));
+        }
+        let mut map = serde_json::Map::new();
+        for key in obj.own_property_keys(context)? {
+            let name = match &key {
+                boa_engine::property::PropertyKey::String(text) => text.to_std_string_escaped(),
+                boa_engine::property::PropertyKey::Index(index) => index.get().to_string(),
+                boa_engine::property::PropertyKey::Symbol(_) => continue,
+            };
+            let prop = obj.get(key, context)?;
+            if prop.is_undefined() || prop.is_callable() || prop.as_symbol().is_some() {
+                continue;
+            }
+            map.insert(name, js_to_json(&prop, context)?);
+        }
+        return Ok(serde_json::Value::Object(map));
+    }
+    Ok(serde_json::Value::Null)
+}
+
+/// Unmarshal a JSON payload back into a fresh value in `context`.
+fn json_to_js(value: &serde_json::Value, context: &mut Context) -> JsResult<JsValue> {
+    match value {
+        serde_json::Value::Null => Ok(JsValue::null()),
+        serde_json::Value::Bool(flag) => Ok(JsValue::from(*flag)),
+        serde_json::Value::Number(number) => Ok(number
+            .as_f64()
+            .map(JsValue::from)
+            .unwrap_or(JsValue::null())),
+        serde_json::Value::String(text) => Ok(JsValue::from(JsString::from(text.as_str()))),
+        serde_json::Value::Array(items) => {
+            let mut elements = Vec::with_capacity(items.len());
+            for item in items {
+                elements.push(json_to_js(item, context)?);
+            }
+            Ok(JsValue::from(JsArray::from_iter(elements, context)))
+        }
+        serde_json::Value::Object(map) => {
+            // Build child values first: `ObjectInitializer` holds its
+            // `&mut Context` borrow, which the recursion also needs.
+            let mut props = Vec::with_capacity(map.len());
+            for (name, item) in map {
+                props.push((JsString::from(name.as_str()), json_to_js(item, context)?));
+            }
+            let mut init = ObjectInitializer::new(context);
+            for (name, value) in props {
+                init.property(name, value, Attribute::all());
+            }
+            Ok(JsValue::from(init.build()))
+        }
+    }
+}
+
+/// Collect the trailing call arguments as JSON payloads.
+fn json_args(args: &[JsValue], context: &mut Context) -> JsResult<Vec<serde_json::Value>> {
+    args.iter().map(|arg| js_to_json(arg, context)).collect()
+}
+
+/// `require('electron')` inside a renderer page: only the renderer module
+/// resolves (the main-process module object belongs to another context and
+/// must never leak across).
+fn e_require_renderer(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let specifier = require_string_arg(args, 0, "require")?;
+    if specifier != "electron" {
+        return Err(JsError::from(
+            JsNativeError::error().with_message(format!("Cannot find module '{specifier}'")),
+        ));
+    }
+    let shared = electron_state(context)?;
+    shared
+        .0
+        .borrow()
+        .renderer_module
+        .clone()
+        .map(JsValue::from)
+        .ok_or_else(|| {
+            JsNativeError::error()
+                .with_message("Electron renderer module not initialised")
+                .into()
+        })
+}
+
+/// `ipcRenderer.invoke(channel, ...args)`: queue the call and return the
+/// pending promise, settled by [`ScriptDocument::pump_ipc`](crate::ScriptDocument::pump_ipc).
+fn e_ipc_renderer_invoke(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let channel = require_string_arg(args, 0, "ipcRenderer.invoke")?;
+    let payloads = json_args(args.get(1..).unwrap_or(&[]), context)?;
+    let (promise, resolvers) = JsPromise::new_pending(context);
+    electron_state(context)?
+        .0
+        .borrow_mut()
+        .invoke_queue
+        .push_back(PendingInvoke {
+            channel,
+            args: payloads,
+            resolve: resolvers.resolve,
+            reject: resolvers.reject,
+        });
+    Ok(JsValue::from(promise))
+}
+
+/// `ipcRenderer.send(channel, ...args)`: queue a broadcast for the pump.
+fn e_ipc_renderer_send(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let channel = require_string_arg(args, 0, "ipcRenderer.send")?;
+    let payloads = json_args(args.get(1..).unwrap_or(&[]), context)?;
+    electron_state(context)?
+        .0
+        .borrow_mut()
+        .send_queue
+        .push_back(PendingSend {
+            channel,
+            args: payloads,
+        });
+    Ok(JsValue::undefined())
+}
+
+/// `ipcRenderer.on(channel, listener)`: register a renderer broadcast
+/// listener (invoked by the Slice-3 pump for main-originated sends once a
+/// `webContents.send` binding exists; recorded today for symmetry).
+fn e_ipc_renderer_on(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let channel = require_string_arg(args, 0, "ipcRenderer.on")?;
+    let listener = require_callable_arg(args, 1, "ipcRenderer.on")?;
+    electron_state(context)?
+        .0
+        .borrow_mut()
+        .renderer_listeners
+        .entry(channel)
+        .or_default()
+        .push(listener);
+    Ok(JsValue::undefined())
+}
+
+/// The message a renderer `.catch` should observe for a main-process handler
+/// failure: the thrown `Error`'s `message` when it is a JS error, else the
+/// full display string (matching Electron's `err.message` passthrough).
+fn js_error_message(error: &JsError, context: &mut Context) -> String {
+    error
+        .try_native(context)
+        .map(|native| native.message().to_string())
+        .unwrap_or_else(|_| error.to_string())
+}
+
+/// Reject an invoke promise with an `Error` carrying `message`.
+fn reject_with_message(
+    renderer: &mut crate::runtime::ScriptRuntime,
+    reject: &JsFunction,
+    message: &str,
+) {
+    let error = JsError::from(JsNativeError::error().with_message(message.to_string()))
+        .into_opaque(&mut renderer.context)
+        .unwrap_or_else(|_| JsValue::from(JsString::from(message)));
+    if let Err(error) = reject.call(&JsValue::undefined(), &[error], &mut renderer.context) {
+        record_callback_error(&mut renderer.context, "ipcRenderer.invoke reject", &error);
+    }
+}
+
+impl crate::runtime::ScriptRuntime {
+    /// Install the renderer host: `require('electron').ipcRenderer` backed by
+    /// the shared host queues. The same [`ElectronHost`] may back one
+    /// main-process document and any number of renderer pages.
+    pub(crate) fn install_electron_renderer_host(&mut self, shared: &SharedElectronHost) {
+        register_primitive(&mut self.context, "require", 1, e_require_renderer);
+        register_primitive(
+            &mut self.context,
+            "__strake_ipc_renderer_invoke",
+            1,
+            e_ipc_renderer_invoke,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_ipc_renderer_send",
+            1,
+            e_ipc_renderer_send,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_ipc_renderer_on",
+            2,
+            e_ipc_renderer_on,
+        );
+
+        self.context.insert_data(shared.clone());
+        self.eval(
+            RENDERER_BOOTSTRAP_JS,
+            "<strake-electron-renderer-bootstrap>",
+        );
+
+        let module = self
+            .context
+            .global_object()
+            .get(
+                js_string!("__strake_electron_renderer_module"),
+                &mut self.context,
+            )
+            .ok()
+            .and_then(|value| value.as_object());
+        shared.0.borrow_mut().renderer_module = module;
+    }
+
+    /// Pump queued renderer IPC through main-process handlers (issue #83):
+    /// each `invoke` runs its `ipcMain.handle` callback in this (main)
+    /// context and settles the renderer promise; each `send` fans out to
+    /// `ipcMain.on` listeners. Returns the number of pumped calls. All shared
+    /// borrows are statement-scoped takes, so re-entrant JS (handlers calling
+    /// back into Electron) cannot trip the `RefCell`s.
+    pub(crate) fn pump_ipc_to(&mut self, renderer: &mut crate::runtime::ScriptRuntime) -> usize {
+        let Some(shared) = self.context.get_data::<SharedElectronHost>().cloned() else {
+            return 0;
+        };
+        let (invokes, sends) = {
+            let mut state = shared.0.borrow_mut();
+            let invokes: Vec<PendingInvoke> = state.invoke_queue.drain(..).collect();
+            let sends: Vec<PendingSend> = state.send_queue.drain(..).collect();
+            (invokes, sends)
+        };
+        let mut pumped = 0;
+
+        for item in invokes {
+            pumped += 1;
+            let handler = shared.0.borrow().ipc_handlers.get(&item.channel).cloned();
+            let Some(handler) = handler else {
+                reject_with_message(
+                    renderer,
+                    &item.reject,
+                    &format!("No handler registered for '{}'", item.channel),
+                );
+                renderer.run_jobs("ipcRenderer.invoke rejection");
+                continue;
+            };
+            // Electron invokes handlers as `(event, ...args)`; the Slice 3
+            // event is a minimal stub object (full `sender`/`frameId` shape is
+            // a later slice).
+            let mut call_args = Vec::with_capacity(item.args.len() + 1);
+            call_args.push(JsValue::from(
+                ObjectInitializer::new(&mut self.context).build(),
+            ));
+            for arg in &item.args {
+                match json_to_js(arg, &mut self.context) {
+                    Ok(value) => call_args.push(value),
+                    Err(error) => {
+                        record_callback_error(
+                            &mut self.context,
+                            "ipcRenderer.invoke argument",
+                            &error,
+                        );
+                        call_args.push(JsValue::null());
+                    }
+                }
+            }
+            match handler.call(&JsValue::undefined(), &call_args, &mut self.context) {
+                Ok(returned) => match js_to_json(&returned, &mut self.context) {
+                    Ok(payload) => match json_to_js(&payload, &mut renderer.context) {
+                        Ok(value) => {
+                            if let Err(error) = item.resolve.call(
+                                &JsValue::undefined(),
+                                &[value],
+                                &mut renderer.context,
+                            ) {
+                                record_callback_error(
+                                    &mut renderer.context,
+                                    "ipcRenderer.invoke resolve",
+                                    &error,
+                                );
+                            }
+                        }
+                        Err(error) => {
+                            record_callback_error(
+                                &mut renderer.context,
+                                "ipcRenderer.invoke result",
+                                &error,
+                            );
+                            reject_with_message(
+                                renderer,
+                                &item.reject,
+                                "failed to marshal handler result",
+                            );
+                        }
+                    },
+                    Err(error) => {
+                        record_callback_error(
+                            &mut self.context,
+                            "ipcRenderer.invoke result",
+                            &error,
+                        );
+                        reject_with_message(
+                            renderer,
+                            &item.reject,
+                            "failed to marshal handler result",
+                        );
+                    }
+                },
+                Err(error) => {
+                    let message = js_error_message(&error, &mut self.context);
+                    record_callback_error(&mut self.context, "ipcMain.handle callback", &error);
+                    reject_with_message(renderer, &item.reject, &message);
+                }
+            }
+            renderer.run_jobs("ipcRenderer.invoke continuations");
+        }
+
+        for item in sends {
+            pumped += 1;
+            let listeners = shared
+                .0
+                .borrow()
+                .ipc_listeners
+                .get(&item.channel)
+                .cloned()
+                .unwrap_or_default();
+            if listeners.is_empty() {
+                continue;
+            }
+            let mut call_args = Vec::with_capacity(item.args.len() + 1);
+            call_args.push(JsValue::from(
+                ObjectInitializer::new(&mut self.context).build(),
+            ));
+            for arg in &item.args {
+                match json_to_js(arg, &mut self.context) {
+                    Ok(value) => call_args.push(value),
+                    Err(error) => {
+                        record_callback_error(
+                            &mut self.context,
+                            "ipcRenderer.send argument",
+                            &error,
+                        );
+                        call_args.push(JsValue::null());
+                    }
+                }
+            }
+            for listener in listeners {
+                if let Err(error) =
+                    listener.call(&JsValue::undefined(), &call_args, &mut self.context)
+                {
+                    record_callback_error(&mut self.context, "ipcMain.on listener", &error);
+                }
+            }
+        }
+        if pumped > 0 {
+            self.run_jobs("ipc microtasks");
+        }
+        pumped
     }
 }

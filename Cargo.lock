@@ -7614,6 +7614,7 @@ dependencies = [
  "keyboard-types 0.7.0",
  "log",
  "markup5ever",
+ "serde_json",
  "strake-dom",
  "strake-electron-compat",
  "strake-html",

@@ -21,6 +21,9 @@ strake-electron-compat = { workspace = true }
 strake-html = { workspace = true }
 strake-traits = { workspace = true }
 
+# Same pinned JSON as strake-electron-compat: IPC payloads cross the
+# main/renderer context boundary as JSON strings.
+serde_json = "1.0.140"
 
 # Boa (JavaScript engine)
 # `annex-b` enables the Annex B (web-compatibility) ECMAScript features
