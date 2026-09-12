@@ -12,7 +12,7 @@ You may not:
 - Alter the official Boson logo or use confusingly similar marks.
 
 ## 3. Third-Party Trademarks
-- **Blitz** and **Dioxus** are trademarks of DioxusLabs and/or their respective owners. Boson is an independent downstream derivative and is not affiliated with, endorsed by, or sponsored by DioxusLabs.
+- **Boson** and **Dioxus** are trademarks of DioxusLabs and/or their respective owners. Boson is an independent downstream derivative and is not affiliated with, endorsed by, or sponsored by DioxusLabs.
 - **Electron** is a trademark of the OpenJS Foundation.
 - **Chromium** and **Chrome** are trademarks of Google LLC.
 - **macOS**, **iOS**, **Metal**, and **Apple** are trademarks of Apple Inc.

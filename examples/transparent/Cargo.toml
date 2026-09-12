@@ -7,10 +7,10 @@ publish = false
 
 [features]
 default = ["hybrid"]
-system-fonts = ["blitz-dom/system-fonts"]
+system-fonts = ["boson-dom/system-fonts"]
 vello = ["dioxus-native/vello"]
 cpu = ["cpu-pixels"]
-svg = ["blitz-paint/svg"]
+svg = ["boson-paint/svg"]
 hybrid = ["dioxus-native/vello-hybrid"]
 cpu-pixels = ["dioxus-native/vello-cpu-pixels"]
 cpu-softbuffer = ["dioxus-native/vello-cpu-softbuffer"]
@@ -20,9 +20,9 @@ skia = ["dioxus-native/skia"]
 dioxus-native = { workspace = true, default-features = false, features = ["prelude", "system-fonts"] }
 
 # Control whether system font support is enabled
-blitz-dom = { workspace = true, default-features = false }
-blitz-paint = { workspace = true, default-features = false }
-blitz-traits = { workspace = true }
+boson-dom = { workspace = true, default-features = false }
+boson-paint = { workspace = true, default-features = false }
+boson-traits = { workspace = true }
 
 # Disable unicode URL support
 # See https://github.com/hsivonen/idna_adapter

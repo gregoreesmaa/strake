@@ -28,7 +28,7 @@ fn main() {
     let use_html_renderer = env::args().any(|arg| arg == "--html");
 
     if use_html_renderer {
-        // Render WGPU demo using Blitz HTML document
+        // Render WGPU demo using Boson HTML document
         launch_html();
     } else {
         // Render WGPU demo using dioxus-native

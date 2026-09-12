@@ -9,9 +9,9 @@ crate-type = ["cdylib"]
 
 [dependencies]
 anyrender_vello_hybrid = { workspace = true, features = ["webgl"] }
-blitz-dom = { workspace = true, features = ["woff"] }
-blitz-html = { workspace = true }
-blitz-shell = { workspace = true, default-features = false, features = ["tracing"]}
+boson-dom = { workspace = true, features = ["woff"] }
+boson-html = { workspace = true }
+boson-shell = { workspace = true, default-features = false, features = ["tracing"]}
 
 winit = { workspace = true }
 

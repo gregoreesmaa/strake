@@ -2,7 +2,7 @@
 #![cfg_attr(all(not(test), target_os = "windows"), windows_subsystem = "windows")]
 #![allow(clippy::collapsible_if)]
 
-//! A web browser with UI powered by Dioxus Native and content rendering powered by Blitz
+//! A web browser with UI powered by Dioxus Native and content rendering powered by Boson
 
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
@@ -10,13 +10,13 @@ static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::sync::Arc;
 
-use blitz_traits::net::Url;
+use boson_traits::net::Url;
 use dioxus_native::{NodeHandle, WindowAttributes, prelude::*, use_back_button};
 
 #[cfg(target_os = "macos")]
 use winit::platform::macos::WindowAttributesMacOS;
 
-pub(crate) type StdNetProvider = blitz_net::Provider;
+pub(crate) type StdNetProvider = boson_net::Provider;
 
 mod about_pages;
 mod browser_history;

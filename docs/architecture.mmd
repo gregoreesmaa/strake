@@ -1,8 +1,8 @@
 
 flowchart TB
 
-    blitz-paint[**blitz-paint**] --> anyrender
-    blitz-paint --> blitz-dom
+    boson-paint[**boson-paint**] --> anyrender
+    boson-paint --> boson-dom
 
     anyrender[**AnyRender**
     vello_cpu
@@ -19,9 +19,9 @@ flowchart TB
     %% vello --> wgpu
     %% vello_hybrid --> wgpu
 
-    blitz-html --> blitz-dom
+    boson-html --> boson-dom
 
-    blitz-dom["`**Blitz DOM**
+    boson-dom["`**Boson DOM**
     stylo (css)
     taffy (box layout)
     parley (text layout)
@@ -29,40 +29,40 @@ flowchart TB
     Accessibility
     `"]
 
-    %% blitz-net --> blitz-traits
-    %% blitz-html --> blitz-traits
-    %% blitz-shell --> blitz-traits
-    blitz-dom --> blitz-traits
-    blitz-dom --> stylo
-    blitz-dom --> taffy
-    blitz-dom --> parley
-    blitz-dom --> accesskit
-    %% blitz-dom -.-> anyrender
+    %% boson-net --> boson-traits
+    %% boson-html --> boson-traits
+    %% boson-shell --> boson-traits
+    boson-dom --> boson-traits
+    boson-dom --> stylo
+    boson-dom --> taffy
+    boson-dom --> parley
+    boson-dom --> accesskit
+    %% boson-dom -.-> anyrender
 
     dioxus-native["`**Dioxus Native**
     `"]
 
-    dioxus-native --> blitz-paint[**blitz-paint**
+    dioxus-native --> boson-paint[**boson-paint**
     AnyRender]
-    dioxus-native --> blitz-shell[**blitz-shell**
+    dioxus-native --> boson-shell[**boson-shell**
     Winit]
     dioxus-native --> dioxus-native-dom[**dioxus-native-dom**]
-    dioxus-native --> blitz-net[**blitz-net**
+    dioxus-native --> boson-net[**boson-net**
     Reqwest/Hyper]
-    dioxus-native --> blitz-html[**blitz-html**
+    dioxus-native --> boson-html[**boson-html**
     html5ever]
 
-        dioxus-native-dom --> blitz-dom
+        dioxus-native-dom --> boson-dom
 
-    blitz-shell --> blitz-dom
+    boson-shell --> boson-dom
 
     %% Styles
 
-    %% style blitz-paint fill:#0097B2,color:#FFFFFF
-    %% style blitz-html color:#FFFFFF,fill:#0097B2
-    %% style blitz-shell color:#FFFFFF,fill:#0097B2
-    %% style blitz-net color:#FFFFFF,fill:#0097B2
-    %% style blitz-dom fill:#0097B2,color:#FFFFFF
+    %% style boson-paint fill:#0097B2,color:#FFFFFF
+    %% style boson-html color:#FFFFFF,fill:#0097B2
+    %% style boson-shell color:#FFFFFF,fill:#0097B2
+    %% style boson-net color:#FFFFFF,fill:#0097B2
+    %% style boson-dom fill:#0097B2,color:#FFFFFF
     %% style anyrender fill:#5CE1E6
     %% style taffy color:#000000,fill:#5CE1E6
     %% style parley fill:#5CE1E6
@@ -70,5 +70,5 @@ flowchart TB
     %% style dioxus-native-dom fill:#00BF63,color:#FFFFFF
     %% style stylo color:#FFFFFF,fill:#FF5757
     %% style wgpu fill:#FF5757,color:#FFFFFF
-    %% style blitz-traits color:#FFFFFF,fill:#0097B2
+    %% style boson-traits color:#FFFFFF,fill:#0097B2
     %% style accesskit color:#FFFFFF,fill:#545454

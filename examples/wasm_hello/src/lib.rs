@@ -1,4 +1,4 @@
-//! Minimal WASM proof: drives `BlitzApplication` on `wasm32-unknown-unknown` and
+//! Minimal WASM proof: drives `BosonApplication` on `wasm32-unknown-unknown` and
 //! renders a static HTML payload to a canvas.
 //!
 //! Build with: `trunk serve` from this directory.
@@ -8,9 +8,9 @@
 use std::sync::Arc;
 
 use anyrender_vello_hybrid::VelloHybridWindowRenderer;
-use blitz_dom::{DocumentConfig, FontContext, decode_font_bytes};
-use blitz_html::HtmlDocument;
-use blitz_shell::{BlitzApplication, BlitzShellProxy, WindowConfig};
+use boson_dom::{DocumentConfig, FontContext, decode_font_bytes};
+use boson_html::HtmlDocument;
+use boson_shell::{BosonApplication, BosonShellProxy, WindowConfig};
 use parley::fontique::{Blob, Collection, CollectionOptions, GenericFamily, SourceCache};
 use tracing::info;
 use wasm_bindgen::prelude::*;
@@ -24,19 +24,19 @@ const DEJAVU_SANS: &[u8] = include_bytes!("../assets/DejaVuSans.woff2");
 
 const HTML: &str = r#"<!doctype html>
 <html>
-<head><title>blitz-shell on WASM</title></head>
+<head><title>boson-shell on WASM</title></head>
 <body>
   <main>
-    <h1>blitz-shell, running in your browser</h1>
+    <h1>boson-shell, running in your browser</h1>
     <p class="lede">
-      Laid out by <strong>blitz-dom</strong>, painted by <strong>blitz-paint</strong>,
+      Laid out by <strong>boson-dom</strong>, painted by <strong>boson-paint</strong>,
       rendered through <strong>anyrender</strong>'s vello hybrid backend &mdash;
-      driven by the same <code>BlitzApplication</code> that runs natively.
+      driven by the same <code>BosonApplication</code> that runs natively.
     </p>
     <ul>
       <li>winit creates the canvas and dispatches events</li>
       <li><code>WindowRenderer::resume</code> spawns wgpu init onto the JS microtask queue</li>
-      <li>A <code>BlitzShellEvent::ResumeReady</code> finalizes the first frame</li>
+      <li>A <code>BosonShellEvent::ResumeReady</code> finalizes the first frame</li>
     </ul>
   </main>
 </body>
@@ -107,7 +107,7 @@ pub fn start() -> Result<(), JsValue> {
     info!("Starting app...");
     let window = web_sys::window().expect("global window does not exists");
     let document = window.document().expect("expecting a document on window");
-    let canvas = document.get_element_by_id("blitz-target").unwrap();
+    let canvas = document.get_element_by_id("boson-target").unwrap();
     let canvas = canvas.dyn_into::<web_sys::HtmlCanvasElement>().unwrap();
 
     // Make sure the canvas can be given focus.
@@ -118,7 +118,7 @@ pub fn start() -> Result<(), JsValue> {
     canvas.style().set_property("outline", "none")?;
 
     let event_loop = EventLoop::new().map_err(|e| JsValue::from_str(&format!("{e}")))?;
-    let (proxy, rx) = BlitzShellProxy::new(event_loop.create_proxy());
+    let (proxy, rx) = BosonShellProxy::new(event_loop.create_proxy());
 
     let renderer = VelloHybridWindowRenderer::new();
     let doc = HtmlDocument::from_html(
@@ -137,7 +137,7 @@ pub fn start() -> Result<(), JsValue> {
     ));
     let window_config = WindowConfig::with_attributes(Box::new(doc), renderer, attrs);
 
-    let mut app = BlitzApplication::<VelloHybridWindowRenderer>::new(proxy, rx);
+    let mut app = BosonApplication::<VelloHybridWindowRenderer>::new(proxy, rx);
     app.add_window(window_config);
 
     event_loop

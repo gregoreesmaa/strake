@@ -1,4 +1,4 @@
-use blitz_traits::net::{Bytes, NetHandler, NetProvider, Request};
+use boson_traits::net::{Bytes, NetHandler, NetProvider, Request};
 use data_url::DataUrl;
 use log::{debug, warn};
 use std::{

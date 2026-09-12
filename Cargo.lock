@@ -897,246 +897,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "blitz"
-version = "0.3.0-beta.2"
-dependencies = [
- "anyrender_vello",
- "blitz-dom",
- "blitz-html",
- "blitz-net",
- "blitz-paint",
- "blitz-shell",
- "blitz-traits",
- "tokio",
- "tracing",
- "url",
-]
-
-[[package]]
-name = "blitz-dom"
-version = "0.3.0-beta.2"
-dependencies = [
- "accesskit",
- "anyrender",
- "app_units",
- "atomic_refcell",
- "bitflags 2.13.1",
- "blitz-traits",
- "color",
- "cssparser",
- "cursor-icon",
- "debug_timer 0.1.3",
- "euclid",
- "html-escape",
- "image",
- "keyboard-types 0.7.0",
- "kurbo",
- "linebender_resource_handle",
- "markup5ever",
- "objc2 0.6.4",
- "parley",
- "percent-encoding",
- "rayon",
- "selectors",
- "skrifa",
- "slotmap",
- "smallvec",
- "stylo",
- "stylo_dom",
- "stylo_static_prefs",
- "stylo_taffy",
- "stylo_traits",
- "svgtypes",
- "taffy",
- "thin-vec",
- "thread_local",
- "tracing",
- "url",
- "usvg",
- "web-time",
- "wuff",
-]
-
-[[package]]
-name = "blitz-examples"
-version = "0.0.1"
-dependencies = [
- "anyrender",
- "anyrender_vello",
- "anyrender_vello_cpu",
- "anyrender_vello_hybrid",
- "blitz",
- "blitz-dom",
- "blitz-html",
- "blitz-net",
- "blitz-paint",
- "blitz-shell",
- "blitz-traits",
- "blitz-vibey-script",
- "color",
- "dioxus",
- "dioxus-native",
- "env_logger",
- "euclid",
- "image",
- "peniko",
- "png 0.18.1",
- "reqwest",
- "rustc-hash 2.1.3",
- "tokio",
- "tracing-subscriber",
- "url",
- "vello",
- "vello_common",
- "vello_cpu",
- "vello_hybrid",
- "wgpu",
- "wgpu_context",
-]
-
-[[package]]
-name = "blitz-html"
-version = "0.3.0-beta.2"
-dependencies = [
- "blitz-dom",
- "blitz-traits",
- "html5ever",
- "tracing",
- "xml5ever",
-]
-
-[[package]]
-name = "blitz-net"
-version = "0.3.0-beta.2"
-dependencies = [
- "blitz-traits",
- "data-url",
- "directories",
- "http-cache",
- "http-cache-reqwest",
- "reqwest",
- "reqwest-middleware",
- "tokio",
- "tracing",
- "wasm-bindgen-futures",
-]
-
-[[package]]
-name = "blitz-paint"
-version = "0.3.0-beta.2"
-dependencies = [
- "anyrender",
- "anyrender_svg",
- "blitz-dom",
- "blitz-traits",
- "color",
- "euclid",
- "kurbo",
- "parley",
- "peniko",
- "skrifa",
- "smallvec",
- "stylo",
- "taffy",
- "tracing",
- "usvg",
-]
-
-[[package]]
-name = "blitz-shell"
-version = "0.3.0-beta.2"
-dependencies = [
- "accesskit",
- "accesskit_xplat",
- "android-activity",
- "anyrender",
- "arboard",
- "atomic_refcell",
- "blitz-dom",
- "blitz-paint",
- "blitz-traits",
- "data-url",
- "futures-util",
- "keyboard-types 0.7.0",
- "rfd",
- "tracing",
- "wasm-bindgen",
- "web-sys",
- "web-time",
- "winit",
-]
-
-[[package]]
-name = "blitz-test-harness"
-version = "0.3.0-beta.2"
-dependencies = [
- "blitz-dom",
- "blitz-html",
- "blitz-traits",
- "dioxus-core",
- "dioxus-native-dom",
- "keyboard-types 0.7.0",
- "smol_str",
-]
-
-[[package]]
-name = "blitz-tests"
-version = "0.3.0-beta.2"
-dependencies = [
- "accesskit",
- "anyrender",
- "anyrender_vello_cpu",
- "blitz-dom",
- "blitz-html",
- "blitz-paint",
- "blitz-test-harness",
- "blitz-traits",
- "dioxus",
- "dioxus-core",
- "dioxus-native-dom",
- "keyboard-types 0.7.0",
- "markup5ever",
- "stylo",
- "taffy",
- "test-that",
- "usvg",
-]
-
-[[package]]
-name = "blitz-traits"
-version = "0.3.0-beta.2"
-dependencies = [
- "atomic_refcell",
- "bitflags 2.13.1",
- "bytes",
- "cursor-icon",
- "http",
- "keyboard-types 0.7.0",
- "serde",
- "smol_str",
- "url",
-]
-
-[[package]]
-name = "blitz-vibey-script"
-version = "0.3.0-beta.2"
-dependencies = [
- "blitz-dom",
- "blitz-html",
- "blitz-traits",
- "boa_engine",
- "boa_gc",
- "boa_runtime",
- "data-url",
- "keyboard-types 0.7.0",
- "log",
- "markup5ever",
- "tracing",
- "url",
- "web-time",
-]
-
-[[package]]
 name = "block"
 version = "0.1.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1374,6 +1134,246 @@ dependencies = [
 ]
 
 [[package]]
+name = "boson"
+version = "0.3.0-beta.2"
+dependencies = [
+ "anyrender_vello",
+ "boson-dom",
+ "boson-html",
+ "boson-net",
+ "boson-paint",
+ "boson-shell",
+ "boson-traits",
+ "tokio",
+ "tracing",
+ "url",
+]
+
+[[package]]
+name = "boson-dom"
+version = "0.3.0-beta.2"
+dependencies = [
+ "accesskit",
+ "anyrender",
+ "app_units",
+ "atomic_refcell",
+ "bitflags 2.13.1",
+ "boson-traits",
+ "color",
+ "cssparser",
+ "cursor-icon",
+ "debug_timer 0.1.3",
+ "euclid",
+ "html-escape",
+ "image",
+ "keyboard-types 0.7.0",
+ "kurbo",
+ "linebender_resource_handle",
+ "markup5ever",
+ "objc2 0.6.4",
+ "parley",
+ "percent-encoding",
+ "rayon",
+ "selectors",
+ "skrifa",
+ "slotmap",
+ "smallvec",
+ "stylo",
+ "stylo_dom",
+ "stylo_static_prefs",
+ "stylo_taffy",
+ "stylo_traits",
+ "svgtypes",
+ "taffy",
+ "thin-vec",
+ "thread_local",
+ "tracing",
+ "url",
+ "usvg",
+ "web-time",
+ "wuff",
+]
+
+[[package]]
+name = "boson-examples"
+version = "0.0.1"
+dependencies = [
+ "anyrender",
+ "anyrender_vello",
+ "anyrender_vello_cpu",
+ "anyrender_vello_hybrid",
+ "boson",
+ "boson-dom",
+ "boson-html",
+ "boson-net",
+ "boson-paint",
+ "boson-shell",
+ "boson-traits",
+ "boson-vibey-script",
+ "color",
+ "dioxus",
+ "dioxus-native",
+ "env_logger",
+ "euclid",
+ "image",
+ "peniko",
+ "png 0.18.1",
+ "reqwest",
+ "rustc-hash 2.1.3",
+ "tokio",
+ "tracing-subscriber",
+ "url",
+ "vello",
+ "vello_common",
+ "vello_cpu",
+ "vello_hybrid",
+ "wgpu",
+ "wgpu_context",
+]
+
+[[package]]
+name = "boson-html"
+version = "0.3.0-beta.2"
+dependencies = [
+ "boson-dom",
+ "boson-traits",
+ "html5ever",
+ "tracing",
+ "xml5ever",
+]
+
+[[package]]
+name = "boson-net"
+version = "0.3.0-beta.2"
+dependencies = [
+ "boson-traits",
+ "data-url",
+ "directories",
+ "http-cache",
+ "http-cache-reqwest",
+ "reqwest",
+ "reqwest-middleware",
+ "tokio",
+ "tracing",
+ "wasm-bindgen-futures",
+]
+
+[[package]]
+name = "boson-paint"
+version = "0.3.0-beta.2"
+dependencies = [
+ "anyrender",
+ "anyrender_svg",
+ "boson-dom",
+ "boson-traits",
+ "color",
+ "euclid",
+ "kurbo",
+ "parley",
+ "peniko",
+ "skrifa",
+ "smallvec",
+ "stylo",
+ "taffy",
+ "tracing",
+ "usvg",
+]
+
+[[package]]
+name = "boson-shell"
+version = "0.3.0-beta.2"
+dependencies = [
+ "accesskit",
+ "accesskit_xplat",
+ "android-activity",
+ "anyrender",
+ "arboard",
+ "atomic_refcell",
+ "boson-dom",
+ "boson-paint",
+ "boson-traits",
+ "data-url",
+ "futures-util",
+ "keyboard-types 0.7.0",
+ "rfd",
+ "tracing",
+ "wasm-bindgen",
+ "web-sys",
+ "web-time",
+ "winit",
+]
+
+[[package]]
+name = "boson-test-harness"
+version = "0.3.0-beta.2"
+dependencies = [
+ "boson-dom",
+ "boson-html",
+ "boson-traits",
+ "dioxus-core",
+ "dioxus-native-dom",
+ "keyboard-types 0.7.0",
+ "smol_str",
+]
+
+[[package]]
+name = "boson-tests"
+version = "0.3.0-beta.2"
+dependencies = [
+ "accesskit",
+ "anyrender",
+ "anyrender_vello_cpu",
+ "boson-dom",
+ "boson-html",
+ "boson-paint",
+ "boson-test-harness",
+ "boson-traits",
+ "dioxus",
+ "dioxus-core",
+ "dioxus-native-dom",
+ "keyboard-types 0.7.0",
+ "markup5ever",
+ "stylo",
+ "taffy",
+ "test-that",
+ "usvg",
+]
+
+[[package]]
+name = "boson-traits"
+version = "0.3.0-beta.2"
+dependencies = [
+ "atomic_refcell",
+ "bitflags 2.13.1",
+ "bytes",
+ "cursor-icon",
+ "http",
+ "keyboard-types 0.7.0",
+ "serde",
+ "smol_str",
+ "url",
+]
+
+[[package]]
+name = "boson-vibey-script"
+version = "0.3.0-beta.2"
+dependencies = [
+ "boa_engine",
+ "boa_gc",
+ "boa_runtime",
+ "boson-dom",
+ "boson-html",
+ "boson-traits",
+ "data-url",
+ "keyboard-types 0.7.0",
+ "log",
+ "markup5ever",
+ "tracing",
+ "url",
+ "web-time",
+]
+
+[[package]]
 name = "brotli"
 version = "8.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1402,12 +1402,12 @@ dependencies = [
  "anyrender",
  "anyrender_serialize",
  "anyrender_vello_cpu",
- "blitz-dom",
- "blitz-html",
- "blitz-net",
- "blitz-paint",
- "blitz-traits",
- "blitz-vibey-script",
+ "boson-dom",
+ "boson-html",
+ "boson-net",
+ "boson-paint",
+ "boson-traits",
+ "boson-vibey-script",
  "browser-persistence",
  "dioxus-native",
  "image",
@@ -2026,8 +2026,8 @@ name = "counter"
 version = "0.1.0"
 dependencies = [
  "android-activity",
- "blitz-dom",
- "blitz-paint",
+ "boson-dom",
+ "boson-paint",
  "dioxus-native",
  "idna_adapter",
 ]
@@ -2635,12 +2635,12 @@ dependencies = [
  "anyrender_vello",
  "anyrender_vello_cpu",
  "anyrender_vello_hybrid",
- "blitz-dom",
- "blitz-html",
- "blitz-net",
- "blitz-paint",
- "blitz-shell",
- "blitz-traits",
+ "boson-dom",
+ "boson-html",
+ "boson-net",
+ "boson-paint",
+ "boson-shell",
+ "boson-traits",
  "cfg-if",
  "dioxus-asset-resolver",
  "dioxus-cli-config",
@@ -2671,8 +2671,8 @@ dependencies = [
 name = "dioxus-native-dom"
 version = "0.7.0"
 dependencies = [
- "blitz-dom",
- "blitz-traits",
+ "boson-dom",
+ "boson-traits",
  "dioxus",
  "dioxus-core",
  "dioxus-html",
@@ -6619,12 +6619,12 @@ dependencies = [
  "anyrender_vello",
  "anyrender_vello_cpu",
  "anyrender_vello_hybrid",
- "blitz-dom",
- "blitz-html",
- "blitz-net",
- "blitz-paint",
- "blitz-shell",
- "blitz-traits",
+ "boson-dom",
+ "boson-html",
+ "boson-net",
+ "boson-paint",
+ "boson-shell",
+ "boson-traits",
  "comrak",
  "image",
  "notify",
@@ -8528,9 +8528,9 @@ name = "transparent"
 version = "0.1.0"
 dependencies = [
  "android-activity",
- "blitz-dom",
- "blitz-paint",
- "blitz-traits",
+ "boson-dom",
+ "boson-paint",
+ "boson-traits",
  "dioxus-native",
  "idna_adapter",
 ]
@@ -9054,9 +9054,9 @@ name = "wasm_hello"
 version = "0.0.0"
 dependencies = [
  "anyrender_vello_hybrid",
- "blitz-dom",
- "blitz-html",
- "blitz-shell",
+ "boson-dom",
+ "boson-html",
+ "boson-shell",
  "console_error_panic_hook",
  "parley",
  "tracing",
@@ -9479,11 +9479,11 @@ dependencies = [
  "anyrender",
  "anyrender_vello",
  "anyrender_vello_hybrid",
- "blitz-dom",
- "blitz-html",
- "blitz-paint",
- "blitz-shell",
- "blitz-traits",
+ "boson-dom",
+ "boson-html",
+ "boson-paint",
+ "boson-shell",
+ "boson-traits",
  "bytemuck",
  "color",
  "dioxus-native",
@@ -10147,11 +10147,11 @@ dependencies = [
  "anyrender_vello_cpu",
  "atomic_float",
  "bitflags 2.13.1",
- "blitz-dom",
- "blitz-html",
- "blitz-paint",
- "blitz-traits",
- "blitz-vibey-script",
+ "boson-dom",
+ "boson-html",
+ "boson-paint",
+ "boson-traits",
+ "boson-vibey-script",
  "data-url",
  "dify",
  "env_logger",

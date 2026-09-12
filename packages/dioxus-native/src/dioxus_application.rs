@@ -1,4 +1,4 @@
-use blitz_shell::{BlitzApplication, BlitzShellProxy, View};
+use boson_shell::{BosonApplication, BosonShellProxy, View};
 use dioxus_core::{ScopeId, provide_context};
 use dioxus_history::{History, MemoryHistory};
 use std::rc::Rc;
@@ -13,7 +13,7 @@ use winit::platform::macos::ApplicationHandlerExtMacOS;
 
 use crate::DioxusNativeWindowRenderer;
 use crate::event_handlers::WindowEventHandlers;
-use crate::{BlitzShellEvent, DioxusDocument, WindowConfig, contexts::DioxusNativeDocument};
+use crate::{BosonShellEvent, DioxusDocument, WindowConfig, contexts::DioxusNativeDocument};
 
 /// Dioxus-native specific event type
 pub enum DioxusNativeEvent {
@@ -34,19 +34,19 @@ pub enum DioxusNativeEvent {
 
 pub struct DioxusNativeApplication {
     pending_window: Option<WindowConfig<DioxusNativeWindowRenderer>>,
-    inner: BlitzApplication<DioxusNativeWindowRenderer>,
+    inner: BosonApplication<DioxusNativeWindowRenderer>,
     event_handlers: Rc<WindowEventHandlers>,
 }
 
 impl DioxusNativeApplication {
     pub fn new(
-        proxy: BlitzShellProxy,
-        event_queue: std::sync::mpsc::Receiver<BlitzShellEvent>,
+        proxy: BosonShellProxy,
+        event_queue: std::sync::mpsc::Receiver<BosonShellEvent>,
         config: WindowConfig<DioxusNativeWindowRenderer>,
     ) -> Self {
         Self {
             pending_window: Some(config),
-            inner: BlitzApplication::new(proxy, event_queue),
+            inner: BosonApplication::new(proxy, event_queue),
             event_handlers: Rc::new(WindowEventHandlers::default()),
         }
     }
@@ -202,12 +202,12 @@ impl ApplicationHandler for DioxusNativeApplication {
     fn proxy_wake_up(&mut self, event_loop: &dyn ActiveEventLoop) {
         while let Ok(event) = self.inner.event_queue.try_recv() {
             match event {
-                BlitzShellEvent::Embedder(event) => {
+                BosonShellEvent::Embedder(event) => {
                     if let Some(event) = event.downcast_ref::<DioxusNativeEvent>() {
                         self.handle_dioxus_native_event(event_loop, event);
                     }
                 }
-                event => self.inner.handle_blitz_shell_event(event_loop, event),
+                event => self.inner.handle_boson_shell_event(event_loop, event),
             }
         }
     }

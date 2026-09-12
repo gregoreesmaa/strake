@@ -1,7 +1,7 @@
-# Contributing to Blitz
+# Contributing to Boson
 
 Welcome to the Dioxus community!
-Blitz is a "native" HTML/CSS renderer built to support the "Dioxus Native" project. It is effectively a lightweight webview except that the JavaScript engine is replaced with a native Rust API which allows Rust reactivity / state management libraries like Dioxus to interface with it directly.
+Boson is a "native" HTML/CSS renderer built to support the "Dioxus Native" project. It is effectively a lightweight webview except that the JavaScript engine is replaced with a native Rust API which allows Rust reactivity / state management libraries like Dioxus to interface with it directly.
 
 Talk to us in: the #native channel in the [Dioxus Discord](https://discord.gg/BWTrn6d3)
 
@@ -21,11 +21,11 @@ Usually requires installing Python. We recommend installing using https://docs.a
 
 ### Linux
 
-To **build** Blitz you need a C toolchain plus a few dependencies:
+To **build** Boson you need a C toolchain plus a few dependencies:
 
  * `pkg-config` and a C compiler (`build-essential`)
  * `python3` — used to generate code while building `stylo`
- * `libssl-dev` (OpenSSL) — required by `reqwest` via `blitz-net`
+ * `libssl-dev` (OpenSSL) — required by `reqwest` via `boson-net`
  * `libfontconfig-dev` (fontconfig) — required by `parley`/`fontique` for system-font enumeration
 
 For example on Ubuntu:
@@ -35,7 +35,7 @@ sudo apt-get update
 sudo apt-get install build-essential pkg-config python3 libssl-dev libfontconfig-dev
 ```
 
-To **run** Blitz as windowed application you additionally need X11 and/or Wayland. These are usually already
+To **run** Boson as windowed application you additionally need X11 and/or Wayland. These are usually already
 present on a desktop Linux install, but may need to be installed in server setups or if using a system like
 Nix that requires explicit dependencies. needed there.
 
@@ -56,7 +56,7 @@ a dialog to actually open:
 
 
 ### VSCode
-You can add the following JSON to your `.vscode/settings.json` to automically build Blitz on all supported targets.
+You can add the following JSON to your `.vscode/settings.json` to automically build Boson on all supported targets.
 ```json
 {
     "rust-analyzer.check.features": "all",

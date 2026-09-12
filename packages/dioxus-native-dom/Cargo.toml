@@ -3,7 +3,7 @@ name = "dioxus-native-dom"
 version = "0.7.0"
 authors = ["Jonathan Kelley", "Nico Burns"]
 edition = "2024"
-description = "Core headless native renderer for Dioxus based on blitz"
+description = "Core headless native renderer for Dioxus based on boson"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/DioxusLabs/dioxus/"
 homepage = "https://dioxuslabs.com/learn/0.7/getting_started"
@@ -13,19 +13,19 @@ keywords = ["dom", "ui", "gui", "react"]
 default = ["accessibility", "svg", "system-fonts"]
 
 # DOM features
-svg = ["blitz-dom/svg"]
-floats = ["blitz-dom/floats"]
-accessibility = ["blitz-dom/accessibility"]
-tracing = ["dep:tracing", "blitz-dom/tracing"]
-system-fonts = ["blitz-dom/system-fonts"]
+svg = ["boson-dom/svg"]
+floats = ["boson-dom/floats"]
+accessibility = ["boson-dom/accessibility"]
+tracing = ["dep:tracing", "boson-dom/tracing"]
+system-fonts = ["boson-dom/system-fonts"]
 # complex-scripts: enable dictionary-based line-breaking
-complex-scripts = ["blitz-dom/complex-scripts"]
-autofocus = ["blitz-dom/autofocus"]
+complex-scripts = ["boson-dom/complex-scripts"]
+autofocus = ["boson-dom/autofocus"]
 
 [dependencies]
-# Blitz dependencies
-blitz-dom = { workspace = true, default-features = false, features = ["custom-widget"] }
-blitz-traits = { workspace = true }
+# Boson dependencies
+boson-dom = { workspace = true, default-features = false, features = ["custom-widget"] }
+boson-traits = { workspace = true }
 
 # DioxusLabs dependencies
 dioxus-core = { workspace = true }

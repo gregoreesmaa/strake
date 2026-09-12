@@ -2,24 +2,24 @@
 members = [
     "packages/accesskit_xplat",
     "packages/debug_timer",
-    "packages/blitz-traits",
-    "packages/blitz-dom",
-    "packages/blitz-html",
-    "packages/blitz-net",
-    "packages/blitz-paint",
-    "packages/blitz-vibey-script",
-    "packages/blitz-shell",
-    "packages/blitz",
+    "packages/boson-traits",
+    "packages/boson-dom",
+    "packages/boson-html",
+    "packages/boson-net",
+    "packages/boson-paint",
+    "packages/boson-vibey-script",
+    "packages/boson-shell",
+    "packages/boson",
     "packages/stylo_taffy",
     "packages/dioxus-native",
     "packages/dioxus-native-dom",
-    "packages/blitz-test-harness",
+    "packages/boson-test-harness",
     "apps/browser",
     "apps/browser/persistence",
     "apps/readme",
     "apps/bump",
     "wpt/runner",
-    "tests/blitz-tests",
+    "tests/boson-tests",
     "examples/counter",
     "examples/transparent",
     "examples/seven_guis",
@@ -40,22 +40,22 @@ edition = "2024"
 rust-version = "1.91.0"
 
 [workspace.dependencies]
-# Blitz dependencies(in-repo)
-blitz = { version = "=0.3.0-beta.2", path = "./packages/blitz" }
-blitz-dom = { version = "=0.3.0-beta.2", path = "./packages/blitz-dom", default-features = false }
-blitz-html = { version = "=0.3.0-beta.2", path = "./packages/blitz-html", default-features = false }
-blitz-net = { version = "=0.3.0-beta.2", path = "./packages/blitz-net", default-features = false }
-blitz-paint = { version = "=0.3.0-beta.2", path = "./packages/blitz-paint", default-features = false }
-blitz-vibey-script = { version = "=0.3.0-beta.2", path = "./packages/blitz-vibey-script", default-features = false }
-blitz-shell = { version = "=0.3.0-beta.2", path = "./packages/blitz-shell", default-features = false }
-blitz-traits = { version = "=0.3.0-beta.2", path = "./packages/blitz-traits", default-features = false }
+# Boson dependencies(in-repo)
+boson = { version = "=0.3.0-beta.2", path = "./packages/boson" }
+boson-dom = { version = "=0.3.0-beta.2", path = "./packages/boson-dom", default-features = false }
+boson-html = { version = "=0.3.0-beta.2", path = "./packages/boson-html", default-features = false }
+boson-net = { version = "=0.3.0-beta.2", path = "./packages/boson-net", default-features = false }
+boson-paint = { version = "=0.3.0-beta.2", path = "./packages/boson-paint", default-features = false }
+boson-vibey-script = { version = "=0.3.0-beta.2", path = "./packages/boson-vibey-script", default-features = false }
+boson-shell = { version = "=0.3.0-beta.2", path = "./packages/boson-shell", default-features = false }
+boson-traits = { version = "=0.3.0-beta.2", path = "./packages/boson-traits", default-features = false }
 stylo_taffy = { version = "=0.3.0-beta.2", path = "./packages/stylo_taffy", default-features = false }
 dioxus-native = { version = "0.7.0", path = "./packages/dioxus-native", default-features = false }
 dioxus-native-dom = { version = "0.7.0", path = "./packages/dioxus-native-dom", default-features = false }
 debug_timer = { version = "0.1.2", path = "./packages/debug_timer" }
 accesskit_xplat = { version = "0.1", path = "./packages/accesskit_xplat", default-features = false }
 browser-persistence = { path = "./apps/browser/persistence" }
-blitz-test-harness = { path = "./packages/blitz-test-harness" }
+boson-test-harness = { path = "./packages/boson-test-harness" }
 
 # Servo dependencies
 style = { version = "0.21.0", package = "stylo" }
@@ -235,11 +235,11 @@ opt-level = 3
 # This is a "virtual package"
 # It is not meant to be published, but is used so "cargo run --example XYZ" works properly
 [package]
-name = "blitz-examples"
+name = "boson-examples"
 version = "0.0.1"
 authors = ["Jonathan Kelley"]
 edition = "2024"
-description = "Top level crate for Blitz"
+description = "Top level crate for Boson"
 license = "MIT OR Apache-2.0"
 keywords = ["dom", "ui", "gui", "react", "wasm"]
 rust-version = "1.91.0"
@@ -255,14 +255,14 @@ anyrender = { workspace = true }
 anyrender_vello = { workspace = true }
 anyrender_vello_cpu = { workspace = true, features = ["multithreading"] }
 anyrender_vello_hybrid = { workspace = true }
-blitz-dom = { workspace = true, features = ["default"] }
-blitz-html = { workspace = true }
-blitz-traits = { workspace = true }
-blitz-paint = { workspace = true }
-blitz-shell = { workspace = true }
-blitz-net = { workspace = true }
-blitz-vibey-script = { workspace = true }
-blitz = { workspace = true, features = ["net"] }
+boson-dom = { workspace = true, features = ["default"] }
+boson-html = { workspace = true }
+boson-traits = { workspace = true }
+boson-paint = { workspace = true }
+boson-shell = { workspace = true }
+boson-net = { workspace = true }
+boson-vibey-script = { workspace = true }
+boson = { workspace = true, features = ["net"] }
 dioxus = { workspace = true }
 dioxus-native = { workspace = true, features = [
     "vello-hybrid",

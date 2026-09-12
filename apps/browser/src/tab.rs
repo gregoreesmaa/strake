@@ -6,7 +6,7 @@ use std::{
     },
 };
 
-use blitz_traits::net::{Request, Url};
+use boson_traits::net::{Request, Url};
 use dioxus_native::{NodeHandle, SubDocumentAttr, prelude::*};
 
 use crate::StdNetProvider;

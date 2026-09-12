@@ -1,13 +1,13 @@
 use std::{cell::RefCell, rc::Rc, sync::atomic::AtomicUsize};
 
-use blitz_dom::{Document, Widget};
+use boson_dom::{Document, Widget};
 use dioxus_core::{AttributeValue, IntoAttributeValue};
 
 #[derive(Clone, PartialEq)]
 pub struct SubDocumentAttr(WriteOnceAttr<Box<dyn Document>>);
 
 impl SubDocumentAttr {
-    /// Accepts any [`Document`] implementation, e.g. a plain [`BaseDocument`](blitz_dom::BaseDocument).
+    /// Accepts any [`Document`] implementation, e.g. a plain [`BaseDocument`](boson_dom::BaseDocument).
     pub fn new(doc: impl Document) -> Self {
         let id = doc.id();
         Self(WriteOnceAttr::new(id, Box::new(doc) as Box<dyn Document>))

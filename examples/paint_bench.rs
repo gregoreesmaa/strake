@@ -1,4 +1,4 @@
-//! Benchmark the paint phase (blitz-paint `paint_scene` -> renderer command encoding)
+//! Benchmark the paint phase (boson-paint `paint_scene` -> renderer command encoding)
 //! and the rasterization phase (renderer-side work: GPU dispatch / CPU rendering).
 //!
 //! Supports the vello, vello_cpu and vello_hybrid anyrender backends.
@@ -11,11 +11,11 @@ use anyrender::PaintScene as _;
 use anyrender_vello::VelloScenePainter;
 use anyrender_vello_cpu::VelloCpuImageRenderer;
 use anyrender_vello_hybrid::{ImageManager, VelloHybridScenePainter};
-use blitz_dom::DocumentConfig;
-use blitz_html::HtmlDocument;
-use blitz_net::Provider;
-use blitz_paint::paint_scene;
-use blitz_traits::shell::{ColorScheme, Viewport};
+use boson_dom::DocumentConfig;
+use boson_html::HtmlDocument;
+use boson_net::Provider;
+use boson_paint::paint_scene;
+use boson_traits::shell::{ColorScheme, Viewport};
 use reqwest::Url;
 use rustc_hash::FxHashMap;
 use std::sync::Arc;

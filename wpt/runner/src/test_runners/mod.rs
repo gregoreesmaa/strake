@@ -3,10 +3,10 @@ use std::sync::LazyLock;
 use std::time::Duration;
 use std::{fs, sync::Arc, time::Instant};
 
-use blitz_dom::traversal::TreeTraverser;
-use blitz_dom::{BaseDocument, Document as _, DocumentConfig};
-use blitz_html::{HtmlDocument, HtmlProvider};
-use blitz_vibey_script::ScriptDocument;
+use boson_dom::traversal::TreeTraverser;
+use boson_dom::{BaseDocument, Document as _, DocumentConfig};
+use boson_html::{HtmlDocument, HtmlProvider};
+use boson_vibey_script::ScriptDocument;
 use log::{debug, warn};
 use regex::Regex;
 
@@ -43,15 +43,15 @@ static TIMEOUT_QUARANTINE: LazyLock<HashMap<&'static str, &'static str>> = LazyL
 
 /// Is the node a `<script>` element whose `type` would execute as JavaScript?
 /// Returns the node if so.
-fn as_js_script_element(node: &blitz_dom::Node) -> Option<&blitz_dom::node::ElementData> {
+fn as_js_script_element(node: &boson_dom::Node) -> Option<&boson_dom::node::ElementData> {
     let element = node.element_data()?;
-    if element.name.local != blitz_dom::local_name!("script") {
+    if element.name.local != boson_dom::local_name!("script") {
         return None;
     }
 
     // Skip non-JavaScript script types (e.g. JSON data blocks)
     let script_type = element
-        .attr(blitz_dom::local_name!("type"))
+        .attr(boson_dom::local_name!("type"))
         .unwrap_or("")
         .trim()
         .to_ascii_lowercase();
@@ -72,15 +72,15 @@ pub fn document_has_scripts(doc: &BaseDocument) -> bool {
             return false;
         };
         if let Some(element) = node.element_data()
-            && element.name.local == blitz_dom::local_name!("body")
-            && element.attr(blitz_dom::local_name!("onload")).is_some()
+            && element.name.local == boson_dom::local_name!("body")
+            && element.attr(boson_dom::local_name!("onload")).is_some()
         {
             return true;
         }
         let Some(element) = as_js_script_element(node) else {
             return false;
         };
-        element.attr(blitz_dom::local_name!("src")).is_some()
+        element.attr(boson_dom::local_name!("src")).is_some()
             || !node.text_content().trim().is_empty()
     })
 }
@@ -104,7 +104,7 @@ pub fn attr_test_needs_scripts(doc: &BaseDocument) -> bool {
         let Some(element) = as_js_script_element(node) else {
             return false;
         };
-        if element.attr(blitz_dom::local_name!("src")).is_some() {
+        if element.attr(boson_dom::local_name!("src")).is_some() {
             return false;
         }
         let body = node.text_content();

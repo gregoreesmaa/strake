@@ -11,6 +11,27 @@
 
 ---
 
+## The Boson Ethos: 100% Compatibility at Inception, Relentless Ultra-Optimization in Perpetuity
+
+> **"In the compatibility layer, all hacks are permissible. On the modern path, zero waste is tolerated."**
+
+Boson is governed by two inviolable laws:
+
+1. **The Inviolable Law of Compatibility (Day 1 Drop-in Replacement):**
+   * Any application written for Electron or standard web environments must run in Boson on Day 1 without breaking changes or painful architectural rewrites.
+   * In the compatibility layer, **all pragmatic shims, polyfills, monkey-patches, and offscreen Chromium fallbacks are completely acceptable**. No edge-case feature, legacy API, or obscure web specification will be turned away if an existing real-world app depends on it. Compatibility is our adoption vector.
+
+2. **The Inviolable Law of Ultra-Optimization (The End-State Moat):**
+   * In our target steady state, **no heavy rendering engines, multi-process bloat, or redundant virtual machines may permanently consume disk space, CPU, GPU, or RAM**.
+   * Ultra-optimization is our technical reason for being: **sub-30MB baseline RAM, sub-100ms cold startup, 120fps GPU compute rendering, 0% CPU at idle, and sub-20MB distributable binaries**.
+
+3. **The Bifurcated Architecture: The Modern "Hyper-Path":**
+   * **The Legacy / Fallback Path:** For unpolyfilled APIs or complex legacy browser subsystems (WebRTC, Widevine, intricate iframes), Boson dynamically routes rendering to a disposable, heavily throttled offscreen Chromium worker that hibernates or terminates the moment it is hidden.
+   * **The Modern Hyper-Path:** When an application authors clean, modern, evergreen web code (standard Flexbox/Grid layouts, modern ES modules, native Web APIs), the engine bypasses all shims, virtualization, and Chromium overhead entirely—executing directly on bare-metal Rust and GPU compute shaders with minimal resource consumption.
+   * **The Developer Incentive:** Developers are never blocked by missing features, but are naturally rewarded with featherweight, battery-friendly native performance simply by writing modern standard code.
+
+---
+
 ## The Vision & Architectural Moat
 
 Traditional desktop web wrappers (Electron, CEF) embed an entire Google Chromium browser and Node.js instance for every single application, consuming hundreds of megabytes of RAM, bloating binary sizes past 150MB, draining laptop battery life, and introducing seconds of cold-boot latency.
@@ -118,7 +139,7 @@ cargo run -rp rdme ./README.md
 
 ## License & Attribution
 
-Boson is an open-source project originally derived from [Blitz](https://github.com/DioxusLabs/blitz) by DioxusLabs.
+Boson is an open-source project originally derived from [Boson](https://github.com/DioxusLabs/boson) by DioxusLabs.
 
 This project is dual-licensed under:
 * **[Apache License, Version 2.0](LICENSE-APACHE)** ([http://www.apache.org/licenses/LICENSE-2.0](http://www.apache.org/licenses/LICENSE-2.0))

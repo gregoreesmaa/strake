@@ -3,8 +3,8 @@ android_main_activity = "MainActivity.kt"
 
 [bundle]
 publisher = "DioxusLabs"
-identifier = "com.dioxuslabs.blitz"
-icon = ["./assets/blitz-logo.png", "./assets/blitz-logo.ico"]
+identifier = "com.dioxuslabs.boson"
+icon = ["./assets/boson-logo.png", "./assets/boson-logo.ico"]
 
 [bundle.windows]
 webview_install_mode = "Skip"

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 use crate::Color;
 use anyrender::{PaintRef, PaintScene, ResourceId};
-use blitz_dom::node::ComputedStyles;
-use blitz_dom::Widget;
+use boson_dom::node::ComputedStyles;
+use boson_dom::Widget;
 use peniko::kurbo::{Affine, Rect};
 use peniko::{Fill, ImageBrush, ImageSampler};
 use std::sync::mpsc::{channel, Receiver, Sender};
@@ -41,7 +41,7 @@ impl Widget for DemoWidget {
         true
     }
 
-    fn handle_event(&mut self, event: &blitz_traits::events::UiEvent) {
+    fn handle_event(&mut self, event: &boson_traits::events::UiEvent) {
         let _ = event;
     }
 

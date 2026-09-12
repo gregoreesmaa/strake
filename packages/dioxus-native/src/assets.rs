@@ -1,7 +1,7 @@
-use blitz_shell::BlitzShellProxy;
+use boson_shell::BosonShellProxy;
 use std::sync::Arc;
 
-use blitz_traits::net::{NetHandler, NetProvider, Request};
+use boson_traits::net::{NetHandler, NetProvider, Request};
 
 pub struct DioxusNativeNetProvider {
     inner_net_provider: Option<Arc<dyn NetProvider + 'static>>,
@@ -9,25 +9,25 @@ pub struct DioxusNativeNetProvider {
 
 #[allow(unused)]
 impl DioxusNativeNetProvider {
-    pub fn shared(proxy: BlitzShellProxy) -> Arc<dyn NetProvider> {
+    pub fn shared(proxy: BosonShellProxy) -> Arc<dyn NetProvider> {
         Arc::new(Self::new(proxy)) as Arc<dyn NetProvider>
     }
 
-    pub fn new(proxy: BlitzShellProxy) -> Self {
+    pub fn new(proxy: BosonShellProxy) -> Self {
         #[cfg(any(feature = "data-uri", feature = "net"))]
         let net_waker = Some(Arc::new(proxy) as _);
 
         #[cfg(feature = "net")]
-        let inner_net_provider = Some(blitz_net::Provider::shared(net_waker.clone()));
+        let inner_net_provider = Some(boson_net::Provider::shared(net_waker.clone()));
         #[cfg(all(feature = "data-uri", not(feature = "net")))]
-        let inner_net_provider = Some(blitz_shell::DataUriNetProvider::shared(net_waker.clone()));
+        let inner_net_provider = Some(boson_shell::DataUriNetProvider::shared(net_waker.clone()));
         #[cfg(all(not(feature = "data-uri"), not(feature = "net")))]
         let inner_net_provider = None;
 
         Self { inner_net_provider }
     }
 
-    pub fn with_inner(proxy: BlitzShellProxy, inner: Arc<dyn NetProvider>) -> Self {
+    pub fn with_inner(proxy: BosonShellProxy, inner: Arc<dyn NetProvider>) -> Self {
         Self {
             inner_net_provider: Some(inner),
         }

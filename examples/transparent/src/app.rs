@@ -1,6 +1,6 @@
 //! Drive the renderer from Dioxus, with a transparent, decoration-less,
 //! content-sized, draggable window.
-use blitz_traits::shell::ShellProvider;
+use boson_traits::shell::ShellProvider;
 use dioxus_native::prelude::*;
 use dioxus_native::{Color, CompositeAlphaMode, Config, LogicalSize, WindowAttributes, use_window};
 use std::any::Any;

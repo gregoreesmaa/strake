@@ -10,10 +10,10 @@ crate-type = ["cdylib"]
 
 [features]
 default = ["hybrid"]
-system-fonts = ["blitz-dom/system-fonts"]
+system-fonts = ["boson-dom/system-fonts"]
 vello = ["dioxus-native/vello"]
 cpu = ["cpu-pixels"]
-svg = ["blitz-paint/svg"]
+svg = ["boson-paint/svg"]
 hybrid = ["dioxus-native/vello-hybrid"]
 cpu-pixels = ["dioxus-native/vello-cpu-pixels"]
 cpu-softbuffer = ["dioxus-native/vello-cpu-softbuffer"]
@@ -25,8 +25,8 @@ log-phase-times = ["dioxus-native/log-phase-times"]
 dioxus-native = { workspace = true, default-features = false, features = ["prelude", "system-fonts"] }
 
 # Control whether system font support is enabled
-blitz-dom = { workspace = true, default-features = false }
-blitz-paint = { workspace = true, default-features = false }
+boson-dom = { workspace = true, default-features = false }
+boson-paint = { workspace = true, default-features = false }
 
 # Disable unicode URL support
 # See https://github.com/hsivonen/idna_adapter

@@ -1,4 +1,4 @@
-use blitz_traits::{
+use boson_traits::{
     navigation::{NavigationOptions, NavigationProvider},
     net::Method,
 };

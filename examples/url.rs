@@ -4,5 +4,5 @@ fn main() {
     let url = std::env::args()
         .nth(1)
         .unwrap_or_else(|| "https://www.google.com".into());
-    blitz::launch_url(&url);
+    boson::launch_url(&url);
 }

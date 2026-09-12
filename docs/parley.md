@@ -1,19 +1,19 @@
 # Running WPT tests against Parley
 
-Blitz uses [Parley](https://github.com/linebender/parley) for all of its text
+Boson uses [Parley](https://github.com/linebender/parley) for all of its text
 layout. Its [Web Platform Tests](https://github.com/web-platform-tests/wpt)
 (WPT) runner makes it possible to test Parley against thousands of real-world
 text layout tests covering line breaking, shaping, bidirectional text, font
 fallback, and font selection.
 
-This document explains how to run the Blitz WPT runner against a local Parley
+This document explains how to run the Boson WPT runner against a local Parley
 checkout.
 
 ## Prerequisites
 
-1. **A clone of Blitz** (this repository):
+1. **A clone of Boson** (this repository):
    ```sh
-   git clone https://github.com/DioxusLabs/blitz.git
+   git clone https://github.com/DioxusLabs/boson.git
    ```
 2. **A clone of Parley**:
    ```sh
@@ -27,7 +27,7 @@ checkout.
 The layout assumed by the rest of this document is sibling directories:
 
 ```text
-~/code/blitz
+~/code/boson
 ~/code/parley
 ~/code/wpt
 ```
@@ -39,10 +39,10 @@ You may also find the unofficial
 cargo install wpt --locked
 ```
 
-## Pointing Blitz at your local Parley
+## Pointing Boson at your local Parley
 
-Blitz normally depends on a released version of Parley from crates.io. To test
-local changes, change the dependency in Blitz's root workspace `Cargo.toml` to
+Boson normally depends on a released version of Parley from crates.io. To test
+local changes, change the dependency in Boson's root workspace `Cargo.toml` to
 a local path dependency:
 
 ```toml
@@ -57,12 +57,12 @@ inside the `parley` directory of its repository.
 - It is generally best to remove the `version` specifier from the dependency
   specification, as above. If `version` is present, Cargo will require that
   your local checkout of Parley's version matches it.
-- Blitz usually tracks Parley releases, not Parley `main`. If your branch is
-  based on `main` and Parley's API has moved on since the last release, Blitz
+- Boson usually tracks Parley releases, not Parley `main`. If your branch is
+  based on `main` and Parley's API has moved on since the last release, Boson
   may fail to compile against it. You can:
-  - fix the usually small API mismatches in Blitz locally;
-  - check whether Blitz has a branch that already tracks a newer Parley; or
-  - base your Parley branch on the branch or tag matching the release Blitz
+  - fix the usually small API mismatches in Boson locally;
+  - check whether Boson has a branch that already tracks a newer Parley; or
+  - base your Parley branch on the branch or tag matching the release Boson
     uses, such as `v0.11.x`.
 
 Verify that the path dependency took effect with:
@@ -77,7 +77,7 @@ The output should include a path, for example:
 ## Running the tests
 
 The runner needs the `WPT_DIR` environment variable pointing at your WPT clone.
-From the Blitz repository root:
+From the Boson repository root:
 
 ```sh
 WPT_DIR=../wpt cargo run -rp wpt css/css-text
@@ -125,7 +125,7 @@ Other suites that may be useful:
 | `css/css-text-decor` | Underlines, `text-decoration`, and `text-emphasis` |
 
 Failures in these suites are not necessarily Parley bugs. A test may exercise a
-CSS feature that Blitz does not yet implement, or the bug may be in Blitz's
+CSS feature that Boson does not yet implement, or the bug may be in Boson's
 inline layout integration rather than in Parley itself.
 
 ### Useful flags and environment variables
@@ -173,15 +173,15 @@ The runner supports four kinds of test:
 - `testharness.js` tests (`HAR`), which require a JavaScript engine.
 
 The single-letter flags after each result (`F`, `I`, `C`, `D`, `W`, `X`, and
-others) mark tests that use features Blitz does not fully support, such as
+others) mark tests that use features Boson does not fully support, such as
 floats, intrinsic sizing keywords, `calc()`, direction, writing modes, or
 scripts.
 
 ## Artifacts in `wpt/output/`
 
-Each run wipes and repopulates `wpt/output/` in the Blitz repository:
+Each run wipes and repopulates `wpt/output/` in the Boson repository:
 
-- `<test>.html-test.png`: Blitz's rendering of the test page
+- `<test>.html-test.png`: Boson's rendering of the test page
 - `<test>.html-ref.png` (or `-ref-N.png`): rendering of the reference pages
 - `<test>.html-diff.png`: pixel diff for failing comparisons
 - `wptreport.json`: standard WPT report format, consumable by WPT tooling and

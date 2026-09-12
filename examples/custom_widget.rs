@@ -1,6 +1,6 @@
 use anyrender::PaintScene as _;
-use blitz_dom::node::ComputedStyles;
-use blitz_traits::events::UiEvent;
+use boson_dom::node::ComputedStyles;
+use boson_traits::events::UiEvent;
 use color::parse_color;
 use dioxus_native::CustomWidgetAttr;
 use dioxus_native::Widget;
@@ -49,7 +49,7 @@ fn app() -> Element {
             }
         }
         header {
-            h2 { "Blitz Custom Widget Demo" }
+            h2 { "Boson Custom Widget Demo" }
         }
         if show_cube() {
             SpinningCube { color: color_str }

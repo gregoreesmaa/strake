@@ -1,6 +1,6 @@
 use std::time::Duration;
 
-use blitz_dom::{BaseDocument, Document as _, Node};
+use boson_dom::{BaseDocument, Document as _, Node};
 use log::warn;
 use style_traits::ToCss;
 

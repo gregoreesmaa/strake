@@ -1,10 +1,10 @@
-use blitz_dom::{
-    BaseDocument, Node, ScrollBehavior as BlitzScrollBehavior,
-    ScrollLogicalPosition as BlitzScrollLogicalPosition,
+use boson_dom::{
+    BaseDocument, Node, ScrollBehavior as BosonScrollBehavior,
+    ScrollLogicalPosition as BosonScrollLogicalPosition,
 };
-use blitz_traits::events::{
-    BlitzKeyEvent, BlitzPointerEvent, BlitzPointerId, BlitzScrollEvent, BlitzWheelDelta,
-    BlitzWheelEvent, MouseEventButton,
+use boson_traits::events::{
+    BosonKeyEvent, BosonPointerEvent, BosonPointerId, BosonScrollEvent, BosonWheelDelta,
+    BosonWheelEvent, MouseEventButton,
 };
 use dioxus_html::{
     AnimationData, CancelData, ClipboardData, CompositionData, DragData, FocusData, FormData,
@@ -40,7 +40,7 @@ pub struct NativeConverter {}
 
 impl HtmlEventConverter for NativeConverter {
     fn convert_cancel_data(&self, _event: &PlatformEventData) -> CancelData {
-        unimplemented!("todo: convert_cancel_data in dioxus-native. requires support in blitz")
+        unimplemented!("todo: convert_cancel_data in dioxus-native. requires support in boson")
     }
 
     fn convert_form_data(&self, event: &PlatformEventData) -> FormData {
@@ -57,7 +57,7 @@ impl HtmlEventConverter for NativeConverter {
 
     fn convert_keyboard_data(&self, event: &PlatformEventData) -> KeyboardData {
         event
-            .downcast::<BlitzKeyboardData>()
+            .downcast::<BosonKeyboardData>()
             .unwrap()
             .clone()
             .into()
@@ -68,27 +68,27 @@ impl HtmlEventConverter for NativeConverter {
     }
 
     fn convert_animation_data(&self, _event: &PlatformEventData) -> AnimationData {
-        unimplemented!("todo: convert_animation_data in dioxus-native. requires support in blitz")
+        unimplemented!("todo: convert_animation_data in dioxus-native. requires support in boson")
     }
 
     fn convert_clipboard_data(&self, _event: &PlatformEventData) -> ClipboardData {
-        unimplemented!("todo: convert_clipboard_data in dioxus-native. requires support in blitz")
+        unimplemented!("todo: convert_clipboard_data in dioxus-native. requires support in boson")
     }
 
     fn convert_composition_data(&self, _event: &PlatformEventData) -> CompositionData {
-        unimplemented!("todo: convert_composition_data in dioxus-native. requires support in blitz")
+        unimplemented!("todo: convert_composition_data in dioxus-native. requires support in boson")
     }
 
     fn convert_drag_data(&self, _event: &PlatformEventData) -> DragData {
-        unimplemented!("todo: convert_drag_data in dioxus-native. requires support in blitz")
+        unimplemented!("todo: convert_drag_data in dioxus-native. requires support in boson")
     }
 
     fn convert_image_data(&self, _event: &PlatformEventData) -> ImageData {
-        unimplemented!("todo: convert_image_data in dioxus-native. requires support in blitz")
+        unimplemented!("todo: convert_image_data in dioxus-native. requires support in boson")
     }
 
     fn convert_media_data(&self, _event: &PlatformEventData) -> MediaData {
-        unimplemented!("todo: convert_media_data in dioxus-native. requires support in blitz")
+        unimplemented!("todo: convert_media_data in dioxus-native. requires support in boson")
     }
 
     fn convert_mounted_data(&self, event: &PlatformEventData) -> MountedData {
@@ -108,11 +108,11 @@ impl HtmlEventConverter for NativeConverter {
     }
 
     fn convert_selection_data(&self, _event: &PlatformEventData) -> SelectionData {
-        unimplemented!("todo: convert_selection_data in dioxus-native. requires support in blitz")
+        unimplemented!("todo: convert_selection_data in dioxus-native. requires support in boson")
     }
 
     fn convert_toggle_data(&self, _event: &PlatformEventData) -> ToggleData {
-        unimplemented!("todo: convert_toggle_data in dioxus-native. requires support in blitz")
+        unimplemented!("todo: convert_toggle_data in dioxus-native. requires support in boson")
     }
 
     fn convert_touch_data(&self, event: &PlatformEventData) -> TouchData {
@@ -120,7 +120,7 @@ impl HtmlEventConverter for NativeConverter {
     }
 
     fn convert_transition_data(&self, _event: &PlatformEventData) -> TransitionData {
-        unimplemented!("todo: convert_transition_data in dioxus-native. requires support in blitz")
+        unimplemented!("todo: convert_transition_data in dioxus-native. requires support in boson")
     }
 
     fn convert_wheel_data(&self, event: &PlatformEventData) -> WheelData {
@@ -128,11 +128,11 @@ impl HtmlEventConverter for NativeConverter {
     }
 
     fn convert_resize_data(&self, _event: &PlatformEventData) -> ResizeData {
-        unimplemented!("todo: convert_resize_data in dioxus-native. requires support in blitz")
+        unimplemented!("todo: convert_resize_data in dioxus-native. requires support in boson")
     }
 
     fn convert_visible_data(&self, _event: &PlatformEventData) -> VisibleData {
-        unimplemented!("todo: convert_visible_data in dioxus-native. requires support in blitz")
+        unimplemented!("todo: convert_visible_data in dioxus-native. requires support in boson")
     }
 }
 
@@ -233,20 +233,20 @@ impl RenderedElementBacking for NodeHandle {
         }
 
         let behavior = match options.behavior {
-            ScrollBehavior::Smooth => BlitzScrollBehavior::Smooth,
-            ScrollBehavior::Instant => BlitzScrollBehavior::Instant,
+            ScrollBehavior::Smooth => BosonScrollBehavior::Smooth,
+            ScrollBehavior::Instant => BosonScrollBehavior::Instant,
         };
         let vertical = match options.vertical {
-            ScrollLogicalPosition::Start => BlitzScrollLogicalPosition::Start,
-            ScrollLogicalPosition::Center => BlitzScrollLogicalPosition::Center,
-            ScrollLogicalPosition::End => BlitzScrollLogicalPosition::End,
-            ScrollLogicalPosition::Nearest => BlitzScrollLogicalPosition::Nearest,
+            ScrollLogicalPosition::Start => BosonScrollLogicalPosition::Start,
+            ScrollLogicalPosition::Center => BosonScrollLogicalPosition::Center,
+            ScrollLogicalPosition::End => BosonScrollLogicalPosition::End,
+            ScrollLogicalPosition::Nearest => BosonScrollLogicalPosition::Nearest,
         };
         let horizontal = match options.horizontal {
-            ScrollLogicalPosition::Start => BlitzScrollLogicalPosition::Start,
-            ScrollLogicalPosition::Center => BlitzScrollLogicalPosition::Center,
-            ScrollLogicalPosition::End => BlitzScrollLogicalPosition::End,
-            ScrollLogicalPosition::Nearest => BlitzScrollLogicalPosition::Nearest,
+            ScrollLogicalPosition::Start => BosonScrollLogicalPosition::Start,
+            ScrollLogicalPosition::Center => BosonScrollLogicalPosition::Center,
+            ScrollLogicalPosition::End => BosonScrollLogicalPosition::End,
+            ScrollLogicalPosition::Nearest => BosonScrollLogicalPosition::Nearest,
         };
         doc.scroll_into_view(node_id, behavior, vertical, horizontal);
 
@@ -272,8 +272,8 @@ impl RenderedElementBacking for NodeHandle {
             coordinates.x,
             coordinates.y,
             match behavior {
-                ScrollBehavior::Smooth => BlitzScrollBehavior::Smooth,
-                ScrollBehavior::Instant => BlitzScrollBehavior::Instant,
+                ScrollBehavior::Smooth => BosonScrollBehavior::Smooth,
+                ScrollBehavior::Instant => BosonScrollBehavior::Instant,
             },
         );
 
@@ -326,15 +326,15 @@ impl HasFileData for NativeFormData {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct BlitzKeyboardData(pub(crate) BlitzKeyEvent);
+pub(crate) struct BosonKeyboardData(pub(crate) BosonKeyEvent);
 
-impl ModifiersInteraction for BlitzKeyboardData {
+impl ModifiersInteraction for BosonKeyboardData {
     fn modifiers(&self) -> Modifiers {
         self.0.modifiers
     }
 }
 
-impl HasKeyboardData for BlitzKeyboardData {
+impl HasKeyboardData for BosonKeyboardData {
     fn key(&self) -> Key {
         self.0.key.clone()
     }
@@ -361,7 +361,7 @@ impl HasKeyboardData for BlitzKeyboardData {
 }
 
 #[derive(Clone)]
-pub struct NativePointerData(pub(crate) BlitzPointerEvent);
+pub struct NativePointerData(pub(crate) BosonPointerEvent);
 
 impl InteractionLocation for NativePointerData {
     fn client_coordinates(&self) -> ClientPoint {
@@ -421,17 +421,17 @@ impl HasPointerData for NativePointerData {
 
     fn pointer_id(&self) -> i32 {
         match self.0.id {
-            BlitzPointerId::Mouse => 0,
-            BlitzPointerId::Pen => 0,
-            BlitzPointerId::Finger(id) => id as i32,
+            BosonPointerId::Mouse => 0,
+            BosonPointerId::Pen => 0,
+            BosonPointerId::Finger(id) => id as i32,
         }
     }
 
     fn pointer_type(&self) -> String {
         match self.0.id {
-            BlitzPointerId::Mouse => String::from("mouse"),
-            BlitzPointerId::Pen => String::from("pen"),
-            BlitzPointerId::Finger(_) => String::from("touch"),
+            BosonPointerId::Mouse => String::from("mouse"),
+            BosonPointerId::Pen => String::from("pen"),
+            BosonPointerId::Finger(_) => String::from("touch"),
         }
     }
 
@@ -462,12 +462,12 @@ impl HasPointerData for NativePointerData {
 
 /// Touch event data exposed to Dioxus Native application code.
 ///
-/// Blitz tracks input via pointer events, so a touch event is generated from the
+/// Boson tracks input via pointer events, so a touch event is generated from the
 /// pointer event of the finger that triggered it (`touches_changed`). The full
 /// list of concurrent touches is carried on the triggering event's
-/// [`BlitzPointerEvent::active_pointers`] list and reported via `touches`.
+/// [`BosonPointerEvent::active_pointers`] list and reported via `touches`.
 #[derive(Clone)]
-pub struct NativeTouchData(pub(crate) BlitzPointerEvent);
+pub struct NativeTouchData(pub(crate) BosonPointerEvent);
 
 impl ModifiersInteraction for NativeTouchData {
     fn modifiers(&self) -> Modifiers {
@@ -503,7 +503,7 @@ impl HasTouchData for NativeTouchData {
 }
 
 #[derive(Clone)]
-pub struct NativeTouchPointData(BlitzPointerEvent);
+pub struct NativeTouchPointData(BosonPointerEvent);
 
 impl InteractionLocation for NativeTouchPointData {
     fn client_coordinates(&self) -> ClientPoint {
@@ -522,8 +522,8 @@ impl InteractionLocation for NativeTouchPointData {
 impl HasTouchPointData for NativeTouchPointData {
     fn identifier(&self) -> i32 {
         match self.0.id {
-            BlitzPointerId::Finger(id) => id as i32,
-            BlitzPointerId::Mouse | BlitzPointerId::Pen => 0,
+            BosonPointerId::Finger(id) => id as i32,
+            BosonPointerId::Mouse | BosonPointerId::Pen => 0,
         }
     }
 
@@ -532,12 +532,12 @@ impl HasTouchPointData for NativeTouchPointData {
     }
 
     fn radius(&self) -> ScreenPoint {
-        // TODO: expose real touch radius once blitz tracks it
+        // TODO: expose real touch radius once boson tracks it
         ScreenPoint::new(1.0, 1.0)
     }
 
     fn rotation(&self) -> f64 {
-        // TODO: expose real touch rotation once blitz tracks it
+        // TODO: expose real touch rotation once boson tracks it
         0.0
     }
 
@@ -555,7 +555,7 @@ impl HasFocusData for NativeFocusData {
 }
 
 #[derive(Clone)]
-pub struct NativeScrollData(pub(crate) BlitzScrollEvent);
+pub struct NativeScrollData(pub(crate) BosonScrollEvent);
 impl HasScrollData for NativeScrollData {
     fn as_any(&self) -> &dyn Any {
         self as &dyn Any
@@ -587,7 +587,7 @@ impl HasScrollData for NativeScrollData {
 }
 
 #[derive(Clone)]
-pub struct NativeWheelData(pub(crate) BlitzWheelEvent);
+pub struct NativeWheelData(pub(crate) BosonWheelEvent);
 impl HasWheelData for NativeWheelData {
     fn as_any(&self) -> &dyn Any {
         self as &dyn Any
@@ -595,10 +595,10 @@ impl HasWheelData for NativeWheelData {
 
     fn delta(&self) -> WheelDelta {
         match self.0.delta {
-            BlitzWheelDelta::Lines(x, y) => {
+            BosonWheelDelta::Lines(x, y) => {
                 dioxus_html::geometry::WheelDelta::Lines(Vector3D::new(x, y, 0.0))
             }
-            BlitzWheelDelta::Pixels(x, y) => {
+            BosonWheelDelta::Pixels(x, y) => {
                 dioxus_html::geometry::WheelDelta::Pixels(Vector3D::new(x, y, 0.0))
             }
         }
@@ -656,13 +656,13 @@ pub fn synthetic_click_event(node: &Node, modifiers: Modifiers) -> Box<dyn Any> 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use blitz_traits::events::{
-        BlitzPointerId, MouseEventButton, MouseEventButtons, Point, PointerCoords, PointerDetails,
+    use boson_traits::events::{
+        BosonPointerId, MouseEventButton, MouseEventButtons, Point, PointerCoords, PointerDetails,
     };
 
-    fn finger_event(id: u64, x: f32, y: f32) -> BlitzPointerEvent {
-        BlitzPointerEvent {
-            id: BlitzPointerId::Finger(id),
+    fn finger_event(id: u64, x: f32, y: f32) -> BosonPointerEvent {
+        BosonPointerEvent {
+            id: BosonPointerId::Finger(id),
             is_primary: id == 0,
             coords: PointerCoords {
                 page_x: x,

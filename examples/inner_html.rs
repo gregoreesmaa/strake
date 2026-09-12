@@ -1,14 +1,14 @@
 use std::sync::Arc;
 
 use anyrender_vello::VelloWindowRenderer;
-use blitz_dom::DocumentConfig;
-use blitz_html::{HtmlDocument, HtmlProvider};
-use blitz_shell::{BlitzApplication, BlitzShellProxy, WindowConfig, create_default_event_loop};
+use boson_dom::DocumentConfig;
+use boson_html::{HtmlDocument, HtmlProvider};
+use boson_shell::{BosonApplication, BosonShellProxy, WindowConfig, create_default_event_loop};
 
 pub fn main() {
     // Create renderer
 
-    // Parse the HTML into a Blitz document
+    // Parse the HTML into a Boson document
     let mut doc = HtmlDocument::from_html(
         HTML,
         DocumentConfig {
@@ -23,8 +23,8 @@ pub fn main() {
 
     // Create the Winit application and window
     let event_loop = create_default_event_loop();
-    let (proxy, reciever) = BlitzShellProxy::new(event_loop.create_proxy());
-    let mut application = BlitzApplication::new(proxy, reciever);
+    let (proxy, reciever) = BosonShellProxy::new(event_loop.create_proxy());
+    let mut application = BosonApplication::new(proxy, reciever);
     let renderer = VelloWindowRenderer::new();
     let window = WindowConfig::new(Box::new(doc), renderer);
     application.add_window(window);

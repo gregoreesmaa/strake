@@ -10,4 +10,4 @@
 /wpt/*.json
 /apps/wpt/output
 /sites
-.blitz-cache
+.boson-cache

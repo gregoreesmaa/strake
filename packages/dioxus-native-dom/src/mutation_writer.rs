@@ -1,7 +1,7 @@
-//! Integration between Dioxus and Blitz
+//! Integration between Dioxus and Boson
 use crate::{NodeId, qual_name, trace, write_once_attr::WriteOnceAttr};
-use blitz_dom::{BaseDocument, Document, DocumentMutator, Widget};
-use blitz_traits::events::DomEventKind;
+use boson_dom::{BaseDocument, Document, DocumentMutator, Widget};
+use boson_traits::events::DomEventKind;
 use dioxus_core::{
     AttributeValue, ElementId, Template, TemplateAttribute, TemplateNode, WriteMutations,
 };

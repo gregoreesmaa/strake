@@ -1,7 +1,7 @@
 use anyrender::{ImageRenderer as _, PaintScene as _};
-use blitz_dom::util::Color;
-use blitz_dom::{BaseDocument, Document as _};
-use blitz_paint::paint_scene;
+use boson_dom::util::Color;
+use boson_dom::{BaseDocument, Document as _};
+use boson_paint::paint_scene;
 use image::{ImageBuffer, ImageFormat};
 use log::warn;
 use peniko::Fill;

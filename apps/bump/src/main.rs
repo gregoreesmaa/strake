@@ -10,15 +10,15 @@ const ANYRENDER_PACKAGES: &[&str] = &[
     "anyrender_svg",
 ];
 
-// The set of the "blitz" packages that are versioned together
-const BLITZ_PACKAGES: &[&str] = &[
-    "blitz",
-    "blitz-dom",
-    "blitz-html",
-    "blitz-net",
-    "blitz-paint",
-    "blitz-shell",
-    "blitz-traits",
+// The set of the "boson" packages that are versioned together
+const BOSON_PACKAGES: &[&str] = &[
+    "boson",
+    "boson-dom",
+    "boson-html",
+    "boson-net",
+    "boson-paint",
+    "boson-shell",
+    "boson-traits",
     "stylo_taffy",
 ];
 
@@ -69,12 +69,12 @@ fn main() {
     // Parse "target" CLI arg
     let target = args.next();
     let target = match target.as_deref() {
-        Some(target @ ("blitz" | "anyrender")) => target,
+        Some(target @ ("boson" | "anyrender")) => target,
         Some(target) => {
             println!("{target}");
-            bail!("Invalid target. Must be 'blitz' or 'anyrender'")
+            bail!("Invalid target. Must be 'boson' or 'anyrender'")
         }
-        _ => bail!("Missing target. Must be 'blitz' or 'anyrender'"),
+        _ => bail!("Missing target. Must be 'boson' or 'anyrender'"),
     };
 
     // Parse "version" CLI arg
@@ -100,12 +100,12 @@ fn main() {
         println!("Bumped anyrender versions")
     }
 
-    if target == "blitz" {
+    if target == "boson" {
         set_workspace_version(&version);
-        for package in BLITZ_PACKAGES {
+        for package in BOSON_PACKAGES {
             set_workspace_dep_version(package, &version);
         }
 
-        println!("Bumped blitz versions")
+        println!("Bumped boson versions")
     }
 }

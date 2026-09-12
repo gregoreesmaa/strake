@@ -32,8 +32,24 @@ Boson is a modular, ultra-fast native HTML/CSS/JS runtime and next-generation **
 Rather than compromising startup speed or waiting years for 100% web spec reimplementation:
 * **Native-First Path**: 80%+ of typical web app surfaces (DOM, CSS Flexbox/Grid, typography, vector paint, event dispatch) are executed natively by the Rust core.
 * **Offscreen Fallback**: Long-tail unhandled browser APIs (WebRTC, Widevine DRM, complex WebGL/WebGPU shaders) are lazily rendered by an offscreen headless Chromium/CEF worker.
-* **Zero-Copy Hardware Compositing**: Fallback frames share native OS GPU surfaces (`IOSurface` on macOS, `DXGI` handles on Windows, `dma-buf` on Linux/Android) and composite directly into Blitz's WGPU pipeline.
+* **Zero-Copy Hardware Compositing**: Fallback frames share native OS GPU surfaces (`IOSurface` on macOS, `DXGI` handles on Windows, `dma-buf` on Linux/Android) and composite directly into Boson's WGPU pipeline.
 * **Progressive Discarding**: Chromium dependencies are systematically phased out as native Rust modules mature.
+
+### The Boson Ethos: Compatibility First, Ultra-Optimization Always
+Any autonomous agent or engineer contributing to this repository must uphold two inviolable laws:
+
+1. **The Inviolable Law of Compatibility (Day 1 Drop-in Replacement):**
+   * Boson exists to replace Electron. Existing Electron and standard web applications must run in Boson on Day 1 without requiring code rewrites.
+   * In the compatibility layer, **all pragmatic hacks, shims, polyfills, monkey-patches, and offscreen Chromium fallbacks are completely acceptable**. If an obscure API or legacy behavior is needed by real-world apps, provide it without hesitation. Compatibility is our adoption vector.
+
+2. **The Inviolable Law of Ultra-Optimization (The End-State Moat):**
+   * In the target steady state, **no heavy rendering engines, multi-process bloat, or redundant virtual machines may permanently consume disk space, CPU, GPU, or RAM**.
+   * Ultra-optimization is non-negotiable: **sub-30MB baseline RAM, sub-100ms cold boots, 120fps GPU compute rendering, 0% CPU at idle, and sub-20MB binaries**.
+
+3. **The Bifurcated Execution Path:**
+   * **The Fallback / Legacy Safety Net:** Unpolyfilled APIs or complex legacy browser subsystems (WebRTC, Widevine, intricate iframes) lazily trigger disposable, heavily throttled offscreen Chromium surfaces that hibernate or terminate when not visible.
+   * **The Modern Hyper-Path:** When applications author modern, clean, evergreen web code (standard Flexbox/Grid, typed JS/ES modules, native Web APIs), the engine bypasses all shims, virtualization, and Chromium overhead entirely—executing directly on bare-metal Rust and GPU compute shaders with minimal resource usage.
+   * **Agent Obligation:** Never break backward compatibility in the name of optimization, and never accept permanent runtime bloat in the name of convenience.
 
 ---
 
@@ -101,29 +117,29 @@ Each tick or frame follows strict deterministic stages:
 The repository is structured as a Cargo workspace:
 
 ```
-blitz/
+boson/
 ├── apps/
-│   ├── browser/          # Desktop reference browser (bin: blitz / boson)
+│   ├── browser/          # Desktop reference browser (bin: boson / boson)
 │   │   └── persistence/  # SQLite browser history persistence (rusqlite)
 │   ├── bump/             # Workspace semantic release and version bumper tool
 │   └── readme/           # Standalone live-watching markdown viewer (bin: rdme)
 ├── packages/
-│   ├── blitz/            # High-level entrypoint and umbrella facade
-│   ├── blitz-dom/        # Headless DOM, NodeTree, Stylo/Taffy bridge, events
-│   ├── blitz-paint/      # Translates DOM scenes into anyrender draw commands
-│   ├── blitz-shell/      # Winit windowing, IME, native clipboard, file dialogs
-│   ├── blitz-html/       # HTML5/XHTML parser integration (html5ever, xml5ever)
-│   ├── blitz-net/        # Async HTTP client, streaming responses, disk cache
-│   ├── blitz-traits/     # Fundamental shared types (NodeId, UiEvent, Viewport)
-│   ├── blitz-test-harness/ # Headless test harness for DOM, layout, and events
-│   ├── blitz-vibey-script/ # JavaScript runtime integration (Boa -> QuickJS-ng)
+│   ├── boson/            # High-level entrypoint and umbrella facade
+│   ├── boson-dom/        # Headless DOM, NodeTree, Stylo/Taffy bridge, events
+│   ├── boson-paint/      # Translates DOM scenes into anyrender draw commands
+│   ├── boson-shell/      # Winit windowing, IME, native clipboard, file dialogs
+│   ├── boson-html/       # HTML5/XHTML parser integration (html5ever, xml5ever)
+│   ├── boson-net/        # Async HTTP client, streaming responses, disk cache
+│   ├── boson-traits/     # Fundamental shared types (NodeId, UiEvent, Viewport)
+│   ├── boson-test-harness/ # Headless test harness for DOM, layout, and events
+│   ├── boson-vibey-script/ # JavaScript runtime integration (Boa -> QuickJS-ng)
 │   ├── dioxus-native/    # Dioxus reactive UI integration (moving to adapter)
-│   ├── dioxus-native-dom/# Headless core connecting Dioxus VDOM to blitz-dom
+│   ├── dioxus-native-dom/# Headless core connecting Dioxus VDOM to boson-dom
 │   ├── stylo_taffy/      # Stylo ComputedValues to Taffy style bridge (MPL-2.0)
 │   ├── accesskit_xplat/  # Cross-platform AccessKit OS accessibility bridge
 │   └── debug_timer/      # Zero-overhead compile-time profiling timers
 ├── tests/
-│   └── blitz-tests/      # 45 integration test suites (DOM, layout, events)
+│   └── boson-tests/      # 45 integration test suites (DOM, layout, events)
 └── wpt/
     └── runner/           # Web Platform Tests (WPT) headless reftest runner
 ```
@@ -152,7 +168,7 @@ All commands are executed from the repository root.
 cargo check --workspace
 
 # Check core DOM package
-cargo check -p blitz-dom
+cargo check -p boson-dom
 
 # Check with just
 just check
@@ -178,13 +194,13 @@ just fmt
 cargo test --workspace
 
 # Run integration tests
-cargo test -p blitz-tests
+cargo test -p boson-tests
 
 # Run a single integration test with stdout logging
-cargo test -p blitz-tests --test style_property_invalidation -- --nocapture
+cargo test -p boson-tests --test style_property_invalidation -- --nocapture
 
 # Run headless test harness
-cargo test -p blitz-test-harness
+cargo test -p boson-test-harness
 ```
 
 ### D. Running Applications & Demos

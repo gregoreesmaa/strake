@@ -1,5 +1,5 @@
-use blitz_traits::navigation::NavigationOptions;
-use blitz_traits::net::{Method, Request, Url};
+use boson_traits::navigation::NavigationOptions;
+use boson_traits::net::{Method, Request, Url};
 use dioxus_native::prelude::Key;
 
 pub fn req_from_string(url_s: &str) -> Option<Request> {
