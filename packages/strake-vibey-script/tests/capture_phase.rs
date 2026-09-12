@@ -61,6 +61,9 @@ fn capture_listeners_fire_root_to_target_before_bubble() {
         "#,
     );
     doc.dispatch_dom_event(click_on(&doc, "#inner"));
+    // Note: at-target capture listeners run before bubble listeners here;
+    // the modern DOM fires at-target listeners in registration order
+    // regardless of capture. Deviation tracked for issue #10 follow-up.
     assert_eq!(
         text_of_selector(&doc, "#out"),
         "cap:outer,cap:middle,cap:inner,bub:inner,bub:middle,bub:outer"

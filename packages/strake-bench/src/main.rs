@@ -131,7 +131,9 @@ fn main() {
     let variance = samples.iter().map(|s| (s - mean).powi(2)).sum::<f64>() / samples.len() as f64;
     let rss = idle_rss_mib(&html);
 
-    println!("cold-boot over {ITERATIONS} iterations (ms):");
+    println!(
+        "parse+resolve over {ITERATIONS} iterations (ms, in-process warm samples; not process-exec cold start):"
+    );
     println!(
         "  median {median:.2}  p95 {p95:.2}  mean {mean:.2}  stddev {:.2}",
         variance.sqrt()
@@ -177,7 +179,7 @@ fn main() {
         let mut table = String::new();
         let _ = writeln!(
             table,
-            "| **Cold Boot (p95)** | {p95:.2} ms | {max_p95:.2} ms | ✅ PASS |"
+            "| **Parse+Resolve p95 (in-process)** | {p95:.2} ms | {max_p95:.2} ms | ✅ PASS |"
         );
         match rss {
             Some(mib) => {

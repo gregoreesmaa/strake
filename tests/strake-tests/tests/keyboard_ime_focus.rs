@@ -5,7 +5,9 @@
 //! and #20 (keyboard paths of DnD/print flows). These tests pin the behavior
 //! that upcoming work must not regress. Known spec gaps deliberately NOT
 //! pinned here: positive-`tabindex` prioritization (traversal is document
-//! order) and Backspace/Delete editing keys (unhandled in `keyboard.rs`).
+//! order; see issue #10) and Backspace/Delete editing keys (unhandled in
+//! `keyboard.rs`). Tests below cover `tabindex` 0/implicit document order,
+//! which matches the spec for that subset.
 
 use keyboard_types::{Key, Modifiers};
 use strake_test_harness::Harness;

@@ -227,16 +227,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       - run: sudo apt-get update && sudo apt-get install -y libfontconfig1-dev
-      - name: Build production bench binary
-        run: cargo build --profile production -p strake-bench
+      - name: Build production binaries
+        run: cargo build --profile production -p strake-bench -p browser
       - name: Binary size gate (budget 25MB)
         env:
           PERF_MAX_BINARY_MB: "25"
         run: |
-          BIN=./target/production/strake-bench
+          BIN=./target/production/strake
           BYTES=$(stat -c%s "$BIN")
           MB=$(python3 -c "print($BYTES/1024/1024)")
-          echo "strake-bench binary: $MB MiB (budget ${PERF_MAX_BINARY_MB} MiB)"
+          echo "strake product binary: $MB MiB (budget ${PERF_MAX_BINARY_MB} MiB)"
           if python3 -c "import sys; sys.exit(0 if float('$MB') <= float('$PERF_MAX_BINARY_MB') else 1)"; then
             STATUS="✅ PASS"
           else
@@ -246,10 +246,11 @@ jobs:
             echo "### Strake Performance Budget Report"
             echo "| Metric | Measured | Budget | Status |"
             echo "| :--- | :---: | :---: | :---: |"
-            echo "| **Binary Size** | $MB MiB | ${PERF_MAX_BINARY_MB} MiB | $STATUS |"
+            echo "| **Binary Size (strake)** | $MB MiB | ${PERF_MAX_BINARY_MB} MiB | $STATUS |"
           } >> "$GITHUB_STEP_SUMMARY"
           if [ "$STATUS" = "❌ FAIL" ]; then
             echo "PERF BREACH: binary size $MB MiB exceeds budget ${PERF_MAX_BINARY_MB} MiB"
+            echo "(install cargo-bloat and run 'cargo bloat --profile production -p browser --crates' for per-crate attribution)"
             exit 1
           fi
       - name: Cold-boot and RSS gate
