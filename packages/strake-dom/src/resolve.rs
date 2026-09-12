@@ -390,6 +390,7 @@ impl BaseDocument {
 
         // println!("\n\nRESOLVE LAYOUT\n===========\n");
 
+        self.layout_passes += 1;
         taffy::compute_root_layout(self, root_element_id, available_space);
         taffy::round_layout(self, root_element_id);
 

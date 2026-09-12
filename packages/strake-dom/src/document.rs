@@ -248,6 +248,10 @@ pub struct BaseDocument {
     pub(crate) thread_font_contexts: ThreadLocal<RefCell<Box<FontContext>>>,
     /// A Parley layout context
     pub(crate) layout_ctx: parley::LayoutContext<TextBrush>,
+    /// Number of times `resolve_layout` ran Taffy layout since construction.
+    /// Test observability for restyle-isolation pins (issue #2): paint-only
+    /// mutations must not increment this counter.
+    pub(crate) layout_passes: u64,
 
     /// The real (non-anonymous) node which is currently hovered (if any).
     /// This is never a layout-generated (anonymous) node, so it remains valid
@@ -452,6 +456,7 @@ impl BaseDocument {
             #[cfg(feature = "parallel-construct")]
             thread_font_contexts: ThreadLocal::new(),
             layout_ctx: parley::LayoutContext::new(),
+            layout_passes: 0,
 
             hover_node_id: None,
             hover_hit_node_id: None,
@@ -1968,6 +1973,12 @@ impl BaseDocument {
     /// Enables or disables incremental layout for this document.
     pub fn set_incremental_layout(&mut self, enabled: bool) {
         self.incremental_layout = enabled;
+    }
+
+    /// Number of Taffy layout passes executed by `resolve_layout` since the
+    /// document was constructed.
+    pub fn layout_pass_count(&self) -> u64 {
+        self.layout_passes
     }
 
     pub fn devtools(&self) -> &DevtoolSettings {
