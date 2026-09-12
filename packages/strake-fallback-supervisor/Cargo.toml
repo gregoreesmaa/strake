@@ -1,0 +1,20 @@
+[package]
+name = "strake-fallback-supervisor"
+description = "On-demand headless-Chromium fallback lifecycle: lazy spawn, hibernate/terminate eviction, CPU-image compositing"
+version.workspace = true
+license.workspace = true
+homepage.workspace = true
+repository.workspace = true
+categories.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+# Strake dependencies
+strake-dom = { workspace = true, features = ["custom-widget"] }
+
+# Rendering (Phase-0 CPU-image compositing path; Phase 3 replaces CpuFrame
+# with zero-copy GPU texture imports behind the same Widget seam)
+anyrender = { workspace = true }
+peniko = { workspace = true }
+linebender_resource_handle = { workspace = true }
