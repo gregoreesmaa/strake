@@ -32,8 +32,8 @@ pub use app::{App, AppEventKind, AppPath};
 pub use coverage::{ApiEntry, SupportStatus, TOP50};
 pub use ipc::{IpcBus, IpcError, ListenerId};
 pub use menu::{
-    Accelerator, AcceleratorError, MenuError, MenuItemTemplate, MenuRole, MenuTemplate, Modifier,
-    parse_accelerator,
+    Accelerator, AcceleratorError, MenuError, MenuItemTemplate, MenuItemType, MenuRole,
+    MenuTemplate, Modifier, parse_accelerator,
 };
 pub use permissions::{Decision, Enforcer, NetScope, PathScope, PermissionManifest, clean_path};
 pub use shell::{ShellError, ShellWindow};

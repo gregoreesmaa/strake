@@ -72,41 +72,72 @@ impl std::fmt::Display for AcceleratorError {
 
 impl std::error::Error for AcceleratorError {}
 
+/// Map a token to its modifier, if it names one. Matching stays lenient
+/// (case-insensitive, aliases) so platform spellings all parse to the same
+/// model.
+fn modifier_token(token: &str) -> Option<Modifier> {
+    match token.to_ascii_lowercase().as_str() {
+        "commandorcontrol" | "cmdorctrl" => Some(Modifier::CommandOrControl),
+        "control" | "ctrl" => Some(Modifier::Control),
+        "alt" | "option" => Some(Modifier::Alt),
+        "shift" => Some(Modifier::Shift),
+        "super" | "meta" | "command" | "cmd" => Some(Modifier::Super),
+        _ => None,
+    }
+}
+
 /// Parse an Electron accelerator (`CommandOrControl+Shift+S`).
 /// `CmdOrCtrl` is accepted as an alias; modifier matching is
-/// case-insensitive; the final token is the key.
+/// case-insensitive. Tokens are collected first and only the final token
+/// may be the key: an unknown token in any earlier position is a mistyped
+/// modifier and fails with [`AcceleratorError::UnknownModifier`] instead of
+/// silently degrading to a broader shortcut. Duplicate modifiers are
+/// deduplicated (first occurrence wins).
 pub fn parse_accelerator(text: &str) -> Result<Accelerator, AcceleratorError> {
-    let mut modifiers = Vec::new();
-    let mut key: Option<&str> = None;
-    for token in text
+    let tokens: Vec<&str> = text
         .split('+')
         .map(str::trim)
         .filter(|token| !token.is_empty())
-    {
-        // The final token is the key; everything before it must be a known
-        // modifier. Matching stays lenient (case-insensitive, aliases) so
-        // platform spellings all parse to the same model.
-        let modifier = match token.to_ascii_lowercase().as_str() {
-            "commandorcontrol" | "cmdorctrl" => Modifier::CommandOrControl,
-            "control" | "ctrl" => Modifier::Control,
-            "alt" | "option" => Modifier::Alt,
-            "shift" => Modifier::Shift,
-            "super" | "meta" | "command" | "cmd" => Modifier::Super,
-            _ => {
-                key = Some(token);
-                continue;
+        .collect();
+    let Some((&last, head)) = tokens.split_last() else {
+        return Err(AcceleratorError::Empty);
+    };
+    let mut modifiers = Vec::new();
+    for token in head {
+        match modifier_token(token) {
+            Some(modifier) => {
+                if !modifiers.contains(&modifier) {
+                    modifiers.push(modifier);
+                }
             }
-        };
-        modifiers.push(modifier);
+            None => return Err(AcceleratorError::UnknownModifier(token.to_string())),
+        }
     }
-    match key {
-        Some(key) => Ok(Accelerator {
-            modifiers,
-            key: key.to_string(),
-        }),
-        None if modifiers.is_empty() => Err(AcceleratorError::Empty),
-        None => Err(AcceleratorError::Empty),
+    // A trailing modifier names no key ("Ctrl", "Ctrl+Shift"): still empty.
+    if modifier_token(last).is_some() {
+        return Err(AcceleratorError::Empty);
     }
+    Ok(Accelerator {
+        modifiers,
+        key: last.to_string(),
+    })
+}
+
+/// Menu item type (Electron's `type` field in
+/// `MenuItemConstructorOptions`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum MenuItemType {
+    /// A normal clickable item.
+    #[default]
+    Normal,
+    /// A visual divider: needs no label, role, or submenu.
+    Separator,
+    /// An item opening a submenu.
+    Submenu,
+    /// A toggleable checkbox item.
+    Checkbox,
+    /// A mutually exclusive radio item.
+    Radio,
 }
 
 /// One menu item template (`MenuItemConstructorOptions` subset).
@@ -114,7 +145,10 @@ pub fn parse_accelerator(text: &str) -> Result<Accelerator, AcceleratorError> {
 pub struct MenuItemTemplate {
     /// Stable id for lookup and tests.
     pub id: Option<String>,
-    /// Display label (required without a role).
+    /// Item type (`type` in Electron; `item_type` here since `type` is a
+    /// Rust keyword). Separators are exempt from the label rule.
+    pub item_type: MenuItemType,
+    /// Display label (required without a role, unless a separator).
     pub label: Option<String>,
     /// Standard behavior role.
     pub role: Option<MenuRole>,
@@ -133,10 +167,28 @@ pub struct MenuItemTemplate {
 }
 
 impl MenuItemTemplate {
+    /// A separator item (`{ type: 'separator' }` in Electron): no label,
+    /// role, or submenu required.
+    pub fn separator() -> Self {
+        Self {
+            id: None,
+            item_type: MenuItemType::Separator,
+            label: None,
+            role: None,
+            accelerator: None,
+            click: None,
+            enabled: true,
+            visible: true,
+            checked: false,
+            submenu: Vec::new(),
+        }
+    }
+
     /// A plain labeled item.
     pub fn labeled(label: &str) -> Self {
         Self {
             id: None,
+            item_type: MenuItemType::Normal,
             label: Some(label.to_string()),
             role: None,
             accelerator: None,
@@ -170,7 +222,14 @@ impl std::fmt::Display for MenuError {
     }
 }
 
-impl std::error::Error for MenuError {}
+impl std::error::Error for MenuError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::BadAccelerator(_, error) => Some(error),
+            _ => None,
+        }
+    }
+}
 
 /// A validated application/tray menu template (`Menu.buildFromTemplate`).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -199,7 +258,11 @@ impl MenuTemplate {
         {
             return Err(MenuError::DuplicateId(id.clone()));
         }
-        if item.label.is_none() && item.role.is_none() && item.submenu.is_empty() {
+        if item.item_type != MenuItemType::Separator
+            && item.label.is_none()
+            && item.role.is_none()
+            && item.submenu.is_empty()
+        {
             return Err(MenuError::Unlabeled(where_.to_string()));
         }
         if let Some(accelerator) = &item.accelerator {
@@ -239,6 +302,7 @@ mod tests {
         let template = MenuTemplate::build(vec![
             MenuItemTemplate {
                 id: Some(String::from("app")),
+                item_type: MenuItemType::Normal,
                 label: Some(String::from("Calculator")),
                 role: None,
                 accelerator: None,
@@ -249,6 +313,7 @@ mod tests {
                 submenu: vec![
                     MenuItemTemplate {
                         id: None,
+                        item_type: MenuItemType::Normal,
                         label: None,
                         role: Some(MenuRole::About),
                         accelerator: None,
@@ -258,8 +323,10 @@ mod tests {
                         checked: false,
                         submenu: Vec::new(),
                     },
+                    MenuItemTemplate::separator(),
                     MenuItemTemplate {
                         id: None,
+                        item_type: MenuItemType::Normal,
                         label: None,
                         role: Some(MenuRole::Quit),
                         accelerator: Some(String::from("CommandOrControl+Q")),
@@ -273,6 +340,7 @@ mod tests {
             },
             MenuItemTemplate {
                 id: Some(String::from("edit")),
+                item_type: MenuItemType::Normal,
                 label: Some(String::from("Edit")),
                 role: None,
                 accelerator: None,
@@ -327,5 +395,104 @@ mod tests {
             MenuTemplate::build(vec![bad]),
             Err(MenuError::BadAccelerator(_, _))
         ));
+    }
+
+    #[test]
+    fn mistyped_modifiers_error_instead_of_silent_fallback() {
+        // "Ctrl+Shft+S" must not degrade to Ctrl+S: the unknown non-final
+        // token is a mistyped modifier.
+        assert_eq!(
+            parse_accelerator("Ctrl+Shft+S"),
+            Err(AcceleratorError::UnknownModifier(String::from("Shft")))
+        );
+        // "Shfit+S" must not degrade to a bare, far broader "S" shortcut.
+        assert_eq!(
+            parse_accelerator("Shfit+S"),
+            Err(AcceleratorError::UnknownModifier(String::from("Shfit")))
+        );
+        // Leniency survives only for the final key token.
+        let parsed = parse_accelerator("Ctrl+Plus").expect("final key stays lenient");
+        assert_eq!(parsed.modifiers, vec![Modifier::Control]);
+        assert_eq!(parsed.key, "Plus");
+        // Trailing modifiers still name no key.
+        assert_eq!(parse_accelerator("Ctrl"), Err(AcceleratorError::Empty));
+        assert_eq!(
+            parse_accelerator("Ctrl+Shift"),
+            Err(AcceleratorError::Empty)
+        );
+    }
+
+    #[test]
+    fn duplicate_modifiers_deduplicate() {
+        // No existing test pinned this; duplicates normalize (first
+        // occurrence wins) so the muda/global-hotkey binding sees one flag.
+        let parsed = parse_accelerator("Ctrl+Ctrl+S").expect("dedup parse");
+        assert_eq!(parsed.modifiers, vec![Modifier::Control]);
+        assert_eq!(parsed.key, "S");
+    }
+
+    #[test]
+    fn separators_need_no_label_role_or_submenu() {
+        // Genuine Electron templates (`{ type: 'separator' }`) validate both
+        // top-level and nested, alongside normal items.
+        let template = MenuTemplate::build(vec![
+            MenuItemTemplate::labeled("File"),
+            MenuItemTemplate::separator(),
+            MenuItemTemplate {
+                id: None,
+                ..MenuItemTemplate::labeled("Edit")
+            },
+        ])
+        .expect("separators validate");
+        assert_eq!(template.items.len(), 3);
+        let nested = MenuTemplate::build(vec![MenuItemTemplate {
+            id: None,
+            item_type: MenuItemType::Normal,
+            label: Some(String::from("View")),
+            role: None,
+            accelerator: None,
+            click: None,
+            enabled: true,
+            visible: true,
+            checked: false,
+            submenu: vec![
+                MenuItemTemplate::labeled("Reload"),
+                MenuItemTemplate::separator(),
+                MenuItemTemplate::labeled("Zoom"),
+            ],
+        }])
+        .expect("nested separators validate");
+        assert_eq!(nested.items[0].submenu.len(), 3);
+        // Non-separator items without label/role/submenu still fail.
+        assert!(matches!(
+            MenuTemplate::build(vec![MenuItemTemplate {
+                item_type: MenuItemType::Normal,
+                label: None,
+                role: None,
+                ..MenuItemTemplate::labeled("ignored")
+            }]),
+            Err(MenuError::Unlabeled(_))
+        ));
+    }
+
+    #[test]
+    fn bad_accelerator_forwards_source() {
+        use std::error::Error;
+        let error = MenuError::BadAccelerator(
+            String::from("at index 0"),
+            AcceleratorError::UnknownModifier(String::from("Shft")),
+        );
+        let source = error.source().expect("source forwards inner error");
+        assert_eq!(source.to_string(), "unknown accelerator modifier 'Shft'");
+        assert!(
+            MenuError::Unlabeled(String::from("at index 0"))
+                .source()
+                .is_none(),
+            "non-accelerator variants have no source"
+        );
+        assert!(
+            MenuError::DuplicateId(String::from("x")).source().is_none(),
+            "non-accelerator variants have no source"
+        );
     }
 }

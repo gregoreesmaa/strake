@@ -18,16 +18,35 @@ pub struct PathScope(String);
 
 impl PathScope {
     /// A new scope. A trailing `/*` marks a directory subtree; anything
-    /// else is an exact path.
+    /// else is an exact path. The scope is lexically cleaned (see
+    /// [`clean_path`]) so a scope containing `..` or `//` cannot silently
+    /// never match.
     pub fn new(scope: &str) -> Self {
-        Self(scope.to_string())
+        match scope.strip_suffix("/*") {
+            Some(prefix) => {
+                let cleaned = clean_path(prefix);
+                // `clean_path` maps an empty/all-slash prefix to `/`, which
+                // must not gain a doubled slash: the filesystem root stays
+                // spelled `/*`.
+                if cleaned == "/" {
+                    Self(String::from("/*"))
+                } else {
+                    Self(format!("{cleaned}/*"))
+                }
+            }
+            None => Self(clean_path(scope)),
+        }
     }
 
-    /// Whether `path` (already lexically cleaned) falls in this scope.
+    /// Whether `path` falls in this scope. The path is lexically cleaned
+    /// (see [`clean_path`]) before the prefix comparison, so callers must
+    /// not pre-clean: `..` escapes cannot outrun the scope even when the
+    /// caller passes a raw path.
     pub fn contains(&self, path: &str) -> bool {
+        let cleaned = clean_path(path);
         match self.0.strip_suffix("/*") {
-            Some(prefix) => path == prefix || path.starts_with(&format!("{prefix}/")),
-            None => path == self.0,
+            Some(prefix) => cleaned == prefix || cleaned.starts_with(&format!("{prefix}/")),
+            None => cleaned == self.0,
         }
     }
 }
@@ -37,13 +56,18 @@ impl PathScope {
 pub struct NetScope(String);
 
 impl NetScope {
-    /// A new scope (`api.example.com` or `*.example.com`).
+    /// A new scope (`api.example.com` or `*.example.com`). The scope is
+    /// lowercased once here because DNS names are case-insensitive.
     pub fn new(scope: &str) -> Self {
-        Self(scope.to_string())
+        Self(scope.to_ascii_lowercase())
     }
 
-    /// Whether `host` (lowercased by the caller) matches.
+    /// Whether `host` matches. The host is lowercased before comparison
+    /// (DNS is case-insensitive), so callers must not pre-normalize. The
+    /// wildcard match stays dot-anchored: `*.example.com` matches
+    /// `api.example.com` but not `evilexample.com`.
     pub fn contains(&self, host: &str) -> bool {
+        let host = host.to_ascii_lowercase();
         match self.0.strip_prefix("*.") {
             Some(suffix) => host == suffix || host.ends_with(&format!(".{suffix}")),
             None => host == self.0,
@@ -87,9 +111,13 @@ impl Decision {
 }
 
 /// Lexically clean a `/`-separated path: resolve `.`/`..` and duplicate
-/// separators without touching the filesystem (symlinks resolve at access
-/// time; the enforcer re-checks the cleaned path, so `..` escapes cannot
-/// outrun their scope).
+/// separators without touching the filesystem. This stops lexical `..`
+/// escapes only — it does nothing against symlink escapes (a scoped symlink
+/// pointing outside the grant still passes, with the OS resolving the open
+/// outside it). The future `node:fs` binding (#16) must close that at the
+/// access layer: canonicalize the path and re-check it against the scope,
+/// or open with `openat2` and `RESOLVE_IN_ROOT`/`RESOLVE_BENEATH`, to avoid
+/// the check-to-use (TOCTOU) race.
 pub fn clean_path(path: &str) -> String {
     let absolute = path.starts_with('/');
     let mut parts: Vec<&str> = Vec::new();
@@ -160,7 +188,7 @@ impl Enforcer {
         self.decide("fs.write", granted)
     }
 
-    /// Network access to `host` (lowercased by the caller).
+    /// Network access to `host` (case-insensitive; normalized on match).
     pub fn check_net(&mut self, host: &str) -> Decision {
         let granted = self.manifest.net.iter().any(|scope| scope.contains(host));
         self.decide("net", granted)
@@ -258,6 +286,76 @@ mod tests {
             enforcer.denied(),
             vec!["fs.read", "native.addons", "net", "shell.open"]
         );
+    }
+
+    #[test]
+    fn contains_cleans_uncleaned_paths_itself() {
+        // `contains` must not trust callers to pre-clean: the raw string
+        // "/data/scores/../secrets/key" starts with "/data/scores/" but
+        // resolves outside the grant.
+        let scope = PathScope::new("/data/scores/*");
+        assert!(
+            !scope.contains("/data/scores/../secrets/key"),
+            "dot-dot escape denied even via `contains` directly"
+        );
+        assert!(
+            !scope.contains("/data/scores/sub/../../etc/passwd"),
+            "nested escape denied via `contains` directly"
+        );
+        assert!(
+            scope.contains("/data/scores/a.json"),
+            "clean hit still allows"
+        );
+        assert!(
+            scope.contains("/data/scores/./a.json"),
+            "dot segments clean to a hit"
+        );
+        // Scopes are normalized at construction: a scope with `..` or `//`
+        // matches by its cleaned form instead of silently never matching.
+        assert_eq!(
+            PathScope::new("/data/scores/*"),
+            PathScope::new("/data//x/../scores/*"),
+            "scope normalized in `new`"
+        );
+        // The filesystem-root scope survives normalization (no `//*`).
+        let root = PathScope::new("/*");
+        assert!(
+            root.contains("/anything/at/all"),
+            "root scope still matches"
+        );
+        assert!(root.contains("/"), "root scope matches root itself");
+    }
+
+    #[test]
+    fn net_matching_is_case_insensitive_but_dot_anchored() {
+        let scope = NetScope::new("*.example.com");
+        assert!(
+            scope.contains("API.EXAMPLE.COM"),
+            "DNS is case-insensitive: mixed-case host matches"
+        );
+        assert!(
+            scope.contains("Example.Com"),
+            "bare suffix matches mixed-case too"
+        );
+        assert!(
+            !scope.contains("evilexample.com"),
+            "no dot anchor: suffix without a label boundary never matches"
+        );
+        assert!(
+            !scope.contains("EVILEXAMPLE.COM"),
+            "dot anchor holds regardless of case"
+        );
+        assert_eq!(
+            NetScope::new("*.EXAMPLE.com"),
+            NetScope::new("*.example.com"),
+            "scope lowercased once in `new`"
+        );
+        let mut enforcer = Enforcer::new(manifest());
+        assert!(
+            enforcer.check_net("API.EXAMPLE.COM").is_allow(),
+            "enforcer accepts mixed-case hosts under a wildcard grant"
+        );
+        assert_eq!(enforcer.check_net("evilexample.com"), Decision::Deny);
     }
 
     #[test]
