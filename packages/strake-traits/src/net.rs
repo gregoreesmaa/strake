@@ -21,8 +21,8 @@ pub trait NetProvider: Send + Sync + 'static {
 
     /// Whether this provider is a no-op (e.g. `DummyNetProvider`) that will never
     /// deliver resources. When true, callers should avoid registering resources
-    /// as "pending critical": the handler is dropped without a callback, and
-    /// only the recipient's drop-backstop (if any) reports the miss. Used by
+    /// as "pending critical": the provider reports the miss via
+    /// [`NetHandler::error`] instead of delivering bytes. Used by
     /// integrations that feed a pre-rendered DOM and perform no sub-fetches
     /// (e.g. aginxbrowser).
     fn is_noop(&self) -> bool {
@@ -180,7 +180,16 @@ impl From<PathBuf> for EntryValue {
 #[derive(Default)]
 pub struct DummyNetProvider;
 impl NetProvider for DummyNetProvider {
-    fn fetch(&self, _doc_id: usize, _request: Request, _handler: Box<dyn NetHandler>) {}
+    fn fetch(&self, _doc_id: usize, request: Request, handler: Box<dyn NetHandler>) {
+        // Report the miss explicitly so URL-keyed recipients (e.g.
+        // `BaseDocument::pending_images`) drain with the URL intact instead
+        // of stalling on a URL-less drop; handlers keeping the default
+        // no-op `error()` observe no traffic, exactly as before.
+        handler.error(
+            request.url.to_string(),
+            String::from("DummyNetProvider never delivers resources"),
+        );
+    }
     fn is_noop(&self) -> bool {
         true
     }

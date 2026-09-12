@@ -76,6 +76,10 @@ pub(crate) struct ResourceHandler<T: Send + Sync + 'static> {
     node_id: Option<NodeId>,
     tx: Sender<DocumentEvent>,
     shell_provider: Arc<dyn ShellProvider>,
+    /// The request URL this handler was created for. Reported by the
+    /// [`Drop`] backstop so a dropped fetch drains URL-keyed state (e.g.
+    /// `pending_images`) exactly like the explicit `error()` path does.
+    request_url: String,
     data: T,
     /// Whether [`ResourceHandler::respond`] already delivered a result.
     /// Consulted by the [`Drop`] backstop so a handler dropped by its
@@ -89,6 +93,7 @@ impl<T: Send + Sync + 'static> ResourceHandler<T> {
         doc_id: usize,
         node_id: Option<NodeId>,
         shell_provider: Arc<dyn ShellProvider>,
+        request_url: String,
         data: T,
     ) -> Self {
         static REQUEST_ID_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -98,6 +103,7 @@ impl<T: Send + Sync + 'static> ResourceHandler<T> {
             node_id,
             tx,
             shell_provider,
+            request_url,
             data,
             responded: AtomicBool::new(false),
         }
@@ -108,12 +114,20 @@ impl<T: Send + Sync + 'static> ResourceHandler<T> {
         doc_id: usize,
         node_id: Option<NodeId>,
         shell_provider: Arc<dyn ShellProvider>,
+        request_url: String,
         data: T,
     ) -> Box<dyn NetHandler>
     where
         ResourceHandler<T>: NetHandler,
     {
-        Box::new(Self::new(tx, doc_id, node_id, shell_provider, data)) as _
+        Box::new(Self::new(
+            tx,
+            doc_id,
+            node_id,
+            shell_provider,
+            request_url,
+            data,
+        )) as _
     }
 
     pub(crate) fn request_id(&self) -> usize {
@@ -146,14 +160,14 @@ impl<T: Send + Sync + 'static> Drop for ResourceHandler<T> {
         // without calling `bytes`/`error` (transport failure, abort, or a
         // third-party `NetProvider` that never calls back) must still drain
         // the request id from `pending_critical_resources` — otherwise the
-        // critical-resource gate blocks rendering forever. `load_resource`
-        // removes the id before inspecting the result, so an `Err` with no
-        // URL is sufficient and otherwise a no-op.
+        // critical-resource gate blocks rendering forever — and the request
+        // URL from `pending_images`, so a later same-URL image load issues a
+        // new fetch instead of queueing onto the dead entry.
         if !self.responded.swap(true, Ao::Relaxed) {
             let response = ResourceLoadResponse {
                 request_id: self.request_id,
                 node_id: self.node_id,
-                resolved_url: None,
+                resolved_url: Some(self.request_url.clone()),
                 result: Err(String::from("network request dropped without a response")),
             };
             let _ = self.tx.send(DocumentEvent::ResourceLoad(response));
@@ -263,6 +277,7 @@ impl ServoStylesheetLoader for StylesheetLoader {
 
         let url = import.url.url().unwrap().clone();
         let import = ServoArc::new(lock.wrap(import));
+        let request_url = url.as_ref().as_str().to_string();
         self.net_provider.fetch(
             self.doc_id,
             stamped_request(url.as_ref().clone(), self.abort_signal.as_ref()),
@@ -271,6 +286,7 @@ impl ServoStylesheetLoader for StylesheetLoader {
                 self.doc_id,
                 None, // node_id
                 self.shell_provider.clone(),
+                request_url,
                 NestedStylesheetHandler {
                     url: url.clone(),
                     loader: StylesheetLoader {
@@ -530,6 +546,7 @@ pub(crate) fn fetch_font_face(
                 });
 
             if let Some((url, format)) = preferred_source {
+                let request_url = url.as_str().to_string();
                 network_provider.fetch(
                     doc_id,
                     stamped_request(url, abort_signal),
@@ -538,6 +555,7 @@ pub(crate) fn fetch_font_face(
                         doc_id,
                         node_id,
                         shell_provider.clone(),
+                        request_url,
                         FontFaceHandler { format, overrides },
                     ),
                 );
