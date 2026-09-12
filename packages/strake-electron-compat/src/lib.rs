@@ -23,11 +23,18 @@
 mod app;
 mod coverage;
 mod ipc;
+mod napi;
 mod shell;
+mod updater;
 mod window;
 
 pub use app::{App, AppEventKind, AppPath};
 pub use coverage::{ApiEntry, SupportStatus, TOP50};
 pub use ipc::{IpcBus, IpcError, ListenerId};
+pub use napi::{
+    AddonLoad, AddonRequirements, IMPLEMENTED_SYMBOLS, NapiStatus, REQUIRED_SYMBOLS,
+    check_addon_load, missing_symbols,
+};
 pub use shell::{ShellError, ShellWindow};
+pub use updater::{Artifact, ManifestError, UpdateManifest, Version};
 pub use window::{BrowserWindow, BrowserWindowOptions, TitleBarStyle, WebContents, WindowManager};
