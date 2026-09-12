@@ -2,7 +2,7 @@
 
 use keyboard_types::Modifiers;
 use strake_dom::{Document, DocumentConfig};
-use strake_traits::events::DomEvent;
+use strake_traits::events::{DomEvent, DomEventData, StrakeFocusEvent};
 use strake_vibey_script::ScriptDocument;
 
 fn doc_from_html(html: &str) -> ScriptDocument {
@@ -30,6 +30,13 @@ fn click_on(doc: &ScriptDocument, selector: &str) -> DomEvent {
             .unwrap()
             .synthetic_click_event(Modifiers::empty()),
     )
+}
+
+fn focus_on(doc: &ScriptDocument, selector: &str) -> DomEvent {
+    let inner = doc.inner();
+    let id = inner.query_selector(selector).unwrap().unwrap();
+    // `focus` does not bubble (`DomEventData::bubbles() == false`).
+    DomEvent::new(id, DomEventData::Focus(StrakeFocusEvent))
 }
 
 #[test]
@@ -85,4 +92,28 @@ fn stop_propagation_in_capture_prevents_bubble_phase() {
     );
     doc.dispatch_dom_event(click_on(&doc, "#inner"));
     assert_eq!(text_of_selector(&doc, "#out"), "cap:outer");
+}
+
+#[test]
+fn at_target_capture_listener_fires_for_non_bubbling_event() {
+    let mut doc = doc_from_html(
+        r#"
+        <html><body>
+            <div id="outer"><button id="inner">hi</button></div>
+            <div id="out"></div>
+            <script>
+                const log = [];
+                const record = (name) => () => {
+                    log.push(name);
+                    document.getElementById("out").textContent = log.join(",");
+                };
+                document.getElementById("inner").addEventListener("focus", record("cap:inner"), true);
+                document.getElementById("inner").addEventListener("focus", record("bub:inner"), false);
+                document.getElementById("outer").addEventListener("focus", record("bub:outer"), false);
+            </script>
+        </body></html>
+        "#,
+    );
+    doc.dispatch_dom_event(focus_on(&doc, "#inner"));
+    assert_eq!(text_of_selector(&doc, "#out"), "cap:inner,bub:inner");
 }

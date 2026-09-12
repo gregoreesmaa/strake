@@ -1015,9 +1015,15 @@ impl ScriptRuntime {
         let capture_stopped = event_ref(&event_obj, &|event| event.stopped.get());
 
         // Phase 2 (bubble): target -> root, bubble listeners only plus the
-        // `on<event>` property handler.
+        // `on<event>` property handler. Exception: at the TARGET of a
+        // non-bubbling event, capture listeners fire too (W3C at-target
+        // semantics); phase 1 is skipped when `!bubbles`, so without this
+        // they would be silently dropped. When `bubbles` is true the guard
+        // is false and phase 1 already fired target capture listeners.
         if !capture_stopped {
-            'chain: for &node_id in chain {
+            'chain: for (idx, &node_id) in chain.iter().enumerate() {
+                let is_target = idx == 0;
+                let at_target_no_bubble = !bubbles && is_target;
                 // Gather ONLY listeners registered with `capture: false` plus
                 // an `on<event>` property handler (if any)
                 let mut callbacks: Vec<JsObject> = Vec::new();
@@ -1031,12 +1037,12 @@ impl ScriptRuntime {
                         callbacks.extend(
                             listeners
                                 .iter()
-                                .filter(|l| !l.capture)
+                                .filter(|l| !l.capture || at_target_no_bubble)
                                 .map(|l| l.callback.clone()),
                         );
                         // `once` listeners are removed at dispatch time;
                         // capture ones were already retired in phase 1.
-                        listeners.retain(|l| !(l.once && !l.capture));
+                        listeners.retain(|l| !(l.once && (!l.capture || at_target_no_bubble)));
                     }
                 }
                 let wrapper = ctx.state.borrow().node_wrappers.get(&node_id).cloned();
