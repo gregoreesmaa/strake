@@ -134,10 +134,15 @@ fn try_keyboard_activate(
         return;
     }
     let tag = element.name.local.clone();
+    // Range sliders consume keys for stepping (issue #51); Enter/Space must
+    // not click them.
     let activatable = tag == local_name!("button")
         || tag == local_name!("summary")
         || (tag == local_name!("input")
-            && !matches!(element.attr(local_name!("type")), Some("hidden")))
+            && !matches!(
+                element.attr(local_name!("type")),
+                Some("hidden") | Some("range")
+            ))
         || (tag == local_name!("a") && element.attr(local_name!("href")).is_some());
     if !activatable {
         return;

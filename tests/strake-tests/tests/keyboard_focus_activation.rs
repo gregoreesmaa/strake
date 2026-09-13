@@ -159,6 +159,31 @@ fn space_activates_focused_button_on_key_up_only() {
     assert_eq!(up_only, 1, "Space key-up must click once");
 }
 
+/// Range sliders consume keys for stepping (issue #51): Enter/Space adjust
+/// nothing and must not click.
+#[test]
+fn enter_space_on_range_steps_nothing_and_clicks_nothing() {
+    let mut harness = Harness::from_html(
+        r#"<html><body style="margin:0">
+            <input id="r" type="range" min="0" max="100" step="1" value="50"
+                style="width:200px; height:24px; margin:0; border:0; padding:0;">
+        </body></html>"#,
+    );
+    harness.press(Key::Tab);
+    assert_eq!(harness.focused(), Some(harness.node("#r")));
+
+    let n = clicks(
+        &mut harness,
+        vec![
+            enter_event(KeyState::Pressed),
+            enter_event(KeyState::Released),
+            space_event(KeyState::Pressed),
+            space_event(KeyState::Released),
+        ],
+    );
+    assert_eq!(n, 0, "Enter/Space on a range slider must not click");
+}
+
 /// Text inputs consume Space for editing: no activation, text appears.
 #[test]
 fn space_in_text_input_edits_without_click() {
