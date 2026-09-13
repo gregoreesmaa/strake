@@ -304,6 +304,71 @@ const NODE_STANDIN_BOOTSTRAP_JS: &str = r#"
             return info.appRoot || "/";
         },
     };
+    const eventsModule = (() => {
+        // Minimal `node:events` EventEmitter (issue #16 canary slice):
+        // on/once/off/removeListener/removeAllListeners/emit/listenerCount/
+        // listeners with Node's copy-on-emit and once-wrapper semantics.
+        function EventEmitter() {
+            this._events = Object.create(null);
+        }
+        EventEmitter.prototype._list = function (type) {
+            const key = String(type);
+            const list = this._events[key];
+            return list === undefined ? null : list;
+        };
+        EventEmitter.prototype.on = function (type, listener) {
+            if (typeof listener !== "function") throw new TypeError("listener must be a function");
+            const key = String(type);
+            if (this._events[key] === undefined) this._events[key] = [];
+            this._events[key].push(listener);
+            return this;
+        };
+        EventEmitter.prototype.addListener = EventEmitter.prototype.on;
+        EventEmitter.prototype.once = function (type, listener) {
+            if (typeof listener !== "function") throw new TypeError("listener must be a function");
+            const self = this;
+            const wrapper = function (...args) {
+                self.removeListener(type, wrapper);
+                return listener.apply(self, args);
+            };
+            wrapper.listener = listener;
+            return this.on(type, wrapper);
+        };
+        EventEmitter.prototype.removeListener = function (type, listener) {
+            const list = this._list(type);
+            if (list !== null) {
+                const key = String(type);
+                this._events[key] = list.filter(
+                    (fn) => fn !== listener && fn.listener !== listener
+                );
+            }
+            return this;
+        };
+        EventEmitter.prototype.off = EventEmitter.prototype.removeListener;
+        EventEmitter.prototype.removeAllListeners = function (type) {
+            if (type === undefined) this._events = Object.create(null);
+            else delete this._events[String(type)];
+            return this;
+        };
+        EventEmitter.prototype.emit = function (type, ...args) {
+            const list = this._list(type);
+            if (list === null || list.length === 0) return false;
+            for (const fn of list.slice()) fn.apply(this, args);
+            return true;
+        };
+        EventEmitter.prototype.listeners = function (type) {
+            const list = this._list(type);
+            return list === null ? [] : list.slice();
+        };
+        EventEmitter.prototype.listenerCount = function (type) {
+            const list = this._list(type);
+            return list === null ? 0 : list.length;
+        };
+        return {
+            EventEmitter,
+            listenerCount: (emitter, type) => emitter.listenerCount(type),
+        };
+    })();
     globalThis.__strake_node_modules = {
         "node:path": pathModule,
         path: pathModule,
@@ -311,6 +376,8 @@ const NODE_STANDIN_BOOTSTRAP_JS: &str = r#"
         url: urlModule,
         "node:process": processModule,
         process: processModule,
+        "node:events": eventsModule,
+        events: eventsModule,
     };
     if (typeof globalThis.process === "undefined") {
         globalThis.process = processModule;
@@ -700,8 +767,8 @@ fn cannot_find_module(specifier: &str) -> JsError {
 }
 
 /// `require(specifier)`: `'electron'` plus the Node core stand-ins
-/// (`node:path`, `node:url`, `node:process`); anything else throws Node's
-/// "Cannot find module" error.
+/// (`node:path`, `node:url`, `node:process`, `node:events`); anything else
+/// throws Node's "Cannot find module" error.
 fn e_require(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let specifier = require_string_arg(args, 0, "require")?;
     if specifier == "electron" {
