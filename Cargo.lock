@@ -7530,7 +7530,12 @@ dependencies = [
 name = "strake-run"
 version = "0.0.0"
 dependencies = [
+ "anyrender_vello_cpu",
+ "strake-dom",
+ "strake-electron-compat",
+ "strake-shell",
  "strake-vibey-script",
+ "winit",
 ]
 
 [[package]]
