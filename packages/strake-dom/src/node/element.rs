@@ -203,7 +203,7 @@ pub struct DocumentData {
     pub element_state: ElementState,
     pub has_snapshot: bool,
     pub snapshot_handled: AtomicBool,
-    /// Last-interaction modality for `:focus-visible` (issue #70): armed by
+    /// Last-interaction modality for `:focus-visible` (issue #839): armed by
     /// key presses, disarmed by pointer presses. A focus change inherits
     /// whatever is armed, matching browser behavior.
     pub keyboard_modality: AtomicBool,

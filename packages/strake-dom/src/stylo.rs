@@ -469,7 +469,7 @@ impl selectors::Element for StrakeNode<'_> {
             NonTSPseudoClass::Focus => self.element_state().contains(ElementState::FOCUS),
             NonTSPseudoClass::FocusWithin => false,
             NonTSPseudoClass::FocusVisible => {
-                // Browser heuristic (issue #70): the ring follows the last
+                // Browser heuristic (issue #839): the ring follows the last
                 // interaction modality, tracked on the document node (armed
                 // by key presses, disarmed by pointer presses), not the
                 // per-element FOCUSRING bit alone.

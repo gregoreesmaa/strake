@@ -98,7 +98,7 @@ pub(crate) fn handle_dom_event<F: FnMut(DomEvent)>(
     event: &mut DomEvent,
     mut dispatch_event: F,
 ) {
-    // `:focus-visible` follows the last interaction modality (issue #70): a
+    // `:focus-visible` follows the last interaction modality (issue #839): a
     // key press arms the ring, a pointer press disarms it. Pointer movement
     // is not an interaction. Arming here runs before Tab traversal in the
     // KeyDown default action below, so keyboard-driven focus shows the ring.
@@ -230,7 +230,7 @@ pub(crate) fn handle_dom_event<F: FnMut(DomEvent)>(
             // Do nothing (no default action)
         }
         DomEventData::KeyUp(event) => {
-            // Space activates the focused control on release (issue #70).
+            // Space activates the focused control on release (issue #839).
             handle_keyup(doc, target_node_id, event, &mut dispatch_event);
         }
         DomEventData::AppleStandardKeybinding(event) => {

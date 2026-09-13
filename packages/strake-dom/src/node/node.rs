@@ -169,7 +169,7 @@ universal_accessors! {
 
 impl Node {
     /// Last-interaction modality for `:focus-visible`, living on the document
-    /// node (issue #70). Style matching reads this; event handling writes it.
+    /// node (issue #839). Style matching reads this; event handling writes it.
     pub fn keyboard_modality(&self) -> bool {
         match &self.data {
             NodeData::Document(data) => data.keyboard_modality.load(Ordering::Relaxed),
