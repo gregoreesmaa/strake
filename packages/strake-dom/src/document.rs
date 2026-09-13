@@ -16,8 +16,8 @@ use crate::url::DocumentUrl;
 use crate::util::ImageType;
 use crate::{
     DEFAULT_CSS, DocumentConfig, DocumentMutator, DummyHtmlParserProvider, ElementData,
-    EventDriver, HtmlParserProvider, Node, NodeData, NoopEventHandler, StyleThreading,
-    TextNodeData,
+    EventDriver, HtmlParserProvider, MutationHooks, Node, NodeData, NoopEventHandler,
+    NoopMutationHooks, StyleThreading, TextNodeData,
 };
 use cursor_icon::CursorIcon;
 use linebender_resource_handle::Blob;
@@ -352,6 +352,11 @@ pub struct BaseDocument {
     pub navigation_provider: Arc<dyn NavigationProvider>,
     /// Shell provider. Can be used to request a redraw or set the cursor icon
     pub shell_provider: Arc<dyn ShellProvider>,
+    /// Synchronous DOM-mutation hooks for embedders implementing the DOM
+    /// standard (issue #56). See [`MutationHooks`]; defaults to
+    /// [`NoopMutationHooks`]. Set via
+    /// [`BaseDocument::set_mutation_hooks`].
+    pub mutation_hooks: Arc<dyn MutationHooks>,
     /// HTML parser provider. Used to parse HTML for setInnerHTML
     pub html_parser_provider: Arc<dyn HtmlParserProvider>,
     /// Carried on every sub-resource `Request` this document issues; aborting
@@ -486,6 +491,7 @@ impl BaseDocument {
             net_provider,
             navigation_provider,
             shell_provider,
+            mutation_hooks: Arc::new(NoopMutationHooks),
             html_parser_provider,
             abort_signal: config.abort_signal,
             last_mousedown_time: None,
@@ -541,6 +547,11 @@ impl BaseDocument {
     /// Set the Document's shell provider
     pub fn set_shell_provider(&mut self, shell_provider: Arc<dyn ShellProvider>) {
         self.shell_provider = shell_provider;
+    }
+
+    /// Set the Document's synchronous DOM-mutation hooks (issue #56).
+    pub fn set_mutation_hooks(&mut self, hooks: Arc<dyn MutationHooks>) {
+        self.mutation_hooks = hooks;
     }
 
     /// Set the Document's html parser provider
@@ -720,7 +731,10 @@ impl BaseDocument {
         self.shell_provider.request_redraw();
     }
 
-    pub fn set_style_property(&mut self, node_id: NodeId, name: &str, value: &str) {
+    /// Set one inline-style declaration. Returns whether a declaration was
+    /// actually parsed and stored; callers (notably the mutation hooks) use
+    /// this to skip no-op edits of unknown properties or invalid values.
+    pub fn set_style_property(&mut self, node_id: NodeId, name: &str, value: &str) -> bool {
         let node = &mut self.nodes[node_id];
         let did_change = node.element_data_mut().unwrap().set_style_property(
             name,
@@ -731,9 +745,12 @@ impl BaseDocument {
         if did_change {
             node.set_restyle_hint(RestyleHint::RESTYLE_STYLE_ATTRIBUTE);
         }
+        did_change
     }
 
-    pub fn remove_style_property(&mut self, node_id: NodeId, name: &str) {
+    /// Remove one inline-style declaration. Returns whether a declaration
+    /// was actually dropped.
+    pub fn remove_style_property(&mut self, node_id: NodeId, name: &str) -> bool {
         let node = &mut self.nodes[node_id];
         let did_change = node.element_data_mut().unwrap().remove_style_property(
             name,
@@ -743,6 +760,7 @@ impl BaseDocument {
         if did_change {
             node.set_restyle_hint(RestyleHint::RESTYLE_STYLE_ATTRIBUTE);
         }
+        did_change
     }
 
     pub fn sub_document_node_ids(&self) -> Vec<NodeId> {
