@@ -262,6 +262,9 @@ pub struct BrowserWindow {
     always_on_top: bool,
     title: String,
     web_contents: WebContents,
+    /// Opener window id for `window.open` children (`None` for top-level
+    /// `new BrowserWindow` windows, issue #15).
+    opener: Option<u32>,
 }
 
 impl BrowserWindow {
@@ -277,6 +280,7 @@ impl BrowserWindow {
             always_on_top: false,
             title,
             web_contents: WebContents::default(),
+            opener: None,
         }
     }
 
@@ -298,6 +302,12 @@ impl BrowserWindow {
     /// Renderer surface, mutably.
     pub fn web_contents_mut(&mut self) -> &mut WebContents {
         &mut self.web_contents
+    }
+
+    /// Opener window id for `window.open` children (`None` for top-level
+    /// windows, issue #15).
+    pub fn opener(&self) -> Option<u32> {
+        self.opener
     }
 
     /// `win.isVisible` (MVP: maps `show`/`hide` state).
@@ -407,6 +417,24 @@ impl WindowManager {
         self.next_id += 1;
         self.windows.insert(id, BrowserWindow::new(options));
         id
+    }
+
+    /// `window.open` from a renderer: register a child window carrying the
+    /// opener id (`None` for an unknown opener — a dropped opener cannot
+    /// spawn children, issue #15). The child is a plain managed window
+    /// otherwise: it loads, shows, sends IPC, and closes independently,
+    /// and outlives its opener. The OS surface binds later like any other
+    /// window (`ShellWindow::attach`).
+    pub fn open_child(&mut self, opener: u32, options: BrowserWindowOptions) -> Option<u32> {
+        if !self.windows.contains_key(&opener) {
+            return None;
+        }
+        let id = self.next_id;
+        self.next_id += 1;
+        let mut child = BrowserWindow::new(options);
+        child.opener = Some(opener);
+        self.windows.insert(id, child);
+        Some(id)
     }
 
     /// Look up a window.
@@ -645,6 +673,37 @@ fn custom_options_are_stored() {
     assert!(!win.options().frame);
     assert!(win.options().transparent);
     assert_eq!(win.options().background_color.as_deref(), Some("#1e1e1e"));
+}
+
+#[test]
+fn open_child_coexists_and_outlives_opener() {
+    // Issue #15 MVP: `window.open` basics — the child carries its opener,
+    // both windows stay independently manageable, and closing either side
+    // never disturbs the other.
+    let mut manager = manager();
+    let main = manager.create(BrowserWindowOptions::default());
+    assert_eq!(manager.get(main).unwrap().opener(), None);
+    let child = manager
+        .open_child(main, BrowserWindowOptions::default())
+        .expect("known opener spawns");
+    assert_eq!(manager.get(child).unwrap().opener(), Some(main));
+    assert_eq!(manager.live_ids(), vec![main, child]);
+    assert_eq!(
+        manager.open_child(999, BrowserWindowOptions::default()),
+        None
+    );
+
+    assert!(manager.close(child), "child closes");
+    assert_eq!(manager.live_ids(), vec![main]);
+    assert!(manager.get(main).is_some(), "opener survives its child");
+
+    let orphan = manager
+        .open_child(main, BrowserWindowOptions::default())
+        .expect("opener spawns again");
+    assert!(manager.close(main), "opener closes first");
+    assert_eq!(manager.get(orphan).unwrap().opener(), Some(main));
+    assert!(manager.close(orphan), "orphan still closes cleanly");
+    assert!(manager.live_ids().is_empty());
 }
 
 #[test]

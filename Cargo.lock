@@ -7506,6 +7506,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "strake-pack"
+version = "0.0.0"
+dependencies = [
+ "serde_json",
+ "strake-electron-compat",
+]
+
+[[package]]
 name = "strake-paint"
 version = "0.3.0-beta.2"
 dependencies = [

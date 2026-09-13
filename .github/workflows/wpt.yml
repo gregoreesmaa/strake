@@ -43,7 +43,14 @@ jobs:
       - name: Build WPT runner
         run: cargo build -rp wpt
       - name: Run WPT tests
-        run: cargo run -rp wpt css svg
+        # Issue #73: dom/nodes, dom/events, html/webappapis, and fetch ride
+        # the same report-only main-vs-PR diff gate and scorecard as css/svg.
+        # Probed locally (timing/boundedness check on a current checkout;
+        # per-pin pass rates will differ): 1502 tests, 0 crashes, ~16s wall
+        # (rayon-parallel, 10s per-test backstop), so the 15-minute job
+        # budget is unaffected. Per-dir baselines land in the published
+        # wptreport.json; enforcing ratchets is the #73 follow-up.
+        run: cargo run -rp wpt css svg dom/nodes dom/events html/webappapis fetch
       - name: Compress report (zstd)
         run: zstd -22 --ultra -o ./wpt/output/wptreport.json.zst ./wpt/output/wptreport.json
       - uses: actions/upload-artifact@v7
