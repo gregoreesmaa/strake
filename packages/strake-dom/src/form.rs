@@ -95,7 +95,12 @@ impl BaseDocument {
         )
         .unwrap_or_default();
 
-        let mut parsed_action = self.resolve_url(action);
+        // An unresolvable action (issue #55) falls back to the document URL,
+        // matching the spec's "submit to the document's address" for invalid
+        // actions — and never panics.
+        let mut parsed_action = self
+            .resolve_url(action)
+            .unwrap_or_else(|| self.base_url().clone());
 
         let scheme = parsed_action.scheme();
 
