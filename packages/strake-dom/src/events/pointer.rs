@@ -23,6 +23,7 @@ use crate::{
 };
 
 use super::focus::generate_focus_events;
+use super::titlebar::{perform_titlebar_action, titlebar_action_for_press};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(crate) struct PanState {
@@ -455,6 +456,23 @@ pub(crate) fn handle_pointerdown(
     // but not DOM children), so we use the hit result for text selection.
     let actual_target = hit.node_id;
 
+    // Frameless titlebar actions (issue #54): DOM-driven window move,
+    // resize, and controls consume a main-button press before content
+    // interaction. The consumed press must not arm clicks or focus, so the
+    // driver-set mousedown/active state is cleared as well. The matching
+    // pointerup is swallowed separately (`titlebar_press_consumed`) so no
+    // click is synthesized on release.
+    if button == MouseEventButton::Main
+        && !doc.titlebar_press_consumed
+        && let Some(action) = titlebar_action_for_press(doc, actual_target, x, y)
+    {
+        perform_titlebar_action(doc, action);
+        doc.set_mousedown_node_id(None);
+        doc.unactive_node();
+        doc.titlebar_press_consumed = true;
+        return;
+    }
+
     // Check what kind of element we're dealing with and extract needed info
     enum ClickTarget {
         TextInput {
@@ -599,6 +617,15 @@ pub(crate) fn handle_pointerup<F: FnMut(DomEvent)>(
         }
         doc.debug_log_node(node.id);
         doc.devtools_mut().highlight_hover = false;
+        return;
+    }
+
+    // A press consumed by a frameless titlebar action owns its release
+    // (issue #54): swallow the matching pointerup so no click follows.
+    // The flag clears on any release so touch releases cannot leak it
+    // into a later mouse press.
+    if std::mem::replace(&mut doc.titlebar_press_consumed, false) {
+        let _ = doc.drag_mode.take();
         return;
     }
 

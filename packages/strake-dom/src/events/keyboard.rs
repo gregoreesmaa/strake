@@ -28,6 +28,14 @@ pub(crate) fn handle_key_or_input_event<F: FnMut(DomEvent)>(
             return;
         }
 
+        // F11 toggles borderless fullscreen from anywhere (issue #54).
+        // Auto-repeats must not oscillate the state.
+        if event.key == Key::F11 && !event.is_auto_repeating {
+            let fullscreen = doc.shell_provider.is_window_fullscreen();
+            doc.shell_provider.set_fullscreen(!fullscreen);
+            return;
+        }
+
         // Enter activates the focused control on key down (issue #70). Like
         // Tab above, this runs after `:focus-visible` arming in the caller.
         if event.state.is_pressed() && event.key == Key::Enter {

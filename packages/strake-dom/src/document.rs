@@ -266,6 +266,13 @@ pub struct BaseDocument {
     pub(crate) hover_node_is_text: bool,
     /// The last known pointer position in client coordinates (viewport-relative, unscrolled).
     pub(crate) last_client_pointer_position: Option<taffy::Point<f32>>,
+    /// Resize direction last reported for the hover position (issue #54):
+    /// refreshes the cursor when the pointer crosses a frameless resize
+    /// band without changing hover node.
+    pub(crate) last_titlebar_resize: Option<strake_traits::shell::ResizeDirection>,
+    /// A press consumed by a frameless titlebar action (issue #54) owns its
+    /// release: the matching pointerup is swallowed so no click follows.
+    pub(crate) titlebar_press_consumed: bool,
     /// The node which is currently focussed (if any)
     pub(crate) focus_node_id: Option<NodeId>,
     /// The node which is currently active (if any)
@@ -468,6 +475,8 @@ impl BaseDocument {
             hover_hit_node_id: None,
             hover_node_is_text: false,
             last_client_pointer_position: None,
+            last_titlebar_resize: None,
+            titlebar_press_consumed: false,
             focus_node_id: None,
             active_node_id: None,
             mousedown_node_id: None,
@@ -1877,9 +1886,17 @@ impl BaseDocument {
         self.hover_hit_node_id = hit_node_id;
         self.hover_node_is_text = new_is_text;
 
+        // A frameless resize band can change without changing hover node
+        // (issue #54); refresh the cursor on that transition too.
+        let resize_now = self
+            .last_client_pointer_position
+            .and_then(|pos| crate::events::titlebar_resize_at_client(self, pos.x, pos.y));
+        let resize_changed = resize_now != self.last_titlebar_resize;
+        self.last_titlebar_resize = resize_now;
+
         // Return early if the new node is the same as the already-hovered node
         if hover_node_id == self.hover_node_id {
-            if hit_changed {
+            if hit_changed || resize_changed {
                 // The canonical target is unchanged (so no restyle is needed)
                 // but the precise hit node changed, which can change the cursor
                 // (e.g. moving between text and non-text within one element).
@@ -1917,6 +1934,7 @@ impl BaseDocument {
         // The pointer is no longer over the document, so stop re-resolving
         // hover state against it.
         self.last_client_pointer_position = None;
+        self.last_titlebar_resize = None;
         self.hover_hit_node_id = None;
 
         let Some(hover_node_id) = self.hover_node_id else {
@@ -2174,6 +2192,12 @@ impl BaseDocument {
     }
 
     pub fn get_cursor(&self) -> Option<CursorIcon> {
+        // Frameless resize bands beat content cursors (issue #54).
+        if let Some(pos) = self.last_client_pointer_position
+            && let Some(direction) = crate::events::titlebar_resize_at_client(self, pos.x, pos.y)
+        {
+            return Some(direction.cursor_icon());
+        }
         // Prefer the precise hit node: `cursor` and `user-select` may be set on
         // a pseudo-element or resolved on an anonymous box, and text hits carry
         // is_text via the hit node. Fall back to the canonical hover node if
