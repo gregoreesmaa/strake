@@ -18,7 +18,7 @@ strake-shell = { workspace = true, optional = true }
 # collection holds only the bullet glyph font, text lays out at zero height,
 # and headed windows present blank (the `rdme`/browser apps opt in the same
 # way). Headed proof is meaningless without real text.
-strake-dom = { workspace = true, features = ["system-fonts"], optional = true }
+strake-dom = { workspace = true, features = ["system-fonts", "floats"], optional = true }
 winit = { workspace = true, optional = true }
 
 [features]

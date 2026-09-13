@@ -814,3 +814,151 @@ fn node_events_standin_covers_emitter_basics() {
         ]
     );
 }
+
+/// Loader helpers for issue #151: hermetic temp app dirs (no repo fixtures).
+fn loader_temp_dir(name: &str) -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("strake-loader-{}-{}", name, std::process::id()));
+    let _ = std::fs::remove_dir_all(&dir);
+    std::fs::create_dir_all(&dir).expect("temp loader dir creates");
+    dir
+}
+
+fn loader_doc_at(root: &std::path::Path) -> ScriptDocument {
+    let host = ElectronHost::new("LoaderApp", "1.0.0");
+    // The document clones the host's shared handle into its context, so
+    // dropping `host` here keeps the state alive inside the document.
+    let mut doc =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    doc.install_electron(&host);
+    doc.set_node_app_root(&root.to_string_lossy());
+    doc
+}
+
+/// Relative-file requires resolve inside the app dir with extension and
+/// index probing, plus JSON (issue #151).
+#[test]
+fn require_relative_resolves_with_probing_and_json() {
+    let root = loader_temp_dir("relative");
+    std::fs::create_dir_all(root.join("lib")).expect("lib dir");
+    std::fs::write(
+        root.join("lib/util.js"),
+        "module.exports = { value: 42, from: __dirname };",
+    )
+    .expect("util.js writes");
+    std::fs::write(root.join("lib/data.json"), r#"{"hello":"world"}"#).expect("data.json writes");
+    std::fs::create_dir_all(root.join("lib/nested")).expect("nested dir");
+    std::fs::write(
+        root.join("lib/nested/index.js"),
+        "module.exports = 'nested-index';",
+    )
+    .expect("index writes");
+
+    let mut doc = loader_doc_at(&root);
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "loader bootstrap must install cleanly"
+    );
+    doc.eval(
+        "const util = require('./lib/util'); \
+         __strake_send_message('util:' + util.value); \
+         const data = require('./lib/data.json'); \
+         __strake_send_message('json:' + data.hello); \
+         const nested = require('./lib/nested'); \
+         __strake_send_message('nested:' + nested);",
+    );
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "relative requires must not throw"
+    );
+    let messages = doc.take_messages();
+    assert!(
+        messages.iter().any(|message| message == "util:42"),
+        "relative .js resolves, got {messages:?}"
+    );
+    assert!(
+        messages.iter().any(|message| message == "json:world"),
+        "relative .json resolves, got {messages:?}"
+    );
+    assert!(
+        messages
+            .iter()
+            .any(|message| message == "nested:nested-index"),
+        "directory index probing resolves, got {messages:?}"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Bare specifiers resolve from the app's `node_modules` via `package.json`
+/// `main`, and a missing package fails naming the package (issue #151).
+#[test]
+fn require_bare_resolves_node_modules_and_names_missing() {
+    let root = loader_temp_dir("bare");
+    let pkg_dir = root.join("node_modules/answer");
+    std::fs::create_dir_all(&pkg_dir).expect("pkg dir");
+    std::fs::write(
+        pkg_dir.join("package.json"),
+        r#"{"name":"answer","version":"1.0.0","main":"main.js"}"#,
+    )
+    .expect("package.json writes");
+    std::fs::write(pkg_dir.join("main.js"), "module.exports = 42;").expect("main.js writes");
+
+    let mut doc = loader_doc_at(&root);
+    doc.eval(
+        "const answer = require('answer'); \
+         __strake_send_message('answer:' + answer);",
+    );
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "bare package must resolve, got {:?}",
+        doc.take_js_errors()
+    );
+    assert_eq!(doc.take_messages(), vec!["answer:42"]);
+
+    doc.eval("require('no-such-pkg-xyz');");
+    let errors = doc.take_js_errors();
+    assert_eq!(
+        errors.len(),
+        1,
+        "missing package throws once, got {errors:?}"
+    );
+    assert!(
+        errors[0].contains("Cannot find module 'no-such-pkg-xyz'"),
+        "missing error names the package, got {}",
+        errors[0]
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Core modules and native addons never mis-resolve via the file loader
+/// (issue #151): `fs` stays a named miss and `.node` files are refused.
+#[test]
+fn require_never_misresolves_core_or_native() {
+    let root = loader_temp_dir("core");
+    // A third-party `fs` in node_modules must NOT shadow the core: the
+    // loader refuses cores before filesystem probing.
+    let shadow = root.join("node_modules/fs");
+    std::fs::create_dir_all(&shadow).expect("shadow dir");
+    std::fs::write(shadow.join("index.js"), "module.exports = 'shadow';").expect("shadow writes");
+    std::fs::write(root.join("evil.node"), "not a real addon").expect("node stub writes");
+
+    let mut doc = loader_doc_at(&root);
+    doc.eval("require('fs');");
+    let errors = doc.take_js_errors();
+    assert_eq!(errors.len(), 1, "core fs throws, got {errors:?}");
+    assert!(
+        errors[0].contains("Cannot find module 'fs'"),
+        "core error names the specifier, got {}",
+        errors[0]
+    );
+    doc.eval("require('./evil.node');");
+    let errors = doc.take_js_errors();
+    assert_eq!(errors.len(), 1, ".node refuses, got {errors:?}");
+    assert!(
+        errors[0].contains("evil.node"),
+        ".node error names the specifier, got {}",
+        errors[0]
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}

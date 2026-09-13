@@ -30,20 +30,29 @@ use winit::window::WindowAttributes;
 
 use crate::{App, Bounds, BrowserWindowOptions, Screen, WindowManager};
 
-/// A synchronous [`NetProvider`] that serves `file:` URLs straight from disk
-/// and fails everything else (issue #146).
+/// A [`NetProvider`] that serves `file:` URLs straight from disk and fetches
+/// `http(s):` subresources over the network (issues #146, #150).
 ///
 /// Headed Electron proof windows load local app files: linked stylesheets,
 /// images, and fonts under the entry file resolve to `file:` URLs, which this
-/// provider serves inline without a network stack or async runtime. Remote
-/// (`http(s):`) subresources fail fast through [`NetHandler::error`] instead
-/// of hanging: render-blocking fetches drain (issue #65) and first paint
-/// proceeds with local styles only, matching the headed proof's "same-origin
-/// stylesheets apply, off-origin hrefs keep today's skip behavior" contract.
-/// Missing/unreadable files likewise report through `error`, never panics.
-#[derive(Debug, Default)]
+/// provider serves inline. Remote font stylesheets (e.g. Google Fonts CSS)
+/// and the `@font-face` files they name resolve to `http(s):` URLs, which
+/// this provider fetches on a background thread via `reqwest` (blocking,
+/// native-tls) with an 8s timeout and delivers through [`NetHandler::bytes`].
+///
+/// Render-blocking policy (explicit per issue #150): `file:` fetches are
+/// synchronous and must settle before first paint; `http(s):` fetches are
+/// async and also gate first paint while in flight (the headed paint loop
+/// waits up to its backstop), but any transport failure — offline host,
+/// DNS error, timeout, HTTP error status — reports through
+/// [`NetHandler::error`] so the gate drains (issue #65) and first paint
+/// proceeds with the system-monospace fallback. Offline/unreachable fonts
+/// therefore degrade to today's fallback with no hang, crash, or proof
+/// failure. Missing/unreadable files likewise report through `error`, never
+/// panics.
+#[derive(Debug, Default, Clone)]
 pub struct FileOnlyNetProvider {
-    served: Mutex<Vec<String>>,
+    served: std::sync::Arc<Mutex<Vec<String>>>,
 }
 
 impl FileOnlyNetProvider {
@@ -52,42 +61,96 @@ impl FileOnlyNetProvider {
         Self::default()
     }
 
-    /// The `file:` URLs this provider has served bytes for, in fetch order.
-    /// Embedders (e.g. the headed proof) use this to assert that every
-    /// linked same-origin stylesheet actually fetched before first paint.
+    /// The `file:` and `http(s):` URLs this provider has served bytes for, in
+    /// fetch order. Embedders (e.g. the headed proof) use this to assert that
+    /// every linked same-origin stylesheet actually fetched before first
+    /// paint, and tests pin remote-font delivery hermetically.
     pub fn served_urls(&self) -> Vec<String> {
         self.served
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .clone()
     }
+
+    fn record_served(&self, url: &str) {
+        self.served
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .push(url.to_string());
+    }
 }
 
 impl NetProvider for FileOnlyNetProvider {
     fn fetch(&self, _doc_id: usize, request: Request, handler: Box<dyn NetHandler>) {
         let url = request.url.to_string();
-        if request.url.scheme() != "file" {
-            handler.error(
+        match request.url.scheme() {
+            "file" => match request.url.to_file_path() {
+                Ok(path) => match std::fs::read(&path) {
+                    Ok(bytes) => {
+                        self.record_served(&url);
+                        handler.bytes(url, Bytes::from(bytes));
+                    }
+                    Err(error) => handler.error(
+                        url.clone(),
+                        format!("cannot read {}: {error}", path.display()),
+                    ),
+                },
+                Err(()) => handler.error(url.clone(), format!("invalid file URL: {url}")),
+            },
+            "http" | "https" => {
+                // Async delivery on a background thread: the headed paint
+                // loop pumps `resolve` until critical resources settle, so a
+                // slow network gates first paint up to its backstop while a
+                // fast failure drains immediately to the fallback.
+                let url_clone = url.clone();
+                let served = std::sync::Arc::clone(&self.served);
+                std::thread::spawn(move || {
+                    // 8s client timeout sits inside the headed paint 10s
+                    // settle backstop so the gate always drains first.
+                    let client = reqwest::blocking::Client::builder()
+                        .timeout(std::time::Duration::from_secs(8))
+                        .build();
+                    match client {
+                        Ok(client) => match client.get(url_clone.clone()).send() {
+                            Ok(response) => {
+                                let status = response.status();
+                                if status.is_success() {
+                                    match response.bytes() {
+                                        Ok(bytes) => {
+                                            served
+                                                .lock()
+                                                .unwrap_or_else(std::sync::PoisonError::into_inner)
+                                                .push(url_clone.clone());
+                                            handler.bytes(url_clone, Bytes::from(bytes.to_vec()));
+                                        }
+                                        Err(error) => handler.error(
+                                            url_clone.clone(),
+                                            format!("http read failed for {url_clone}: {error}"),
+                                        ),
+                                    }
+                                } else {
+                                    handler.error(
+                                        url_clone.clone(),
+                                        format!("http {status} for {url_clone}"),
+                                    );
+                                }
+                            }
+                            Err(error) => handler.error(
+                                url_clone.clone(),
+                                format!("http fetch failed for {url_clone}: {error}"),
+                            ),
+                        },
+                        Err(error) => handler.error(
+                            url_clone.clone(),
+                            format!("http client failed for {url_clone}: {error}"),
+                        ),
+                    }
+                });
+            }
+            _ => handler.error(
                 url.clone(),
                 format!("FileOnlyNetProvider skips off-origin subresource: {url}"),
-            );
-            return;
-        }
-        match request.url.to_file_path() {
-            Ok(path) => match std::fs::read(&path) {
-                Ok(bytes) => {
-                    self.served
-                        .lock()
-                        .unwrap_or_else(std::sync::PoisonError::into_inner)
-                        .push(url.clone());
-                    handler.bytes(url, Bytes::from(bytes));
-                }
-                Err(error) => handler.error(
-                    url.clone(),
-                    format!("cannot read {}: {error}", path.display()),
-                ),
-            },
-            Err(()) => handler.error(url.clone(), format!("invalid file URL: {url}")),
+            ),
         }
     }
 }
@@ -304,6 +367,17 @@ impl ShellWindow {
             .resize(self.compat_id, width, height);
         let doc = self.doc.as_mut().ok_or(ShellError::Destroyed)?;
         doc.set_viewport(Viewport::new(width, height, 1.0, ColorScheme::Light));
+        doc.resolve(0.0);
+        Ok(())
+    }
+
+    /// Pump the page document once (`resolve`): ingests arrived subresource
+    /// bytes/errors and re-resolves style/layout. Headless embedders call
+    /// this in a loop until `has_pending_critical_resources` clears when the
+    /// provider delivers async (issue #150 http(s) webfonts).
+    pub fn pump(&mut self) -> Result<(), ShellError> {
+        self.require_open()?;
+        let doc = self.doc.as_mut().ok_or(ShellError::Destroyed)?;
         doc.resolve(0.0);
         Ok(())
     }
@@ -781,9 +855,9 @@ mod tests {
         assert_eq!(doc.author_stylesheets().count(), 0);
     }
 
-    /// Issue #146: off-origin stylesheets stay unfetched in headed proof
-    /// windows, and the failed fetch drains the render gate (issue #65)
-    /// instead of blocking first paint.
+    /// Issues #146/#150: remote stylesheets are attempted over http(s) and
+    /// failures drain the render gate (issue #65) instead of blocking first
+    /// paint. Unreachable hosts degrade to the fallback with nothing served.
     #[test]
     fn off_origin_stylesheet_drains_without_blocking_first_paint() {
         let net = Arc::new(FileOnlyNetProvider::new());
@@ -793,15 +867,33 @@ mod tests {
             .expect("provider");
         win.set_base_url("file:///tmp/strake-shell-offorigin/")
             .expect("base");
+        // Port 1 refuses fast: the async http fetch errors immediately and
+        // the gate drains to the fallback (issue #150 offline behavior).
         win.load_html(
             "<!DOCTYPE html><html><head>\
-             <link rel=\"stylesheet\" href=\"https://fonts.example.com/remote.css\"></head>\
+             <link rel=\"stylesheet\" href=\"http://127.0.0.1:1/remote.css\"></head>\
              <body><p>local only</p></body></html>",
         )
         .expect("load_html");
+        // Pump until the async failure drains (bounded: refused connections
+        // error fast, well inside the backstop).
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        loop {
+            win.pump().expect("pump");
+            {
+                let doc = win.document().expect("live");
+                if !doc.has_pending_critical_resources() {
+                    break;
+                }
+            }
+            if std::time::Instant::now() >= deadline {
+                panic!("remote failure did not drain the render gate");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
         assert!(
             net.served_urls().is_empty(),
-            "off-origin CSS stays unfetched"
+            "unreachable CSS serves nothing"
         );
         let doc = win.document().expect("live");
         assert!(
