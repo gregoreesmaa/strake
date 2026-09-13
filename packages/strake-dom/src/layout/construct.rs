@@ -8,12 +8,16 @@ use parley::{
     WhiteSpaceCollapse,
 };
 use style::{
-    computed_values::position::T as PositionProperty,
+    computed_values::{
+        contain::T as ContainProp, perspective::T as PerspectiveProp,
+        position::T as PositionProperty,
+    },
     data::ElementData as StyloElementData,
+    properties::ComputedValues,
     shared_lock::StylesheetGuards,
     values::{
         computed::{Content, ContentItem, Display, Float, Overflow, TextTransform},
-        specified::box_::{DisplayInside, DisplayOutside},
+        specified::box_::{DisplayInside, DisplayOutside, WillChangeBits},
     },
 };
 use thin_vec::ThinVec;
@@ -747,7 +751,10 @@ pub(crate) fn reparent_out_of_flow_children(doc: &mut BaseDocument) -> bool {
             continue;
         }
         let to_id = if matches!(position, PositionProperty::Fixed) {
-            root_id
+            // `fixed` hoists past non-CB ancestors but is trapped by the
+            // nearest CB-establishing one (issue #80); with none it anchors
+            // to the root element (ICB approximation).
+            fixed_containing_block(doc, node_id, root_id)
         } else {
             positioned_ancestor(doc, node_id, root_id)
         };
@@ -840,30 +847,101 @@ fn has_clipping_intermediate(doc: &BaseDocument, node_id: NodeId, cb_id: NodeId)
     false
 }
 
+/// Whether computed style establishes a containing block for
+/// absolutely-positioned descendants (and traps `fixed` ones) without
+/// non-`static` positioning (issue #80, CSS Transforms 1 §3 / Filter Effects
+/// 1 §3 / CSS Contain 1 §3 / CSS Will Change 1 §3): a non-`none` `transform`,
+/// `filter`, or `perspective`; `contain: layout`/`paint`; or a `will-change`
+/// naming a CB-establishing property. Box generation is checked by the
+/// caller.
+fn establishes_containing_block(styles: &ComputedValues) -> bool {
+    let css_box = styles.get_box();
+    if !css_box.transform.0.is_empty() {
+        return true;
+    }
+    if !matches!(css_box.perspective, PerspectiveProp::None) {
+        return true;
+    }
+    if css_box
+        .contain
+        .intersects(ContainProp::LAYOUT | ContainProp::PAINT)
+    {
+        return true;
+    }
+    if !styles.get_effects().filter.0.is_empty() {
+        return true;
+    }
+    css_box.will_change.bits.intersects(
+        WillChangeBits::TRANSFORM
+            | WillChangeBits::PERSPECTIVE
+            | WillChangeBits::CONTAIN
+            | WillChangeBits::FIXPOS_CB_NON_SVG,
+    )
+}
+
+/// Whether the node generates a box that out-of-flow descendants can graft
+/// onto: `display: contents` ancestors are transparent (no box), as are
+/// `display: none` subtrees.
+fn generates_graft_box(doc: &BaseDocument, id: NodeId) -> bool {
+    doc.nodes.get(id).is_some_and(|node| {
+        node.display_style().is_some_and(|d| {
+            !matches!(d.inside(), DisplayInside::Contents)
+                && !matches!(d.outside(), DisplayOutside::None)
+        })
+    })
+}
+
 /// Nearest DOM ancestor that establishes a containing block for
-/// absolutely-positioned descendants: a non-`static`-positioned element that
-/// generates a box. `display: contents` ancestors are transparent even when
-/// positioned (no box to graft onto), as are `display: none` subtrees.
-/// Falls back to the root element (initial containing block).
+/// absolutely-positioned descendants: a non-`static`-positioned element, or a
+/// `transform`/`filter`/`perspective`/`contain`/`will-change` ancestor (issue
+/// #80), that generates a box. Falls back to the root element (initial
+/// containing block).
 fn positioned_ancestor(doc: &BaseDocument, node_id: NodeId, root_id: NodeId) -> NodeId {
     let mut current = doc.nodes.get(node_id).and_then(|n| n.parent);
     while let Some(id) = current {
         if id == root_id {
             return root_id;
         }
-        let Some(node) = doc.nodes.get(id) else {
-            break;
-        };
-        let establishes = node
-            .primary_styles()
-            .is_some_and(|s| !matches!(s.clone_position(), PositionProperty::Static))
-            && node.display_style().is_some_and(|d| {
-                !matches!(d.inside(), DisplayInside::Contents)
-                    && !matches!(d.outside(), DisplayOutside::None)
-            });
+        let establishes = doc.nodes.get(id).is_some_and(|node| {
+            node.primary_styles().is_some_and(|s| {
+                let styles: &ComputedValues = &s;
+                !matches!(styles.clone_position(), PositionProperty::Static)
+                    || establishes_containing_block(styles)
+            })
+        }) && generates_graft_box(doc, id);
         if establishes {
             return id;
         }
+        let Some(node) = doc.nodes.get(id) else {
+            break;
+        };
+        current = node.parent;
+    }
+    root_id
+}
+
+/// Nearest DOM ancestor trapping a `fixed` box (issue #80): only a
+/// CB-establishing `transform`/`filter`/`perspective`/`contain`/`will-change`
+/// ancestor — plain positioned ancestors do NOT trap `fixed`, which otherwise
+/// anchors to the root element (ICB approximation).
+fn fixed_containing_block(doc: &BaseDocument, node_id: NodeId, root_id: NodeId) -> NodeId {
+    let mut current = doc.nodes.get(node_id).and_then(|n| n.parent);
+    while let Some(id) = current {
+        if id == root_id {
+            return root_id;
+        }
+        let traps = doc.nodes.get(id).is_some_and(|node| {
+            node.primary_styles().is_some_and(|s| {
+                let styles: &ComputedValues = &s;
+                establishes_containing_block(styles)
+            })
+        }) && generates_graft_box(doc, id);
+        if traps {
+            return id;
+        }
+        let Some(node) = doc.nodes.get(id) else {
+            break;
+        };
         current = node.parent;
     }
     root_id

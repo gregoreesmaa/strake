@@ -196,6 +196,69 @@ fn absolute_under_clipping_intermediate_is_not_reparented() {
     );
 }
 
+/// Issue #80: a `transform` ancestor establishes the containing block for
+/// absolutely-positioned descendants. `#t` sits at (50,20); `#abs` insets
+/// (15,5) resolve against `#t`'s padding box → (65,25) pre-transform.
+/// Pre-#80 the box anchored to the ICB at (15,5).
+#[test]
+fn absolute_anchors_to_transformed_ancestor() {
+    let harness = Harness::from_html(
+        r#"<html><head><style>
+            #t { transform: translateX(10px); width: 300px; height: 200px; margin-left: 50px; margin-top: 20px; }
+            #mid { margin-left: 30px; }
+            #abs { position: absolute; top: 5px; left: 15px; width: 40px; height: 20px; }
+        </style></head><body style="margin:0">
+            <div id="t"><div id="mid"><div id="abs"></div></div></div>
+        </body></html>"#,
+    );
+    let abs_rect = harness.layout_rect("#abs");
+    assert_eq!((abs_rect.x, abs_rect.y), (65.0, 25.0));
+}
+
+/// Issue #80: a `transform` ancestor traps `position: fixed` instead of the
+/// box hoisting to the root. `#fx` insets (0,0) resolve against `#t` → (50,20).
+#[test]
+fn fixed_anchors_to_transformed_ancestor_not_root() {
+    let harness = Harness::from_html(
+        r#"<html><body style="margin:0">
+            <div id="t" style="transform: translateX(10px); width: 300px; height: 200px; margin-left: 50px; margin-top: 20px;">
+                <div id="fx" style="position: fixed; top: 0; left: 0; width: 26px; height: 14px;"></div>
+            </div>
+        </body></html>"#,
+    );
+    let fx = harness.layout_rect("#fx");
+    assert_eq!((fx.x, fx.y), (50.0, 20.0));
+}
+
+/// Issue #80: `filter`, `perspective`, `contain: layout`, and
+/// `will-change: transform` each establish a containing block, like
+/// `transform` does. Same geometry as `absolute_anchors_to_transformed_ancestor`.
+#[test]
+fn absolute_anchors_to_filter_perspective_contain_will_change_ancestors() {
+    for ancestor_style in [
+        "filter: blur(2px);",
+        "perspective: 500px;",
+        "contain: layout;",
+        "will-change: transform;",
+    ] {
+        let harness = Harness::from_html(&format!(
+            r#"<html><head><style>
+                #t {{ {ancestor_style} width: 300px; height: 200px; margin-left: 50px; margin-top: 20px; }}
+                #mid {{ margin-left: 30px; }}
+                #abs {{ position: absolute; top: 5px; left: 15px; width: 40px; height: 20px; }}
+            </style></head><body style="margin:0">
+                <div id="t"><div id="mid"><div id="abs"></div></div></div>
+            </body></html>"#,
+        ));
+        let abs_rect = harness.layout_rect("#abs");
+        assert_eq!(
+            (abs_rect.x, abs_rect.y),
+            (65.0, 25.0),
+            "containing block under `{ancestor_style}`"
+        );
+    }
+}
+
 #[test]
 #[ignore = "known MVP limitation (PR #76 review (c)): `fixed` grafts to the root element's box, not the ICB, so root border leaks into insets; want (0,0)"]
 fn fixed_ignores_root_element_border() {
