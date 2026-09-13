@@ -4,8 +4,8 @@ Increment 1: inventory of Electron's `spec/` against the frozen shim surface
 (`TOP50` in `packages/strake-electron-compat/src/coverage.rs`), the harness
 that boots canary apps, and the first ported batch (lifecycle + windows +
 IPC; OS bridges (clipboard/safe-storage/power/`Notification`, #98) are
-ported. Later increments port `dialog`/`shell`/`nativeTheme` once #12
-lands.
+ported (headless recorder backends; native seat wires later). Later
+increments port `dialog`/`shell`/`nativeTheme` once #12 lands.
 
 ## Harness
 
@@ -32,7 +32,7 @@ lands.
 | `api-safe-storage-spec` | `SafeStorage` + `RecordingKeychain` + shim | `electron.rs`: `os_bridges_*`; compat `recording_backend_round_trips_strings`, `garbage_ciphertext_fails_to_decrypt`, `base64_codec_vectors` | Ported |
 | `api-power-monitor-spec`, `powerSaveBlocker` | `PowerHub`/`PowerMonitor`/`PowerSaveBlocker` + shim | `electron.rs`: `os_bridges_*` (inject + dispatch); compat `synthetic_sleep_resume_reaches_listeners`, `throwing_listener_is_isolated`, `blocker_tracks_lifetimes` | Ported |
 | `api-screen-spec` | `Screen`/`Display` + shim | `window_geometry_*` shim test; compat/placement units | Ported |
-| Web `Notification` | `NotificationCenter` + shim (`show`/`onclick`) | `electron_ipc.rs`: `notification_click_fires_onclick`, `notification_click_flushes_async_continuations`; compat `notify_records_delivery_then_click_dispatch`, `deliveries_keep_fifo_order` | Ported |
+| Web `Notification` | `NotificationCenter` + shim (`new Notification`/`onclick`) | `electron_ipc.rs`: `notification_click_fires_onclick`, `notification_click_flushes_async_continuations`; compat `notify_records_delivery_then_click_dispatch`, `deliveries_keep_fifo_order` | Ported |
 | `api-dialog`, `shell`, `nativeTheme`, `Menu`/`Tray`, `globalShortcut` | Deferred (needs #12 / OS bridges) | — | Gap: spec ports land with the implementations |
 | `webContents` (`executeJavaScript`, `openDevTools`, `print`) | Deferred (renderer binding, devtools UI, #12 printing) | — | Gap |
 
