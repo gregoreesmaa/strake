@@ -1081,13 +1081,13 @@ impl BaseDocument {
         node
     }
 
-    pub(crate) fn resolve_url(&self, raw: &str) -> url::Url {
-        self.url.resolve_relative(raw).unwrap_or_else(|| {
-            panic!(
-                "to be able to resolve {raw} with the base_url: {:?}",
-                *self.url
-            )
-        })
+    /// Resolve a resource URL against the document base, returning `None`
+    /// when it cannot resolve (issue #55: a relative URL against the
+    /// default `data:` base, as on real pages parsed without a base URL).
+    /// Callers skip the fetch instead of panicking: an unresolvable URL
+    /// could never be fetched anyway.
+    pub(crate) fn resolve_url(&self, raw: &str) -> Option<url::Url> {
+        self.url.resolve_relative(raw)
     }
 
     pub fn print_tree(&self) {
@@ -1109,7 +1109,9 @@ impl BaseDocument {
                 if let Some(href) = element.attr(local_name!("href")) {
                     // println!("Node {node_id} {href} {href_to_reload} {} {}", resolved_href.as_str(), resolved_href.as_str() == url_to_reload);
                     if href == href_to_reload {
-                        let resolved_href = self.resolve_url(href);
+                        let Some(resolved_href) = self.resolve_url(href) else {
+                            continue;
+                        };
                         let request_url = resolved_href.as_str().to_string();
                         self.net_provider.fetch(
                             self.id(),
