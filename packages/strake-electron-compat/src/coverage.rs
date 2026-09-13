@@ -32,8 +32,8 @@ use SupportStatus::{Deferred, Native, Shimmed};
 ///
 /// Seeded as the top 50 for the Day-1 shim (issue #21); slice PRs grow the
 /// freeze by promoting Deferred entries or recording explicit new decisions
-/// (issues #90–#96), and the count test below pins the exact length so every
-/// addition is a reviewed diff.
+/// (issues #90–#96, #92–#95 here), and the count test below pins the exact
+/// length so every addition is a reviewed diff.
 pub const TOP50: &[ApiEntry] = &[
     ApiEntry {
         electron: "BrowserWindow constructor",
@@ -59,6 +59,11 @@ pub const TOP50: &[ApiEntry] = &[
         electron: "MenuItem roles",
         strake: "Deferred: needs #12 native menus",
         status: Deferred("needs #12 native menus"),
+    },
+    ApiEntry {
+        electron: "Notification",
+        strake: "NotificationCenter::notify + vibey renderer binding",
+        status: Shimmed,
     },
     ApiEntry {
         electron: "Tray constructor",
@@ -107,8 +112,8 @@ pub const TOP50: &[ApiEntry] = &[
     },
     ApiEntry {
         electron: "clipboard.readText/writeText",
-        strake: "Deferred: bind strake-shell native clipboard",
-        status: Deferred("bind strake-shell native clipboard"),
+        strake: "Clipboard::read_text/write_text",
+        status: Shimmed,
     },
     ApiEntry {
         electron: "dialog.showMessageBox",
@@ -169,6 +174,21 @@ pub const TOP50: &[ApiEntry] = &[
         electron: "nativeTheme.shouldUseDarkColors",
         strake: "Deferred: needs #12 theme bridge",
         status: Deferred("needs #12 theme bridge"),
+    },
+    ApiEntry {
+        electron: "powerMonitor",
+        strake: "PowerHub/PowerMonitor::on + inject probe",
+        status: Shimmed,
+    },
+    ApiEntry {
+        electron: "powerSaveBlocker",
+        strake: "PowerSaveBlocker::start/stop/isStarted",
+        status: Shimmed,
+    },
+    ApiEntry {
+        electron: "safeStorage",
+        strake: "SafeStorage::encrypt_string/decrypt_string",
+        status: Shimmed,
     },
     ApiEntry {
         electron: "screen.getAllDisplays",
@@ -360,17 +380,20 @@ const MVP_MUST: &[&str] = &[
 ];
 
 #[test]
-fn coverage_freeze_has_fifty_sorted_unique_apis() {
+fn coverage_freeze_is_sorted_unique_apis() {
     // Seeded at 50 for the Day-1 shim; issues #90/#96 add nine entries
     // (window geometry, webContents title, screen enumeration, plus the
     // setMenuBarVisibility deferral decision); issue #84 adds win.on(closed).
-    assert_eq!(TOP50.len(), 60, "freeze grows only by reviewed diff");
+    // Issues #92–#95 add four entries (Notification, powerMonitor,
+    // powerSaveBlocker, safeStorage) and promote clipboard.readText/writeText
+    // to Shimmed.
+    assert_eq!(TOP50.len(), 64, "freeze grows only by reviewed diff");
     let names: Vec<_> = TOP50.iter().map(|entry| entry.electron).collect();
     let mut sorted = names.clone();
     sorted.sort_unstable();
     assert_eq!(names, sorted, "keep the freeze table sorted for review");
     sorted.dedup();
-    assert_eq!(sorted.len(), 60, "no duplicate Electron APIs");
+    assert_eq!(sorted.len(), 64, "no duplicate Electron APIs");
 }
 
 #[test]

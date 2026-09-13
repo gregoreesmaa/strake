@@ -191,6 +191,132 @@ fn payloads_marshal_structurally() {
         ]
     );
 }
+/// Issue #92: notify → recorded delivery → click dispatch → `onclick` fires.
+#[test]
+fn notification_click_fires_onclick() {
+    let host = ElectronHost::new("QuickStart", "1.0.0");
+    let mut renderer = ScriptDocument::from_html(
+        "<html><body><script></script></body></html>",
+        DocumentConfig::default(),
+    )
+    .without_timer_thread()
+    .with_virtual_time();
+    renderer.install_electron_renderer(&host);
+    renderer.execute_scripts();
+    renderer.eval(
+        "const n = new Notification('Build done', { body: 'ok', icon: 'icon.png' }); \
+         n.onclick = (e) => { __strake_send_message('clicked:' + e.type); };",
+    );
+    assert!(
+        renderer.take_js_errors().is_empty(),
+        "notification construction must not throw"
+    );
+
+    let delivered = host.notification_delivered();
+    assert_eq!(delivered.len(), 1, "one recorded delivery");
+    assert_eq!(delivered[0].request.title, "Build done");
+    assert_eq!(delivered[0].request.body.as_deref(), Some("ok"));
+    assert_eq!(
+        delivered[0].request.icon.as_deref(),
+        Some("icon.png"),
+        "icon crosses the JS boundary via the third native arg"
+    );
+    assert!(!delivered[0].clicked);
+
+    assert!(
+        renderer.dispatch_notification_click(delivered[0].id),
+        "known id dispatches"
+    );
+    assert!(
+        !renderer.dispatch_notification_click(999),
+        "unknown id dispatches nothing"
+    );
+    assert!(renderer.take_js_errors().is_empty());
+    assert_eq!(renderer.take_messages(), vec!["clicked:click"]);
+    assert!(
+        host.notification_delivered()[0].clicked,
+        "delivery marked clicked"
+    );
+}
+
+/// Issue #92 review: `dispatch_notification_click` must drain the job queue
+/// after invoking JS (mirroring `dispatch_power_events`), so promise
+/// continuations scheduled by an `onclick` run synchronously inside dispatch
+/// instead of lingering until an unrelated later pump.
+#[test]
+fn notification_click_flushes_async_continuations() {
+    let host = ElectronHost::new("QuickStart", "1.0.0");
+    let mut renderer = ScriptDocument::from_html(
+        "<html><body><script></script></body></html>",
+        DocumentConfig::default(),
+    )
+    .without_timer_thread()
+    .with_virtual_time();
+    renderer.install_electron_renderer(&host);
+    renderer.execute_scripts();
+    renderer.eval(
+        "const n = new Notification('Build done', { body: 'ok', icon: 'icon.png' }); \
+         n.onclick = (e) => { Promise.resolve().then(() => { __strake_send_message('async:' + e.type); }); };",
+    );
+    assert!(renderer.take_js_errors().is_empty());
+
+    let delivered = host.notification_delivered();
+    assert_eq!(delivered.len(), 1, "one recorded delivery");
+    assert!(
+        renderer.dispatch_notification_click(delivered[0].id),
+        "known id dispatches"
+    );
+    assert!(renderer.take_js_errors().is_empty());
+    assert_eq!(
+        renderer.take_messages(),
+        vec!["async:click"],
+        "onclick microtask continuations flush inside dispatch"
+    );
+}
+
+/// Issue #92 review: the `onclick` setter follows the WebIDL EventHandler
+/// conversion — a non-callable assignment normalizes to `null` without
+/// throwing, and the getter and the native handler map stay in agreement
+/// (dispatching afterwards fires nothing).
+#[test]
+fn notification_onclick_non_callable_normalizes_to_null() {
+    let host = ElectronHost::new("QuickStart", "1.0.0");
+    let mut renderer = ScriptDocument::from_html(
+        "<html><body><script></script></body></html>",
+        DocumentConfig::default(),
+    )
+    .without_timer_thread()
+    .with_virtual_time();
+    renderer.install_electron_renderer(&host);
+    renderer.execute_scripts();
+    renderer.eval(
+        "const n = new Notification('Build done', { body: 'ok' }); \
+         n.onclick = (e) => { __strake_send_message('clicked:' + e.type); }; \
+         n.onclick = 42; \
+         __strake_send_message('onclick-is:' + String(n.onclick));",
+    );
+    assert!(
+        renderer.take_js_errors().is_empty(),
+        "non-callable onclick must normalize to null without throwing"
+    );
+    assert_eq!(renderer.take_messages(), vec!["onclick-is:null"]);
+
+    let delivered = host.notification_delivered();
+    assert_eq!(delivered.len(), 1, "one recorded delivery");
+    assert!(
+        renderer.dispatch_notification_click(delivered[0].id),
+        "known id dispatches"
+    );
+    assert!(renderer.take_js_errors().is_empty());
+    assert!(
+        renderer.take_messages().is_empty(),
+        "cleared handler fires nothing on click"
+    );
+    assert!(
+        host.notification_delivered()[0].clicked,
+        "delivery still marked clicked"
+    );
+}
 
 /// Issue #91: main-process `win.webContents.send(channel, ...args)` queues
 /// per target window; the pump delivers each payload to that window's

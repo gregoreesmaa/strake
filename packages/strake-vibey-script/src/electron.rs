@@ -28,13 +28,20 @@
 //!   is the Slice 1 contract: invoking a JS handler needs a JS `Context` at
 //!   invoke time, which only the Slice 3 renderer bridge holds. Slice 3 will
 //!   pump these registrations through `ipcRenderer.invoke`/`send`.
+//! * `clipboard` (`readText`/`writeText`/`clear`, issue #95),
+//!   `safeStorage` (`isEncryptionAvailable`/`encryptString`/`decryptString`,
+//!   issue #94), `powerMonitor.on` plus `powerSaveBlocker`
+//!   (`start`/`stop`/`isStarted`, issue #93) are backed by the compat OS
+//!   bridges (memory/recording backends headless); queued power events reach
+//!   JS listeners via `dispatch_power_events` on the main document.
 //! * Closing the last window fires JS `window-all-closed` listeners and feeds
 //!   the count into `App` (Electron's default quit).
 //!
 //! Renderer scope (Slice 3): [`ScriptDocument::install_electron_renderer`](crate::ScriptDocument::install_electron_renderer)
-//! exposes `require('electron').ipcRenderer` (`invoke`/`send`/`on`) to a page
-//! document sharing the same [`ElectronHost`]. Renderer calls queue JSON
-//! payloads; the embedder runs [`ScriptDocument::pump_ipc`](crate::ScriptDocument::pump_ipc)
+//! exposes `require('electron').ipcRenderer` (`invoke`/`send`/`on`) plus the
+//! `Notification` Web-API shape (`title`/`body`/`icon`/`onclick`, issue #92)
+//! to a page document sharing the same [`ElectronHost`]. Renderer calls
+//! queue JSON payloads; the embedder runs [`ScriptDocument::pump_ipc`](crate::ScriptDocument::pump_ipc)
 //! to invoke main-process handlers and settle renderer promises — the
 //! headless analogue of Electron's cross-process IPC round-trip. Payloads
 //! follow `JSON.stringify` loosely (functions/`undefined`/symbols vanish,
@@ -52,7 +59,12 @@ use boa_engine::{
     Context, JsError, JsNativeError, JsObject, JsResult, JsString, JsValue, NativeFunction,
     js_string,
 };
-use strake_electron_compat::{App, Bounds, BrowserWindowOptions, Screen, WindowManager};
+use strake_electron_compat::{
+    App, Bounds, BrowserWindowOptions, Clipboard, NotificationCenter, NotificationRequest,
+    PowerHub, PowerSaveBlockerKind, SafeStorage, Screen, WindowManager,
+};
+// Re-exported for embedders driving the issue #92/#93 probes.
+pub use strake_electron_compat::{DeliveredNotification, PowerEvent};
 
 use crate::dom::{dom_ctx, to_rust_string};
 use crate::engine::ScriptEngine;
@@ -149,6 +161,44 @@ const ELECTRON_BOOTSTRAP_JS: &str = r#"
             globalThis.__strake_electron_ipc_on(channel, listener);
         },
     };
+    electron.clipboard = {
+        readText() {
+            return globalThis.__strake_electron_clipboard_read_text();
+        },
+        writeText(text) {
+            globalThis.__strake_electron_clipboard_write_text(text);
+        },
+        clear() {
+            globalThis.__strake_electron_clipboard_clear();
+        },
+    };
+    electron.safeStorage = {
+        isEncryptionAvailable() {
+            return globalThis.__strake_electron_safe_storage_is_available();
+        },
+        encryptString(plainText) {
+            return globalThis.__strake_electron_safe_storage_encrypt(plainText);
+        },
+        decryptString(encrypted) {
+            return globalThis.__strake_electron_safe_storage_decrypt(encrypted);
+        },
+    };
+    electron.powerMonitor = {
+        on(event, listener) {
+            globalThis.__strake_electron_power_monitor_on(event, listener);
+        },
+    };
+    electron.powerSaveBlocker = {
+        start(type) {
+            return globalThis.__strake_electron_power_save_blocker_start(type);
+        },
+        stop(id) {
+            return globalThis.__strake_electron_power_save_blocker_stop(id);
+        },
+        isStarted(id) {
+            return globalThis.__strake_electron_power_save_blocker_is_started(id);
+        },
+    };
     globalThis.__strake_electron_module = electron;
 })();
 "#;
@@ -188,6 +238,28 @@ struct ElectronHostState {
     invoke_queue: VecDeque<PendingInvoke>,
     /// `ipcRenderer.send` broadcasts awaiting the main-process pump.
     send_queue: VecDeque<PendingSend>,
+    /// OS clipboard binding (issue #95; memory backend headless).
+    clipboard: Clipboard,
+    /// Renderer notification hub (issue #92; recording backend headless).
+    notifications: NotificationCenter,
+    /// `Notification` `onclick` handlers by delivery id (renderer scope).
+    notification_clicks: HashMap<u64, JsObject>,
+    /// Shared power hub: blocker registry plus the synthetic-probe queue.
+    power: PowerHub,
+    /// `powerMonitor.on` JS listeners by event name (main scope).
+    power_listeners: HashMap<String, Vec<JsObject>>,
+    /// OS keychain binding (issue #94; recording backend headless).
+    safe_storage: SafeStorage,
+}
+
+/// `powerMonitor` event names carried to JS listeners.
+fn power_event_name(event: PowerEvent) -> &'static str {
+    match event {
+        PowerEvent::Suspend => "suspend",
+        PowerEvent::Resume => "resume",
+        PowerEvent::OnAc => "on-ac",
+        PowerEvent::OnBattery => "on-battery",
+    }
 }
 
 /// One `ipcRenderer.invoke` awaiting [`ScriptDocument::pump_ipc`](crate::ScriptDocument::pump_ipc).
@@ -238,6 +310,12 @@ impl ElectronHost {
                 renderer_listeners: HashMap::new(),
                 invoke_queue: VecDeque::new(),
                 send_queue: VecDeque::new(),
+                clipboard: Clipboard::default(),
+                notifications: NotificationCenter::recording(),
+                notification_clicks: HashMap::new(),
+                power: PowerHub::new(),
+                power_listeners: HashMap::new(),
+                safe_storage: SafeStorage::recording(),
             }))),
         }
     }
@@ -311,6 +389,18 @@ impl ElectronHost {
     pub fn pending_ipc_count(&self) -> usize {
         let state = self.shared.0.borrow();
         state.invoke_queue.len() + state.send_queue.len()
+    }
+
+    /// Recorded notification deliveries, in order (issue #92 test observation).
+    pub fn notification_delivered(&self) -> Vec<DeliveredNotification> {
+        self.shared.0.borrow().notifications.delivered()
+    }
+
+    /// Queue a synthetic (or shell-sourced) power event for JS dispatch
+    /// (issue #93 probe). Delivered by
+    /// [`ScriptDocument::dispatch_power_events`](crate::ScriptDocument::dispatch_power_events).
+    pub fn inject_power_event(&self, event: PowerEvent) {
+        self.shared.0.borrow().power.inject_for_dispatch(event);
     }
 
     /// Queued main-to-renderer `webContents.send` payloads across all windows
@@ -924,6 +1014,213 @@ fn e_ipc_handle(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResul
     Ok(JsValue::undefined())
 }
 
+/// Optional string argument (`undefined`/`null`/missing map to `None`).
+fn optional_string_arg(
+    args: &[JsValue],
+    index: usize,
+    context: &mut Context,
+) -> JsResult<Option<String>> {
+    match args.get(index) {
+        None => Ok(None),
+        Some(value) if value.is_undefined() || value.is_null() => Ok(None),
+        Some(value) => to_rust_string(value, context).map(Some),
+    }
+}
+
+/// Numeric id argument with a caller-named error.
+fn numeric_id_arg(args: &[JsValue], context: &mut Context, what: &str) -> JsResult<u64> {
+    let Some(first) = args.first() else {
+        return Err(JsError::from(
+            JsNativeError::typ().with_message(format!("{what} requires a numeric id")),
+        ));
+    };
+    let id = first.to_number(context)?;
+    if id.is_finite() && id >= 0.0 {
+        Ok(id as u64)
+    } else {
+        Err(JsError::from(
+            JsNativeError::typ().with_message(format!("{what} requires a numeric id")),
+        ))
+    }
+}
+
+/// `clipboard.readText()` (issue #95). Unavailable/empty maps to `""`.
+fn e_clipboard_read_text(_: &JsValue, _: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let text = electron_state(context)?
+        .0
+        .borrow()
+        .clipboard
+        .read_text()
+        .unwrap_or_default();
+    Ok(JsValue::from(js_string!(text.as_str())))
+}
+
+/// `clipboard.writeText(text)` (issue #95).
+fn e_clipboard_write_text(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let text = require_string_arg(args, 0, "clipboard.writeText")?;
+    electron_state(context)?
+        .0
+        .borrow()
+        .clipboard
+        .write_text(&text)
+        .map_err(|error| {
+            JsError::from(
+                JsNativeError::error().with_message(format!("clipboard.writeText failed: {error}")),
+            )
+        })?;
+    Ok(JsValue::undefined())
+}
+
+/// `clipboard.clear()` (issue #95).
+fn e_clipboard_clear(_: &JsValue, _: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    electron_state(context)?
+        .0
+        .borrow()
+        .clipboard
+        .clear()
+        .map_err(|error| {
+            JsError::from(
+                JsNativeError::error().with_message(format!("clipboard.clear failed: {error}")),
+            )
+        })?;
+    Ok(JsValue::undefined())
+}
+
+/// `safeStorage.isEncryptionAvailable()` (issue #94).
+fn e_safe_storage_is_available(
+    _: &JsValue,
+    _: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    Ok(JsValue::from(
+        electron_state(context)?
+            .0
+            .borrow()
+            .safe_storage
+            .is_encryption_available(),
+    ))
+}
+
+/// `safeStorage.encryptString(plain)` → base64 ciphertext (issue #94).
+fn e_safe_storage_encrypt(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let plain = require_string_arg(args, 0, "safeStorage.encryptString")?;
+    let sealed = electron_state(context)?
+        .0
+        .borrow()
+        .safe_storage
+        .encrypt_string(&plain)
+        .map_err(|error| {
+            JsError::from(
+                JsNativeError::error()
+                    .with_message(format!("safeStorage.encryptString failed: {error}")),
+            )
+        })?;
+    Ok(JsValue::from(js_string!(sealed.as_str())))
+}
+
+/// `safeStorage.decryptString(base64)` → plaintext (issue #94).
+fn e_safe_storage_decrypt(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let sealed = require_string_arg(args, 0, "safeStorage.decryptString")?;
+    let plain = electron_state(context)?
+        .0
+        .borrow()
+        .safe_storage
+        .decrypt_string(&sealed)
+        .map_err(|error| {
+            JsError::from(
+                JsNativeError::error()
+                    .with_message(format!("safeStorage.decryptString failed: {error}")),
+            )
+        })?;
+    Ok(JsValue::from(js_string!(plain.as_str())))
+}
+
+/// `powerMonitor.on(event, listener)` (issue #93): record a JS listener.
+/// Unknown event names are accepted and never fire, matching `app.on`.
+fn e_power_monitor_on(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let event = require_string_arg(args, 0, "powerMonitor.on")?;
+    let listener = require_callable_arg(args, 1, "powerMonitor.on")?;
+    electron_state(context)?
+        .0
+        .borrow_mut()
+        .power_listeners
+        .entry(event)
+        .or_default()
+        .push(listener);
+    Ok(JsValue::undefined())
+}
+
+/// `powerSaveBlocker.start(type)` → hold id (issue #93).
+fn e_power_save_blocker_start(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let kind = require_string_arg(args, 0, "powerSaveBlocker.start")?;
+    let kind = match kind.as_str() {
+        "prevent-app-suspension" => PowerSaveBlockerKind::PreventAppSuspension,
+        "prevent-display-sleep" => PowerSaveBlockerKind::PreventDisplaySleep,
+        other => {
+            return Err(JsError::from(JsNativeError::typ().with_message(format!(
+                "powerSaveBlocker.start: unknown type '{other}'"
+            ))));
+        }
+    };
+    let shared = electron_state(context)?;
+    let id = shared
+        .0
+        .borrow()
+        .power
+        .with_blocker(|blocker| blocker.start(kind));
+    Ok(JsValue::from(id as f64))
+}
+
+/// `powerSaveBlocker.stop(id)` (issue #93).
+fn e_power_save_blocker_stop(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let id = numeric_id_arg(args, context, "powerSaveBlocker.stop")?;
+    let shared = electron_state(context)?;
+    Ok(JsValue::from(
+        shared
+            .0
+            .borrow()
+            .power
+            .with_blocker(|blocker| blocker.stop(id)),
+    ))
+}
+
+/// `powerSaveBlocker.isStarted(id)` (issue #93).
+fn e_power_save_blocker_is_started(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let id = numeric_id_arg(args, context, "powerSaveBlocker.isStarted")?;
+    let shared = electron_state(context)?;
+    Ok(JsValue::from(
+        shared
+            .0
+            .borrow()
+            .power
+            .with_blocker(|blocker| blocker.is_started(id)),
+    ))
+}
+
 /// `ipcMain.on(channel, listener)`: record a broadcast listener.
 fn e_ipc_on(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let channel = require_string_arg(args, 0, "ipcMain.on")?;
@@ -1092,6 +1389,66 @@ impl crate::runtime::ScriptRuntime {
             e_ipc_handle,
         );
         register_primitive(&mut self.context, "__strake_electron_ipc_on", 2, e_ipc_on);
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_clipboard_read_text",
+            0,
+            e_clipboard_read_text,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_clipboard_write_text",
+            1,
+            e_clipboard_write_text,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_clipboard_clear",
+            0,
+            e_clipboard_clear,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_safe_storage_is_available",
+            0,
+            e_safe_storage_is_available,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_safe_storage_encrypt",
+            1,
+            e_safe_storage_encrypt,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_safe_storage_decrypt",
+            1,
+            e_safe_storage_decrypt,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_power_monitor_on",
+            2,
+            e_power_monitor_on,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_power_save_blocker_start",
+            1,
+            e_power_save_blocker_start,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_power_save_blocker_stop",
+            1,
+            e_power_save_blocker_stop,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_power_save_blocker_is_started",
+            1,
+            e_power_save_blocker_is_started,
+        );
 
         self.context.insert_data(shared.clone());
         self.eval(ELECTRON_BOOTSTRAP_JS, "<strake-electron-bootstrap>");
@@ -1151,6 +1508,33 @@ const RENDERER_BOOTSTRAP_JS: &str = r#"
         },
     };
     globalThis.__strake_electron_renderer_module = { ipcRenderer };
+    // Web Notifications shape bound to the compat NotificationCenter
+    // (issue #92): construction records the delivery, `onclick` assignment
+    // registers the click handler the embedder dispatches.
+    globalThis.Notification = class Notification {
+        constructor(title, options) {
+            const opts = options || {};
+            this.__strakeNotificationId = globalThis.__strake_notification_show(
+                title === undefined || title === null ? "" : String(title),
+                opts.body === undefined || opts.body === null ? undefined : String(opts.body),
+                opts.icon === undefined || opts.icon === null ? undefined : String(opts.icon),
+            );
+            this.__strakeOnclick = null;
+        }
+        get onclick() {
+            return this.__strakeOnclick;
+        }
+        set onclick(handler) {
+            // WebIDL EventHandler conversion: only callables are kept, anything
+            // else normalizes to null without throwing. The native is called
+            // first so the getter and the native map can never disagree.
+            const normalized = (typeof handler === "function") ? handler : null;
+            globalThis.__strake_notification_onclick(this.__strakeNotificationId, normalized);
+            this.__strakeOnclick = normalized;
+        }
+        close() {
+        }
+    };
 })();
 "#;
 
@@ -1309,6 +1693,56 @@ fn e_ipc_renderer_send(_: &JsValue, args: &[JsValue], context: &mut Context) -> 
     Ok(JsValue::undefined())
 }
 
+/// `new Notification(title, { body, icon })` (issue #92): record the
+/// delivery in the shared center, returning its id for click dispatch.
+fn e_notification_show(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let title = optional_string_arg(args, 0, context)?.unwrap_or_default();
+    let body = optional_string_arg(args, 1, context)?;
+    let icon = optional_string_arg(args, 2, context)?;
+    let shared = electron_state(context)?;
+    let id = shared
+        .0
+        .borrow()
+        .notifications
+        .notify(NotificationRequest { title, body, icon });
+    Ok(JsValue::from(id as f64))
+}
+
+/// `notification.onclick = handler` (issue #92): register (or, with
+/// `null`/`undefined`, clear) the click handler for a delivery id.
+fn e_notification_onclick(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let id = numeric_id_arg(args, context, "Notification.onclick")?;
+    let shared = electron_state(context)?;
+    match args.get(1) {
+        None => Ok(JsValue::undefined()),
+        Some(value) if value.is_undefined() || value.is_null() => {
+            shared.0.borrow_mut().notification_clicks.remove(&id);
+            Ok(JsValue::undefined())
+        }
+        Some(value) => {
+            let handler = value
+                .as_object()
+                .filter(|obj| obj.is_callable())
+                .ok_or_else(|| {
+                    JsError::from(
+                        JsNativeError::typ()
+                            .with_message("Notification.onclick requires a function"),
+                    )
+                })?;
+            shared
+                .0
+                .borrow_mut()
+                .notification_clicks
+                .insert(id, handler);
+            Ok(JsValue::undefined())
+        }
+    }
+}
+
 /// `ipcRenderer.on(channel, listener)`: register a renderer broadcast
 /// listener, invoked by the pump for main-originated `webContents.send`
 /// payloads (issue #91).
@@ -1372,6 +1806,18 @@ impl crate::runtime::ScriptRuntime {
             "__strake_ipc_renderer_on",
             2,
             e_ipc_renderer_on,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_notification_show",
+            3,
+            e_notification_show,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_notification_onclick",
+            2,
+            e_notification_onclick,
         );
 
         self.context.insert_data(shared.clone());
@@ -1591,5 +2037,77 @@ impl crate::runtime::ScriptRuntime {
             self.run_jobs("ipc microtasks");
         }
         pumped
+    }
+
+    /// Dispatch a notification click (issue #92): mark the delivery clicked
+    /// and fire its renderer `onclick` with a `{ type: 'click' }` event.
+    /// Returns `false` (no dispatch) for unknown delivery ids. Call on the
+    /// renderer runtime whose context owns the handler.
+    pub(crate) fn dispatch_notification_click(&mut self, id: u64) -> bool {
+        let Some(shared) = self.context.get_data::<SharedElectronHost>().cloned() else {
+            return false;
+        };
+        if !shared.0.borrow().notifications.click(id) {
+            return false;
+        }
+        let handler = shared.0.borrow().notification_clicks.get(&id).cloned();
+        let Some(handler) = handler else {
+            return true;
+        };
+        let mut init = ObjectInitializer::new(&mut self.context);
+        init.property(
+            js_string!("type"),
+            JsValue::from(js_string!("click")),
+            Attribute::all(),
+        );
+        let event = JsValue::from(init.build());
+        if let Err(error) = handler.call(&JsValue::undefined(), &[event], &mut self.context) {
+            record_callback_error(&mut self.context, "Notification.onclick", &error);
+        }
+        self.run_jobs("notification click microtasks");
+        true
+    }
+
+    /// Dispatch queued power events to main-scope `powerMonitor.on`
+    /// listeners (issue #93 probe): each event invokes its name's listeners
+    /// with a `{ type }` event object. Returns the number of dispatched
+    /// events. Call on the main runtime whose context owns the listeners.
+    pub(crate) fn dispatch_power_events(&mut self) -> usize {
+        let Some(shared) = self.context.get_data::<SharedElectronHost>().cloned() else {
+            return 0;
+        };
+        let pending = shared.0.borrow().power.take_pending();
+        let count = pending.len();
+        for event in pending {
+            let name = power_event_name(event).to_string();
+            let listeners = shared
+                .0
+                .borrow()
+                .power_listeners
+                .get(&name)
+                .cloned()
+                .unwrap_or_default();
+            if listeners.is_empty() {
+                continue;
+            }
+            let mut init = ObjectInitializer::new(&mut self.context);
+            init.property(
+                js_string!("type"),
+                JsValue::from(js_string!(name.as_str())),
+                Attribute::all(),
+            );
+            let call_args = [JsValue::from(init.build())];
+            for listener in listeners {
+                if let Err(error) =
+                    listener.call(&JsValue::undefined(), &call_args, &mut self.context)
+                {
+                    record_callback_error(&mut self.context, "powerMonitor.on listener", &error);
+                }
+            }
+        }
+        if count > 0 {
+            self.run_jobs("power event microtasks");
+        }
+        count
     }
 }
