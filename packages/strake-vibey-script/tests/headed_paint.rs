@@ -68,10 +68,14 @@ fn paint_runs_preload_then_page_scripts_and_applies_linked_css() {
 /// expectation sets so the headed proof skips both assertions honestly.
 #[test]
 fn paint_without_preload_or_css_reports_empty_sets() {
+    // The entry file need not exist (no links to resolve), but the path must
+    // be formable as a `file://` URL on every platform (`/tmp/...` is not
+    // valid on Windows, which caught this in CI).
+    let entry = std::env::temp_dir().join("strake-paint-bare-index.html");
     let painted = paint_app_window(
         "<!DOCTYPE html><html><head><title>Bare</title></head>\
          <body><p>bare</p></body></html>",
-        Path::new("/tmp/strake-paint-bare/index.html"),
+        &entry,
         "bare",
         800,
         600,
