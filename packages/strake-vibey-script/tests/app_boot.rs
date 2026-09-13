@@ -119,3 +119,30 @@ fn boot_app_dir_with_ipc_proof_round_trips_through_booted_processes() {
     );
     assert!(proof.succeeded());
 }
+
+/// The IPC proof must not depend on the app shipping a preload: apps
+/// without `webPreferences` (like the calculator demo) still boot a
+/// renderer for the first window so the main/renderer pair proves out.
+#[test]
+fn boot_app_dir_with_ipc_proof_works_without_preload() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mini-app-no-preload");
+    let (report, proof) = strake_vibey_script::boot_app_dir_with_ipc_proof(&dir)
+        .expect("no-preload fixture app boots with proof");
+    assert!(
+        report.js_errors.is_empty(),
+        "main.js must run cleanly, got {:?}",
+        report.js_errors
+    );
+    assert_eq!(report.windows.len(), 1, "exactly one window");
+    assert!(
+        report.windows[0].preload.is_none(),
+        "fixture really has no preload"
+    );
+    assert_eq!(proof.pumped, 1, "probe call pumps without a preload");
+    assert_eq!(
+        proof.reply.as_deref(),
+        Some("strake:pong"),
+        "renderer promise settles with the main reply"
+    );
+    assert!(proof.succeeded());
+}
