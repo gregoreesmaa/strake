@@ -272,7 +272,7 @@ pub struct BaseDocument {
     pub(crate) active_node_id: Option<NodeId>,
     /// The node which recieved a mousedown event (if any)
     pub(crate) mousedown_node_id: Option<NodeId>,
-    /// The range slider currently being dragged (if any, issue #51)
+    /// The range slider currently being dragged (if any, issue #456)
     pub(crate) range_drag_node_id: Option<NodeId>,
     /// The last time a mousedown was made (for double-click detection)
     pub(crate) last_mousedown_time: Option<Instant>,

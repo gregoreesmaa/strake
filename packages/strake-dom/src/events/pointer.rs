@@ -213,7 +213,7 @@ pub(crate) fn handle_pointermove<F: FnMut(DomEvent)>(
     let y = event.page_y();
     let buttons = event.buttons;
 
-    // Range slider drag (issue #51): position updates own the gesture.
+    // Range slider drag (issue #456): position updates own the gesture.
     if let Some(range_id) = doc.range_drag_node_id {
         set_range_value_from_x(doc, range_id, x, &mut dispatch_event);
         doc.shell_provider.request_redraw();
@@ -388,7 +388,7 @@ pub(crate) fn handle_pointermove<F: FnMut(DomEvent)>(
 }
 
 /// Nearest non-anonymous element at or above `node_id` that is a range
-/// input with slider state, if any (issue #51). Stops at the first real
+/// input with slider state, if any (issue #456). Stops at the first real
 /// element, so hits on unrelated content do not leak into a slider.
 fn range_input_at(doc: &BaseDocument, node_id: NodeId) -> Option<NodeId> {
     let mut current = Some(node_id);
@@ -408,7 +408,7 @@ fn range_input_at(doc: &BaseDocument, node_id: NodeId) -> Option<NodeId> {
 }
 
 /// Set a range slider's value from a horizontal position in the same units
-/// as layout boxes (issue #51). Snaps to `step`, marks paint-only damage,
+/// as layout boxes (issue #456). Snaps to `step`, marks paint-only damage,
 /// and dispatches an `input` event when the value actually changed.
 fn set_range_value_from_x(
     doc: &mut BaseDocument,
@@ -526,7 +526,7 @@ pub(crate) fn handle_pointerdown(
     // but not DOM children), so we use the hit result for text selection.
     let actual_target = hit.node_id;
 
-    // Range slider drag (issue #51): a main-button press focuses the slider,
+    // Range slider drag (issue #456): a main-button press focuses the slider,
     // sets its value from the press position, and captures the drag until
     // release. Takes precedence over text selection like scrollbar drags.
     if button == MouseEventButton::Main {
@@ -663,7 +663,7 @@ pub(crate) fn handle_pointerup<F: FnMut(DomEvent)>(
     event: &StrakePointerEvent,
     mut dispatch_event: F,
 ) {
-    // End a range slider drag (issue #51). The click synthesized below keeps
+    // End a range slider drag (issue #456). The click synthesized below keeps
     // focus via the range arm in `handle_click`.
     if doc.range_drag_node_id.is_some() {
         doc.range_drag_node_id = None;
@@ -805,7 +805,7 @@ pub(crate) fn handle_click(
                 }
                 // A range slider's value and focus were set on pointerdown
                 // and drag; a click carries nothing further, but matching
-                // here keeps focus instead of clearing it (issue #51).
+                // here keeps focus instead of clearing it (issue #456).
                 local_name!("input") if el.attr(local_name!("type")) == Some("range") => {
                     break 'matched true;
                 }

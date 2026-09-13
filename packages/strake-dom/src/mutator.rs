@@ -409,7 +409,7 @@ impl DocumentMutator<'_> {
             || (tag, attr) == tag_and_attr!("input", "step")
             || (tag, attr) == tag_and_attr!("input", "value")
         {
-            // Re-parse range slider params (issue #51). Interaction-driven
+            // Re-parse range slider params (issue #456). Interaction-driven
             // value changes go through the slider state, not the attribute.
             if element.range_input_data().is_some() {
                 let fresh = RangeInputData::from_attrs(element);

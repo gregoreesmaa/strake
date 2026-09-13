@@ -100,7 +100,7 @@ fn draw_checkbox(
     }
 }
 
-/// Slider track, fill, and thumb for `<input type="range">` (issue #51).
+/// Slider track, fill, and thumb for `<input type="range">` (issue #456).
 /// Horizontal only; the thumb center travels the content width linearly
 /// with `value`, matching the pointer mapping in `set_range_value_from_x`.
 fn draw_range(
