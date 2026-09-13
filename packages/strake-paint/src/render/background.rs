@@ -742,6 +742,9 @@ enum BackgroundSizeComputeMode {
     /// Intrinsic dimensions of an image which may lack an intrinsic width,
     /// height, and/or aspect ratio (e.g. SVG), sized per the CSS default
     /// sizing algorithm (https://drafts.csswg.org/css-images/#default-sizing)
+    /// The sole constructor lives behind `feature = "svg"`, so minimal
+    /// feature builds would otherwise trip `dead_code` under `-D warnings`.
+    #[cfg_attr(not(feature = "svg"), allow(dead_code))]
     Intrinsic {
         width: Option<f32>,
         height: Option<f32>,

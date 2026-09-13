@@ -30,8 +30,10 @@ mod app;
 mod clipboard;
 mod coverage;
 mod ipc;
+mod menu;
 mod message_channel;
 mod notification;
+mod permissions;
 mod power;
 mod safe_storage;
 mod screen;
@@ -43,11 +45,16 @@ pub use app::{App, AppEventKind, AppPath};
 pub use clipboard::{Clipboard, ClipboardBackend, ClipboardError, MemoryClipboard};
 pub use coverage::{ApiEntry, SupportStatus, TOP50};
 pub use ipc::{IpcBus, IpcError, ListenerId};
+pub use menu::{
+    Accelerator, AcceleratorError, MenuError, MenuItemTemplate, MenuItemType, MenuRole,
+    MenuTemplate, Modifier, parse_accelerator,
+};
 pub use message_channel::{MessageChannel, Port};
 pub use notification::{
     DeliveredNotification, NotificationBackend, NotificationCenter, NotificationRequest,
     RecordingBackend,
 };
+pub use permissions::{Decision, Enforcer, NetScope, PathScope, PermissionManifest, clean_path};
 pub use power::{
     PowerEvent, PowerHub, PowerListenerId, PowerMonitor, PowerSaveBlocker, PowerSaveBlockerKind,
 };
