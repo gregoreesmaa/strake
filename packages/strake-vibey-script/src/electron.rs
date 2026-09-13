@@ -1490,6 +1490,26 @@ impl crate::runtime::ScriptRuntime {
         self.eval(NODE_STANDIN_BOOTSTRAP_JS, "<strake-node-standins>");
     }
 
+    /// Point module resolution at an app dir (issue #110): `__dirname` and
+    /// `process.cwd()` report `root`, so `path.join(__dirname, ...)` resolves
+    /// under the app. Runs after an Electron install, which seeds
+    /// `__strake_node_info`; without one only `__dirname` is set.
+    pub(crate) fn set_node_app_root(&mut self, root: &str) {
+        let root_js = JsValue::from(js_string!(root));
+        let global = self.context.global_object();
+        if let Ok(info) = global.get(js_string!("__strake_node_info"), &mut self.context)
+            && let Some(info) = info.as_object()
+        {
+            let _ = info.set(
+                js_string!("appRoot"),
+                root_js.clone(),
+                false,
+                &mut self.context,
+            );
+        }
+        let _ = global.set(js_string!("__dirname"), root_js, false, &mut self.context);
+    }
+
     /// Install the Electron host: primitives, the `require` global, and the
     /// assembled module object (idempotent: reinstalling replaces the host).
     pub(crate) fn install_electron_host(&mut self, shared: &SharedElectronHost) {

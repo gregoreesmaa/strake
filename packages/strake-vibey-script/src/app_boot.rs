@@ -1,0 +1,284 @@
+//! Boot an Electron app directory headlessly (issue #110, the `npm start`
+//! equivalent).
+//!
+//! [`boot_app_dir`] reads `<app-dir>/package.json`, runs its `main` script
+//! through the [`crate::ElectronHost`] shim with the app dir as the module
+//! root, marks the app ready, and reports every created window: geometry, the
+//! resolved entry HTML first-painted through the DOM pipeline (with its
+//! `<title>`), and the `webPreferences.preload` file executed in renderer
+//! scope before page scripts.
+//!
+//! The windows themselves stay headless: handing a window to a real OS
+//! surface is [`strake_electron_compat::ShellWindow::attach`] plus
+//! `into_window_config` on a live winit event loop (the headed second half
+//! of #110), which consumes the ids this report carries.
+
+use std::fmt;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
+
+use strake_dom::{BaseDocument, DEFAULT_CSS, DocumentConfig};
+use strake_html::{DocumentHtmlParser, HtmlProvider};
+use strake_traits::shell::{ColorScheme, Viewport};
+
+use crate::{ElectronHost, ScriptDocument};
+
+/// One window the app's `main` script created, with its entry page loaded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BootedWindow {
+    /// Compat window id (feeds `ShellWindow::attach` for the headed handoff).
+    pub id: u32,
+    /// Content width in DIP.
+    pub width: u32,
+    /// Content height in DIP.
+    pub height: u32,
+    /// Resolved entry HTML path, or the raw navigation target when it names
+    /// no local file (e.g. `loadURL("https://…")`).
+    pub entry_file: String,
+    /// The entry page `<title>` after headless first paint, if any.
+    pub page_title: Option<String>,
+    /// Recorded `webPreferences.preload` path, if the window declared one.
+    pub preload: Option<String>,
+    /// JS errors from executing the preload, if it ran.
+    pub preload_errors: Vec<String>,
+}
+
+/// What booting an app directory produced.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AppBootReport {
+    /// `package.json` `name` (falls back to the directory name).
+    pub app_name: String,
+    /// `package.json` `main` as written (`"main.js"` default per Electron).
+    pub main_entry: String,
+    /// Windows the `main` script created, in ascending id order.
+    pub windows: Vec<BootedWindow>,
+    /// JS errors from the `main` script itself (evaluate + ready), if any.
+    pub js_errors: Vec<String>,
+}
+
+/// Why an app directory refused to boot.
+#[derive(Debug)]
+pub enum BootError {
+    /// No `package.json` in the directory (or it could not be read).
+    MissingPackageJson { dir: PathBuf },
+    /// `package.json` is not valid JSON or not an object.
+    InvalidPackageJson { path: PathBuf, message: String },
+    /// The `main` script (or another app file) could not be read.
+    UnreadableFile {
+        path: PathBuf,
+        source: std::io::Error,
+    },
+}
+
+impl fmt::Display for BootError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::MissingPackageJson { dir } => {
+                write!(f, "no package.json in {}", dir.display())
+            }
+            Self::InvalidPackageJson { path, message } => {
+                write!(f, "invalid package.json at {}: {message}", path.display())
+            }
+            Self::UnreadableFile { path, source } => {
+                write!(f, "cannot read {}: {source}", path.display())
+            }
+        }
+    }
+}
+
+impl std::error::Error for BootError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::UnreadableFile { source, .. } => Some(source),
+            Self::MissingPackageJson { .. } | Self::InvalidPackageJson { .. } => None,
+        }
+    }
+}
+
+fn read_file(path: &Path) -> Result<String, BootError> {
+    std::fs::read_to_string(path).map_err(|source| BootError::UnreadableFile {
+        path: path.to_path_buf(),
+        source,
+    })
+}
+
+/// Parse the entry HTML and resolve layout at the window size (headless first
+/// paint), returning the page `<title>`, if the page sets one. `base_url` is
+/// the entry file's `file://` URL so relative resources (`./styles.css`)
+/// resolve instead of panicking the resolver.
+fn first_paint_title(
+    html: &str,
+    width: u32,
+    height: u32,
+    base_url: Option<String>,
+) -> Option<String> {
+    let config = DocumentConfig {
+        viewport: Some(Viewport::new(width, height, 1.0, ColorScheme::Light)),
+        ua_stylesheets: Some(vec![String::from(DEFAULT_CSS)]),
+        html_parser_provider: Some(Arc::new(HtmlProvider)),
+        base_url,
+        ..Default::default()
+    };
+    let mut doc = BaseDocument::new(config);
+    let mut mutr = doc.mutate();
+    DocumentHtmlParser::parse_into_mutator(&mut mutr, html);
+    drop(mutr);
+    doc.resolve(0.0);
+    doc.find_title_node().map(|node| node.text_content())
+}
+
+/// Map a `loadFile`/`loadURL` target to a local path: the `file://` URL the
+/// compat core records when it exists on disk, else the app dir joined with
+/// the target's file name. Returns `None` for non-file targets.
+fn resolve_entry_file(app_dir: &Path, target: &str) -> Option<PathBuf> {
+    if let Some(path) = target.strip_prefix("file://") {
+        let direct = PathBuf::from(path);
+        if direct.is_file() {
+            return Some(direct);
+        }
+        if let Some(name) = direct.file_name() {
+            let under_app = app_dir.join(name);
+            if under_app.is_file() {
+                return Some(under_app);
+            }
+        }
+        return None;
+    }
+    None
+}
+
+/// Boot an Electron app directory headlessly (issue #110).
+///
+/// Reads `<app-dir>/package.json` (`main`, default `"index.js"`), evaluates
+/// the main script with the app dir as `__dirname`, marks the app ready, and
+/// loads each created window's entry HTML: first paint plus preload execution
+/// in renderer scope. Remote (`http(s)`) targets are recorded, not fetched.
+pub fn boot_app_dir(app_dir: &Path) -> Result<AppBootReport, BootError> {
+    let manifest_path = app_dir.join("package.json");
+    if !manifest_path.is_file() {
+        return Err(BootError::MissingPackageJson {
+            dir: app_dir.to_path_buf(),
+        });
+    }
+    let manifest: serde_json::Value =
+        serde_json::from_str(&read_file(&manifest_path)?).map_err(|error| {
+            BootError::InvalidPackageJson {
+                path: manifest_path.clone(),
+                message: error.to_string(),
+            }
+        })?;
+    let manifest = manifest
+        .as_object()
+        .ok_or_else(|| BootError::InvalidPackageJson {
+            path: manifest_path.clone(),
+            message: String::from("top level must be an object"),
+        })?;
+    let app_name = manifest
+        .get("name")
+        .and_then(|name| name.as_str())
+        .map(str::to_string)
+        .unwrap_or_else(|| {
+            app_dir
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .unwrap_or_else(|| String::from("app"))
+        });
+    let app_version = manifest
+        .get("version")
+        .and_then(|version| version.as_str())
+        .unwrap_or("0.0.0");
+    let main_entry = manifest
+        .get("main")
+        .and_then(|main| main.as_str())
+        .unwrap_or("index.js");
+    let main_path = app_dir.join(main_entry);
+    let main_source = read_file(&main_path)?;
+
+    let host = ElectronHost::new(&app_name, app_version);
+    let mut doc =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    doc.install_electron(&host);
+    let mut js_errors = doc.take_js_errors();
+    if let Some(root) = app_dir.to_str() {
+        doc.set_node_app_root(root);
+    }
+    doc.eval(&main_source);
+    js_errors.extend(doc.take_js_errors());
+    doc.mark_electron_ready();
+    js_errors.extend(doc.take_js_errors());
+
+    let mut windows = Vec::new();
+    for id in host.live_window_ids() {
+        let (width, height) = host
+            .window_bounds(id)
+            .map(|bounds| (bounds.width, bounds.height))
+            .unwrap_or((800, 600));
+        let target = host.window_pending_url(id).unwrap_or_default();
+        let preload = host.window_preload(id);
+        let mut window = BootedWindow {
+            id,
+            width,
+            height,
+            entry_file: target.clone(),
+            page_title: None,
+            preload: preload.clone(),
+            preload_errors: Vec::new(),
+        };
+        if let Some(entry_path) = resolve_entry_file(app_dir, &target) {
+            window.entry_file = entry_path.to_string_lossy().into_owned();
+            // The entry file's `file://` URL is the base for relative page
+            // resources (`./styles.css`, `./renderer.js`).
+            let base_url = url::Url::from_file_path(&entry_path)
+                .ok()
+                .map(|url| url.into());
+            if let Ok(html) = std::fs::read_to_string(&entry_path) {
+                window.page_title = first_paint_title(&html, width, height, base_url.clone());
+                // The main script joins `__dirname`, which the boot sets to
+                // the app dir; still, resolve relative preload paths against
+                // the app dir defensively.
+                if let Some(preload_path) = preload.as_deref().map(Path::new).and_then(|raw| {
+                    if raw.is_file() {
+                        return Some(raw.to_path_buf());
+                    }
+                    raw.file_name()
+                        .map(|name| app_dir.join(name))
+                        .filter(|path| path.is_file())
+                }) {
+                    let renderer_config = DocumentConfig {
+                        base_url: base_url.clone(),
+                        ..Default::default()
+                    };
+                    let mut renderer = ScriptDocument::from_html(&html, renderer_config)
+                        .without_timer_thread()
+                        .with_virtual_time();
+                    renderer.install_electron_renderer(&host);
+                    renderer.take_js_errors();
+                    match std::fs::read_to_string(&preload_path) {
+                        Ok(source) => {
+                            // Preload runs after document creation, before
+                            // page scripts (`execute_scripts` below).
+                            renderer.eval(&source);
+                            renderer.execute_scripts();
+                            window.preload_errors = renderer.take_js_errors();
+                        }
+                        Err(source) => {
+                            window
+                                .preload_errors
+                                .push(format!("cannot read {}: {source}", preload_path.display()));
+                        }
+                    }
+                }
+            }
+        }
+        windows.push(window);
+    }
+
+    Ok(AppBootReport {
+        app_name,
+        main_entry: main_entry.to_string(),
+        windows,
+        js_errors,
+    })
+}

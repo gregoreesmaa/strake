@@ -7527,6 +7527,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "strake-run"
+version = "0.0.0"
+dependencies = [
+ "strake-vibey-script",
+]
+
+[[package]]
 name = "strake-shell"
 version = "0.3.0-beta.2"
 dependencies = [

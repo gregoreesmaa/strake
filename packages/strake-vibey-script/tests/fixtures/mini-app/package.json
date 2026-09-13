@@ -1,0 +1,10 @@
+{
+  "name": "mini-app",
+  "version": "1.0.0",
+  "description": "Fixture Electron app for the strake-run boot path (issue #110)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "license": "CC0-1.0"
+}

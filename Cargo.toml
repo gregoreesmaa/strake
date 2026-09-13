@@ -21,6 +21,7 @@ members = [
     "apps/browser/persistence",
     "apps/readme",
     "apps/bump",
+    "apps/run",
     "wpt/runner",
     "tests/strake-tests",
     "examples/counter",
