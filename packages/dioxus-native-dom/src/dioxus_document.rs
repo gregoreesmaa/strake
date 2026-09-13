@@ -371,7 +371,7 @@ mod tests {
     use dioxus_core::ScopeId;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    /// Regression pin for <https://github.com/gregoreesmaa/strake/issues/64>
+    /// Regression pin for <https://github.com/gregoreesmaa/strake/issues/692>
     /// (upstream <https://github.com/DioxusLabs/blitz/issues/692>): the
     /// Select-shaped click flow — an `onclick` handler that reads its
     /// mounted node and then mutates document state in the same handler
