@@ -38,6 +38,12 @@ pub(crate) fn handle_key_or_input_event<F: FnMut(DomEvent)>(
             return;
         }
 
+        // Enter activates the focused control on key down (issue #70). Like
+        // Tab above, this runs after `:focus-visible` arming in the caller.
+        if event.state.is_pressed() && event.key == Key::Enter {
+            try_keyboard_activate(doc, target, event.modifiers, &mut dispatch_event);
+        }
+
         // Handle copy (Ctrl+C/Cmd+C) for text selection when no text input is focused
         if event.state.is_pressed() {
             let action_mod = event.modifiers.contains(ACTION_MOD);
@@ -155,6 +161,67 @@ fn handle_range_key(
         ));
     }
     true
+}
+
+/// Space activates the focused control on key *up*, so holding Space does not
+/// repeat-activate (issue #70). KeyUp otherwise has no default action.
+pub(crate) fn handle_keyup(
+    doc: &mut BaseDocument,
+    target: NodeId,
+    event: &StrakeKeyEvent,
+    dispatch_event: &mut dyn FnMut(DomEvent),
+) {
+    if event.state.is_pressed() {
+        return;
+    }
+    if matches!(&event.key, Key::Character(text) if text == " ") {
+        try_keyboard_activate(doc, target, event.modifiers, dispatch_event);
+    }
+}
+
+/// Dispatch a synthetic click on the focused control for keyboard activation
+/// (issue #70): Enter on key down, Space on key up. Text inputs consume
+/// these keys for editing, so they never activate. Queuing the click reaches
+/// script handlers first and then the click default action (checkbox
+/// toggling, details expansion, link navigation) exactly like a mouse click,
+/// including `preventDefault` handling by the driver.
+fn try_keyboard_activate(
+    doc: &mut BaseDocument,
+    target: NodeId,
+    mods: Modifiers,
+    dispatch_event: &mut dyn FnMut(DomEvent),
+) {
+    let focused = doc.focus_node_id.unwrap_or(target);
+    let Some(node) = doc.nodes.get(focused) else {
+        return;
+    };
+    let Some(element) = node.element_data() else {
+        return;
+    };
+    // Text inputs (and textareas) consume Enter/Space for editing.
+    if element.text_input_data().is_some() {
+        return;
+    }
+    let tag = element.name.local.clone();
+    // Range sliders consume keys for stepping (issue #51); Enter/Space must
+    // not click them.
+    let activatable = tag == local_name!("button")
+        || tag == local_name!("summary")
+        || (tag == local_name!("input")
+            && !matches!(
+                element.attr(local_name!("type")),
+                Some("hidden") | Some("range")
+            ))
+        || (tag == local_name!("a") && element.attr(local_name!("href")).is_some());
+    if !activatable {
+        return;
+    }
+    let Some(node) = doc.nodes.get(focused) else {
+        return;
+    };
+    if let click @ DomEventData::Click(_) = node.synthetic_click_event(mods) {
+        dispatch_event(DomEvent::new(focused, click));
+    }
 }
 
 impl BaseDocument {

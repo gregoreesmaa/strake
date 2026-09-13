@@ -468,7 +468,14 @@ impl selectors::Element for StrakeNode<'_> {
             NonTSPseudoClass::Enabled => self.element_state().contains(ElementState::ENABLED),
             NonTSPseudoClass::Focus => self.element_state().contains(ElementState::FOCUS),
             NonTSPseudoClass::FocusWithin => false,
-            NonTSPseudoClass::FocusVisible => false,
+            NonTSPseudoClass::FocusVisible => {
+                // Browser heuristic (issue #70): the ring follows the last
+                // interaction modality, tracked on the document node (armed
+                // by key presses, disarmed by pointer presses), not the
+                // per-element FOCUSRING bit alone.
+                self.element_state().contains(ElementState::FOCUSRING)
+                    && TNode::owner_doc(self).keyboard_modality()
+            }
             NonTSPseudoClass::Fullscreen => false,
             NonTSPseudoClass::Hover => self.element_state().contains(ElementState::HOVER),
             NonTSPseudoClass::Indeterminate => false,

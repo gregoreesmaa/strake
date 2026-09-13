@@ -1669,7 +1669,17 @@ impl BaseDocument {
                 node.blur(shell_provider)
             });
             self.focus_node_id = None;
+            // Focus restyles the blurred node; make sure a frame follows
+            // (issue #70).
+            self.shell_provider.request_redraw();
         }
+    }
+
+    /// Last-interaction modality for `:focus-visible` (issue #70): true when
+    /// the most recent interaction was a key press rather than a pointer
+    /// press. Focus changes inherit whatever is armed.
+    pub(crate) fn set_keyboard_modality(&self, armed: bool) {
+        self.root_node().set_keyboard_modality(armed);
     }
 
     pub fn set_mousedown_node_id(&mut self, node_id: Option<NodeId>) {
@@ -1703,6 +1713,11 @@ impl BaseDocument {
         );
 
         self.focus_node_id = Some(focus_node_id);
+
+        // Focus restyles the newly focused node; make sure a frame follows
+        // (issue #70). This covers Tab traversal and programmatic focus as
+        // well as pointer focus.
+        self.shell_provider.request_redraw();
 
         true
     }
