@@ -593,16 +593,20 @@ impl ElementCx<'_, '_> {
             scene.fill(Fill::NonZero, self.transform, border_color, None, &shape);
         }
 
-        // Draw vertical outer borders
+        // Draw vertical outer borders. They run through the bottom border
+        // band (issue #46): otherwise the bottom outer corners keep a
+        // transparent notch where the bottom band ends and the verticals
+        // stop at `inner_height`.
+        let outer_height = inner_height + border_width;
         // Left border
         if outer_border_style.border_left_style != BorderStyle::Hidden {
             let shape =
-                Rect::new(0.0, 0.0, border_width, inner_height).scale_from_origin(self.scale);
+                Rect::new(0.0, 0.0, border_width, outer_height).scale_from_origin(self.scale);
             scene.fill(Fill::NonZero, self.transform, border_color, None, &shape);
         }
         // Right border
         if outer_border_style.border_right_style != BorderStyle::Hidden {
-            let shape = Rect::new(inner_width, 0.0, inner_width + border_width, inner_height)
+            let shape = Rect::new(inner_width, 0.0, inner_width + border_width, outer_height)
                 .scale_from_origin(self.scale);
             scene.fill(Fill::NonZero, self.transform, border_color, None, &shape);
         }
