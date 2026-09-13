@@ -17,9 +17,14 @@ serde_json = "1.0.140"
 # documents + winit attributes to strake-shell. All workspace-internal and
 # already in Cargo.lock: no new external crates.
 anyrender = { workspace = true }
-strake-dom = { workspace = true }
+strake-dom = { workspace = true, features = ["floats"] }
 strake-html = { workspace = true }
 strake-shell = { workspace = true }
 strake-traits = { workspace = true }
 url = { workspace = true }
 winit = { workspace = true }
+# Issue #150: headed paint fetches remote font stylesheets and @font-face
+# files over http(s). `reqwest` (blocking, native-tls) is already in
+# Cargo.lock via strake-net; this reuses that established networking stack
+# for the compat file+http provider. No new lockfile crate family.
+reqwest = { workspace = true, features = ["blocking", "native-tls"] }

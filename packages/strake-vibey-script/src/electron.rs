@@ -53,13 +53,14 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, VecDeque};
+use std::path::PathBuf;
 use std::rc::Rc;
 
 use boa_engine::object::ObjectInitializer;
 use boa_engine::object::builtins::{JsArray, JsFunction, JsPromise};
 use boa_engine::property::Attribute;
 use boa_engine::{
-    Context, JsError, JsNativeError, JsObject, JsResult, JsString, JsValue, NativeFunction,
+    Context, JsError, JsNativeError, JsObject, JsResult, JsString, JsValue, NativeFunction, Source,
     js_string,
 };
 use strake_electron_compat::{
@@ -435,6 +436,15 @@ struct ElectronHostState {
     power_listeners: HashMap<String, Vec<JsObject>>,
     /// OS keychain binding (issue #94; recording backend headless).
     safe_storage: SafeStorage,
+    /// CommonJS module cache (canonical path -> exports) for the
+    /// relative-file / `node_modules` loader (issue #151). Cached before
+    /// evaluation so circular requires observe partial exports, matching
+    /// Node's semantics.
+    module_cache: HashMap<String, JsValue>,
+    /// Stack of currently-loading module files for relative resolution and
+    /// circular-require detection (issue #151). Empty during the top-level
+    /// main-script eval, where `./x` resolves against the app root.
+    require_stack: Vec<PathBuf>,
 }
 
 /// `powerMonitor` event names carried to JS listeners.
@@ -501,6 +511,8 @@ impl ElectronHost {
                 power: PowerHub::new(),
                 power_listeners: HashMap::new(),
                 safe_storage: SafeStorage::recording(),
+                module_cache: HashMap::new(),
+                require_stack: Vec::new(),
             }))),
         }
     }
@@ -766,9 +778,345 @@ fn cannot_find_module(specifier: &str) -> JsError {
     JsError::from(JsNativeError::error().with_message(format!("Cannot find module '{specifier}'")))
 }
 
+/// Node core modules that must never resolve via the file loader (issue
+/// #151): `node:`-prefixed cores beyond the stand-in table (notably
+/// `node:fs`, owned by issue #16) plus unprefixed core names. Resolving them
+/// from `node_modules` would silently mis-resolve a core as third-party.
+fn is_node_core(specifier: &str) -> bool {
+    if specifier.starts_with("node:") {
+        return true;
+    }
+    matches!(
+        specifier,
+        "fs" | "path"
+            | "url"
+            | "events"
+            | "process"
+            | "child_process"
+            | "os"
+            | "util"
+            | "assert"
+            | "buffer"
+            | "crypto"
+            | "http"
+            | "https"
+            | "stream"
+            | "querystring"
+            | "net"
+            | "tls"
+            | "dns"
+            | "dgram"
+            | "cluster"
+            | "worker_threads"
+            | "perf_hooks"
+            | "async_hooks"
+            | "readline"
+            | "repl"
+            | "tty"
+            | "v8"
+            | "vm"
+            | "zlib"
+    )
+}
+
+/// App root for module resolution (issue #151): `__dirname` when the runner
+/// set it via `set_node_app_root`, else `__strake_node_info.appRoot`, else
+/// the process working directory.
+fn app_root_dir(context: &mut Context) -> PathBuf {
+    if let Ok(dirname) = context
+        .global_object()
+        .get(js_string!("__dirname"), context)
+        && let Some(s) = dirname.as_string()
+    {
+        let path = PathBuf::from(s.to_std_string_escaped());
+        if !path.as_os_str().is_empty() {
+            return path;
+        }
+    }
+    if let Ok(info) = context
+        .global_object()
+        .get(js_string!("__strake_node_info"), context)
+        && let Some(obj) = info.as_object()
+        && let Ok(root) = obj.get(js_string!("appRoot"), context)
+        && let Some(s) = root.as_string()
+    {
+        return PathBuf::from(s.to_std_string_escaped());
+    }
+    std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"))
+}
+
+/// Probe Node's file resolution for one joined base (issue #151): exact file,
+/// then `.js` / `.json` appended, then `index.js` / `index.json` inside
+/// directories. `.node` native addons are never resolved (full C ABI is
+/// issue #144); refusing avoids silent mis-resolution.
+fn probe_file(base: &std::path::Path) -> Option<PathBuf> {
+    if base.is_file() {
+        if base.extension().is_some_and(|ext| ext == "node") {
+            return None;
+        }
+        return Some(base.to_path_buf());
+    }
+    let base_str = base.to_string_lossy();
+    if base_str.ends_with(".node") {
+        return None;
+    }
+    for ext in [".js", ".json"] {
+        let candidate = PathBuf::from(format!("{base_str}{ext}"));
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    if base.is_dir() {
+        for index in ["index.js", "index.json"] {
+            let candidate = base.join(index);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+/// Resolve `./`, `../`, `/` specifiers against the requiring file's directory
+/// (issue #151). The top-level main script has no stack entry, so `./x`
+/// resolves against the app root.
+fn resolve_relative(specifier: &str, parent_dir: &std::path::Path) -> Option<PathBuf> {
+    let joined = if specifier.starts_with('/') {
+        PathBuf::from(specifier)
+    } else {
+        parent_dir.join(specifier)
+    };
+    probe_file(&joined)
+}
+
+/// Split a bare specifier into its package name and optional subpath,
+/// handling `@scope/name` (issue #151).
+fn split_bare(specifier: &str) -> (String, Option<String>) {
+    if let Some(rest) = specifier.strip_prefix('@') {
+        let mut parts = rest.splitn(3, '/');
+        let scope = parts.next().unwrap_or_default();
+        let name = parts.next().unwrap_or_default();
+        if name.is_empty() {
+            return (String::new(), None);
+        }
+        let pkg = format!("@{scope}/{name}");
+        let sub = parts.next().map(str::to_string);
+        (pkg, sub)
+    } else {
+        let mut parts = specifier.splitn(2, '/');
+        let pkg = parts.next().unwrap_or_default().to_string();
+        let sub = parts.next().map(str::to_string);
+        (pkg, sub)
+    }
+}
+
+/// Resolve a package directory's entry point via `package.json` `main`,
+/// falling back to `index.js` / `index.json` (issue #151).
+fn resolve_package_main(pkg_dir: &std::path::Path) -> Option<PathBuf> {
+    let pkg_json = pkg_dir.join("package.json");
+    if let Ok(content) = std::fs::read_to_string(&pkg_json)
+        && let Ok(value) = serde_json::from_str::<serde_json::Value>(&content)
+        && let Some(main) = value.get("main").and_then(|main| main.as_str())
+        && !main.is_empty()
+    {
+        let base = pkg_dir.join(main);
+        if let Some(probed) = probe_file(&base) {
+            return Some(probed);
+        }
+    }
+    for index in ["index.js", "index.json"] {
+        let candidate = pkg_dir.join(index);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+    None
+}
+
+/// Resolve bare third-party specifiers from the app's `node_modules`,
+/// walking up from the requiring file toward the filesystem root (issue
+/// #151). Returns `None` when no candidate exists so the caller throws
+/// Node's "Cannot find module" error naming the package.
+fn resolve_bare(
+    specifier: &str,
+    start_dir: &std::path::Path,
+    _app_root: &std::path::Path,
+) -> Option<PathBuf> {
+    let (pkg, sub) = split_bare(specifier);
+    if pkg.is_empty() {
+        return None;
+    }
+    let mut current = Some(start_dir.to_path_buf());
+    while let Some(dir) = current {
+        let mut base = dir.join("node_modules").join(&pkg);
+        if let Some(subpath) = &sub {
+            base = base.join(subpath);
+            if let Some(probed) = probe_file(&base) {
+                return Some(probed);
+            }
+        } else if base.is_dir() {
+            if let Some(entry) = resolve_package_main(&base) {
+                return Some(entry);
+            }
+        } else if let Some(probed) = probe_file(&base) {
+            return Some(probed);
+        }
+        current = dir.parent().map(std::path::Path::to_path_buf);
+    }
+    None
+}
+
+/// Resolve any loadable specifier to a file path (issue #151): relative and
+/// absolute paths via [`resolve_relative`], bare packages via
+/// [`resolve_bare`]. Returns `None` for Electron/stand-in/core specifiers
+/// (handled before the loader) and for unresolvable paths.
+fn resolve_commonjs(
+    specifier: &str,
+    shared: &SharedElectronHost,
+    app_root: &std::path::Path,
+) -> Option<PathBuf> {
+    if specifier.is_empty()
+        || specifier == "electron"
+        || is_node_core(specifier)
+        || specifier.starts_with("http:")
+        || specifier.starts_with("https:")
+        || specifier.starts_with("file:")
+        || specifier.starts_with("data:")
+    {
+        return None;
+    }
+    if specifier.starts_with("./") || specifier.starts_with("../") || specifier.starts_with('/') {
+        let parent_dir = shared
+            .0
+            .borrow()
+            .require_stack
+            .last()
+            .and_then(|path| path.parent().map(std::path::Path::to_path_buf))
+            .unwrap_or_else(|| app_root.to_path_buf());
+        return resolve_relative(specifier, &parent_dir);
+    }
+    // Bare specifiers must not look like relative paths without a prefix;
+    // anything else goes to `node_modules`.
+    if specifier.starts_with('.') {
+        return None;
+    }
+    let start_dir = shared
+        .0
+        .borrow()
+        .require_stack
+        .last()
+        .and_then(|path| path.parent().map(std::path::Path::to_path_buf))
+        .unwrap_or_else(|| app_root.to_path_buf());
+    resolve_bare(specifier, &start_dir, app_root)
+}
+
+/// Load one resolved CommonJS file (issue #151): JSON files parse to objects,
+/// JS files evaluate with temporary `module` / `exports` / `__dirname` /
+/// `__filename` globals. The exports object is cached before evaluation so
+/// circular requires observe partial exports, matching Node. Failed
+/// evaluations are removed from the cache and their JS error propagates.
+fn load_resolved_file(
+    path: &std::path::Path,
+    shared: &SharedElectronHost,
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let key = std::fs::canonicalize(path)
+        .map(|canonical| canonical.to_string_lossy().into_owned())
+        .unwrap_or_else(|_| path.to_string_lossy().into_owned());
+    if let Some(cached) = shared.0.borrow().module_cache.get(&key).cloned() {
+        return Ok(cached);
+    }
+    if path.extension().is_some_and(|ext| ext == "json") {
+        let content = std::fs::read_to_string(path)
+            .map_err(|error| cannot_find_module(&format!("{} ({error})", path.display())))?;
+        let value: serde_json::Value = serde_json::from_str(&content)
+            .map_err(|error| cannot_find_module(&format!("{} ({error})", path.display())))?;
+        let js = json_to_js(&value, context)?;
+        shared.0.borrow_mut().module_cache.insert(key, js.clone());
+        return Ok(js);
+    }
+    let source = std::fs::read_to_string(path)
+        .map_err(|error| cannot_find_module(&format!("{} ({error})", path.display())))?;
+    // Fresh `module = { exports: {} }` pair, cached before evaluation for
+    // circular requires.
+    let exports_obj = ObjectInitializer::new(context).build();
+    let mut module_init = ObjectInitializer::new(context);
+    module_init.property(
+        js_string!("exports"),
+        JsValue::from(exports_obj.clone()),
+        Attribute::all(),
+    );
+    let module_obj = module_init.build();
+    shared
+        .0
+        .borrow_mut()
+        .module_cache
+        .insert(key.clone(), JsValue::from(exports_obj.clone()));
+    shared.0.borrow_mut().require_stack.push(path.to_path_buf());
+    // Save the globals this module shadows, then point them at this file.
+    let global = context.global_object();
+    let saved_dirname = global
+        .get(js_string!("__dirname"), context)
+        .unwrap_or_default();
+    let saved_filename = global
+        .get(js_string!("__filename"), context)
+        .unwrap_or_default();
+    let saved_module = global
+        .get(js_string!("module"), context)
+        .unwrap_or_default();
+    let saved_exports = global
+        .get(js_string!("exports"), context)
+        .unwrap_or_default();
+    let parent_dir = path
+        .parent()
+        .map(std::path::Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("/"));
+    let dirname_js = JsValue::from(js_string!(parent_dir.to_string_lossy().as_ref()));
+    let filename_js = JsValue::from(js_string!(path.to_string_lossy().as_ref()));
+    let eval_result = (|| -> JsResult<JsValue> {
+        global.set(js_string!("__dirname"), dirname_js, false, context)?;
+        global.set(js_string!("__filename"), filename_js, false, context)?;
+        global.set(
+            js_string!("module"),
+            JsValue::from(module_obj.clone()),
+            false,
+            context,
+        )?;
+        global.set(
+            js_string!("exports"),
+            JsValue::from(exports_obj.clone()),
+            false,
+            context,
+        )?;
+        context.eval(Source::from_bytes(&source))?;
+        module_obj.get(js_string!("exports"), context)
+    })();
+    // Always restore the shadowed globals and pop the stack, even on throw.
+    let _ = global.set(js_string!("__dirname"), saved_dirname, false, context);
+    let _ = global.set(js_string!("__filename"), saved_filename, false, context);
+    let _ = global.set(js_string!("module"), saved_module, false, context);
+    let _ = global.set(js_string!("exports"), saved_exports, false, context);
+    shared.0.borrow_mut().require_stack.pop();
+    match eval_result {
+        Ok(final_exports) => {
+            shared
+                .0
+                .borrow_mut()
+                .module_cache
+                .insert(key, final_exports.clone());
+            Ok(final_exports)
+        }
+        Err(error) => {
+            shared.0.borrow_mut().module_cache.remove(&key);
+            Err(error)
+        }
+    }
+}
+
 /// `require(specifier)`: `'electron'` plus the Node core stand-ins
-/// (`node:path`, `node:url`, `node:process`, `node:events`); anything else
-/// throws Node's "Cannot find module" error.
+/// (`node:path`, `node:url`, `node:process`, `node:events`), plus the
+/// relative-file and `node_modules` CommonJS loader (issue #151); anything
+/// else throws Node's "Cannot find module" error.
 fn e_require(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let specifier = require_string_arg(args, 0, "require")?;
     if specifier == "electron" {
@@ -787,6 +1135,13 @@ fn e_require(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<J
     }
     if let Some(module) = node_standin_module(context, &specifier)? {
         return Ok(module);
+    }
+    if !is_node_core(&specifier) {
+        let shared = electron_state(context)?;
+        let app_root = app_root_dir(context);
+        if let Some(path) = resolve_commonjs(&specifier, &shared, &app_root) {
+            return load_resolved_file(&path, &shared, context);
+        }
     }
     Err(cannot_find_module(&specifier))
 }
@@ -1989,6 +2344,15 @@ fn e_require_renderer(_: &JsValue, args: &[JsValue], context: &mut Context) -> J
     // #108); `node:fs` and friends still throw (owned by issue #16).
     if let Some(module) = node_standin_module(context, &specifier)? {
         return Ok(module);
+    }
+    // Renderer parity for the issue #151 file loader: preloads may require
+    // sibling files via relative paths or vendored `node_modules`.
+    if !is_node_core(&specifier) {
+        let shared = electron_state(context)?;
+        let app_root = app_root_dir(context);
+        if let Some(path) = resolve_commonjs(&specifier, &shared, &app_root) {
+            return load_resolved_file(&path, &shared, context);
+        }
     }
     Err(cannot_find_module(&specifier))
 }

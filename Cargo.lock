@@ -6513,6 +6513,7 @@ dependencies = [
  "cookie",
  "cookie_store",
  "encoding_rs",
+ "futures-channel",
  "futures-core",
  "futures-util",
  "h2",
@@ -7423,6 +7424,7 @@ name = "strake-electron-compat"
 version = "0.3.0-beta.2"
 dependencies = [
  "anyrender",
+ "reqwest",
  "serde_json",
  "strake-dom",
  "strake-html",

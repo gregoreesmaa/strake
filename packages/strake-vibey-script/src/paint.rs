@@ -4,8 +4,11 @@
 //! a real OS surface: entry HTML parsed with the entry file's `file://` URL
 //! as its base (same as boot's first-paint path), the window's preload
 //! evaluated in renderer scope, then the page's own scripts executed
-//! (preload-before-scripts, the boot order), then linked same-origin
-//! stylesheets fetched, ingested, and re-resolved before first paint.
+//! (preload-before-scripts, the boot order), then linked stylesheets fetched,
+//! ingested, and re-resolved before first paint. Local (`file:`) stylesheets
+//! are render-blocking and must settle; remote (`http(s):`) font stylesheets
+//! and `@font-face` files fetch async with a bounded timeout and degrade to
+//! the system fallback on failure (issue #150).
 //!
 //! This lives here rather than in `strake-electron-compat` because script
 //! execution needs [`ScriptDocument`] plus the renderer [`ElectronHost`],
@@ -26,8 +29,10 @@ use crate::{ElectronHost, ScriptDocument};
 
 /// How long [`paint_app_window`] waits for linked (render-blocking)
 /// resources to settle before giving up. `file:` delivery through
-/// [`FileOnlyNetProvider`] is synchronous, so this only trips on genuine
-/// pipeline stalls, never on network timing.
+/// [`FileOnlyNetProvider`] is synchronous; `http(s):` delivery is async on a
+/// background thread with its own 10s client timeout, so this trips on
+/// genuine pipeline stalls or a stalled network, never on fast failures
+/// (which drain to the fallback via the net error callback).
 const SETTLE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Why a headed paint document refused to build.
@@ -192,6 +197,33 @@ pub fn paint_app_window(
             return Err(PaintError::UnsettledResources);
         }
         std::thread::sleep(Duration::from_millis(5));
+    }
+    // Font grace (issue #150): `@font-face` files fetch fire-and-forget
+    // (non-render-blocking by design — first paint must not wait on fonts),
+    // so the gate above can clear while a font is still in flight. Settle
+    // briefly for quiescence so the snapshot below includes arrived fonts
+    // instead of racing the worker thread. Bounded: breaks after 200ms of
+    // no new deliveries (offline/unreachable degrades immediately) with a
+    // 5s backstop.
+    {
+        let mut last_count = net.served_urls().len();
+        let mut quiet_since = Instant::now();
+        let grace_deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            document.inner_mut().resolve(0.0);
+            let count = net.served_urls().len();
+            if count != last_count {
+                last_count = count;
+                quiet_since = Instant::now();
+            }
+            if Instant::now().duration_since(quiet_since) >= Duration::from_millis(200) {
+                break;
+            }
+            if Instant::now() >= grace_deadline {
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
 
     let inner = document.inner();
