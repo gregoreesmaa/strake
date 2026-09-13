@@ -1,4 +1,4 @@
-//! Regression pin for <https://github.com/gregoreesmaa/strake/issues/471>
+//! Regression pin for <https://github.com/gregoreesmaa/strake/issues/52>
 //! (upstream <https://github.com/DioxusLabs/blitz/issues/471>): clicking a
 //! `<label>` forwards activation to its associated form control, toggling a
 //! checkbox both ways and dispatching its click event.
