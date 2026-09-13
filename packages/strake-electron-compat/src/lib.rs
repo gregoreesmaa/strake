@@ -8,7 +8,10 @@
 //!   `ready` / `window-all-closed` / `activate` / `before-quit` events).
 //! * [`WindowManager`] / [`BrowserWindowOptions`] — `BrowserWindow` option
 //!   mapping plus headless-testable window state (show/hide/close/minimize/
-//!   maximize/focus/title), wired to close the [`App`] loop.
+//!   maximize/focus/title, resizable/bounds from issue #90), wired to close
+//!   the [`App`] loop.
+//! * [`Screen`] / [`Display`] — display enumeration over injected monitor
+//!   metrics (issue #96) for `screen.*` and window placement.
 //! * [`IpcBus`] — `ipcMain.handle` / `ipcRenderer.invoke` JSON-string
 //!   round-trips plus `send`/`on` fan-out (issue: JSON first, zero-copy
 //!   later).
@@ -23,11 +26,16 @@
 mod app;
 mod coverage;
 mod ipc;
+mod screen;
 mod shell;
 mod window;
 
 pub use app::{App, AppEventKind, AppPath};
 pub use coverage::{ApiEntry, SupportStatus, TOP50};
 pub use ipc::{IpcBus, IpcError, ListenerId};
+pub use screen::{Display, Screen};
 pub use shell::{ShellError, ShellWindow};
-pub use window::{BrowserWindow, BrowserWindowOptions, TitleBarStyle, WebContents, WindowManager};
+pub use window::{
+    Bounds, BrowserWindow, BrowserWindowOptions, MainSend, TitleBarStyle, WebContents,
+    WindowManager,
+};

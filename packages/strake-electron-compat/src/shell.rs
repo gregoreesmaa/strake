@@ -26,7 +26,7 @@ use strake_traits::shell::{ColorScheme, Viewport};
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::window::WindowAttributes;
 
-use crate::{App, BrowserWindowOptions, WindowManager};
+use crate::{App, Bounds, BrowserWindowOptions, Screen, WindowManager};
 
 /// Failures opening or driving a [`ShellWindow`].
 #[derive(Debug)]
@@ -137,7 +137,8 @@ impl ShellWindow {
     }
 
     /// Parse `html` into the page document and resolve layout at the window
-    /// size (headless first paint).
+    /// size (headless first paint). Syncs the parsed `<title>` into the
+    /// compat `webContents` so `getTitle` serves the page title (issue #90).
     pub fn load_html(&mut self, html: &str) -> Result<(), ShellError> {
         self.require_open()?;
         let doc = self.doc.as_mut().ok_or(ShellError::Destroyed)?;
@@ -146,6 +147,10 @@ impl ShellWindow {
         drop(mutr);
         doc.resolve(0.0);
         self.painted_once = true;
+        let title = self.page_title();
+        if let Some(win) = self.manager.borrow_mut().get_mut(self.compat_id) {
+            win.web_contents_mut().set_document_title(title);
+        }
         Ok(())
     }
 
@@ -175,6 +180,49 @@ impl ShellWindow {
         doc.set_viewport(Viewport::new(width, height, 1.0, ColorScheme::Light));
         doc.resolve(0.0);
         Ok(())
+    }
+
+    /// `win.setBounds` (issue #90): move and resize like [`Self::resize`],
+    /// additionally recording the content position in the compat core.
+    pub fn set_bounds(&mut self, bounds: Bounds) -> Result<(), ShellError> {
+        self.require_open()?;
+        self.manager.borrow_mut().set_bounds(self.compat_id, bounds);
+        let doc = self.doc.as_mut().ok_or(ShellError::Destroyed)?;
+        doc.set_viewport(Viewport::new(
+            bounds.width,
+            bounds.height,
+            1.0,
+            ColorScheme::Light,
+        ));
+        doc.resolve(0.0);
+        Ok(())
+    }
+
+    /// Center the window on the primary display (issue #96). Returns `true`
+    /// once placed; `false` when the snapshot carries no metrics, in which
+    /// case the headless fallback position is kept unchanged.
+    pub fn center_on_screen(&mut self, screen: &Screen) -> Result<bool, ShellError> {
+        self.require_open()?;
+        let (width, height) = {
+            let manager = self.manager.borrow();
+            let win = manager.get(self.compat_id).ok_or(ShellError::Destroyed)?;
+            (win.options().width, win.options().height)
+        };
+        match screen.suggest_centered_position(width, height) {
+            Some((x, y)) => {
+                self.manager.borrow_mut().set_bounds(
+                    self.compat_id,
+                    Bounds {
+                        x,
+                        y,
+                        width,
+                        height,
+                    },
+                );
+                Ok(true)
+            }
+            None => Ok(false),
+        }
     }
 
     /// `win.show`.
@@ -217,7 +265,9 @@ impl ShellWindow {
     }
 
     /// The exact winit attributes `View::init` will consume at handoff,
-    /// derived from live compat state (`None` once closed).
+    /// derived from live compat state (`None` once closed). Compat [`Bounds`]
+    /// are DIP, so geometry travels as `LogicalSize`/`LogicalPosition` and
+    /// winit applies the monitor scale factor to reach physical pixels.
     pub fn window_attributes(&self) -> Option<WindowAttributes> {
         if self.closed {
             return None;
@@ -230,6 +280,7 @@ impl ShellWindow {
             .with_surface_size(LogicalSize::new(options.width, options.height))
             .with_visible(win.is_visible())
             .with_decorations(options.frame)
+            .with_resizable(options.resizable)
             .with_transparent(options.transparent);
         if let Some((x, y)) = options.position {
             attrs = attrs.with_position(LogicalPosition::new(x, y));
@@ -447,5 +498,135 @@ mod tests {
         let stored = manager.get(id).expect("live").options().clone();
         assert_eq!((stored.width, stored.height), (1280, 720));
         assert!(!manager.resize(404, 1, 1), "unknown id fails softly");
+    }
+
+    #[test]
+    fn resizable_reaches_window_attributes() {
+        let (manager, app) = handles();
+        let fixed = ShellWindow::open(
+            Rc::clone(&manager),
+            Rc::clone(&app),
+            BrowserWindowOptions {
+                resizable: false,
+                ..Default::default()
+            },
+        );
+        assert!(!fixed.window_attributes().expect("attrs").resizable);
+        let fluid = ShellWindow::open(manager, app, BrowserWindowOptions::default());
+        assert!(fluid.window_attributes().expect("attrs").resizable);
+    }
+
+    #[test]
+    fn set_bounds_moves_and_resizes_viewport() {
+        let (manager, app) = handles();
+        let mut win = ShellWindow::open(manager, app, BrowserWindowOptions::default());
+        win.set_bounds(Bounds {
+            x: 40,
+            y: 50,
+            width: 1024,
+            height: 768,
+        })
+        .expect("set_bounds");
+        let stored = win
+            .manager
+            .borrow()
+            .get(win.compat_id())
+            .expect("live")
+            .bounds();
+        assert_eq!(
+            stored,
+            Bounds {
+                x: 40,
+                y: 50,
+                width: 1024,
+                height: 768,
+            }
+        );
+        assert_eq!(
+            logical_size(&win.window_attributes().expect("attrs")),
+            Some((1024.0, 768.0))
+        );
+    }
+
+    #[test]
+    fn load_syncs_page_title_into_web_contents() {
+        let (manager, app) = handles();
+        let mut win = ShellWindow::open(Rc::clone(&manager), app, BrowserWindowOptions::default());
+        assert_eq!(
+            manager
+                .borrow()
+                .get(win.compat_id())
+                .expect("live")
+                .web_contents()
+                .get_title(),
+            "",
+            "no page loaded yet"
+        );
+        win.load_html(FIXTURE_HTML).expect("load fixture");
+        assert_eq!(
+            manager
+                .borrow()
+                .get(win.compat_id())
+                .expect("live")
+                .web_contents()
+                .get_title(),
+            "Fixture"
+        );
+    }
+
+    #[test]
+    fn center_on_screen_uses_primary_metrics_with_headless_fallback() {
+        use crate::{Display, Screen};
+        let screen = Screen::new(vec![Display::new(
+            0,
+            Bounds {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            },
+            1.0,
+        )]);
+        let (manager, app) = handles();
+        let mut win = ShellWindow::open(
+            Rc::clone(&manager),
+            app,
+            BrowserWindowOptions {
+                width: 800,
+                height: 600,
+                ..Default::default()
+            },
+        );
+        assert!(win.center_on_screen(&screen).expect("center with metrics"));
+        assert_eq!(
+            manager
+                .borrow()
+                .get(win.compat_id())
+                .expect("live")
+                .bounds(),
+            Bounds {
+                x: 560,
+                y: 240,
+                width: 800,
+                height: 600,
+            }
+        );
+
+        let empty = Screen::new(vec![]);
+        assert!(
+            !win.center_on_screen(&empty)
+                .expect("empty metrics must not error"),
+            "no metrics: keep fallback"
+        );
+        assert_eq!(
+            manager
+                .borrow()
+                .get(win.compat_id())
+                .expect("live")
+                .bounds()
+                .x,
+            560,
+            "fallback position unchanged"
+        );
     }
 }

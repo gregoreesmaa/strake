@@ -17,8 +17,12 @@
 //!   names (any other name is accepted and never fires, matching Electron's
 //!   `EventEmitter`);
 //! * `new BrowserWindow(options)` creates a compat-core window (`width`,
-//!   `height`, `show`, `title` are honoured; the rest is accepted and
-//!   ignored); `loadFile`/`loadURL`/`show`/`close` drive it;
+//!   `height`, `show`, `title`, `resizable` are honoured; the rest is accepted
+//!   and ignored); `loadFile`/`loadURL`/`show`/`close`/`setResizable`/
+//!   `isVisible`/`setBounds`/`getBounds` drive it, `webContents.send` queues
+//!   main-to-renderer payloads per window (issue #91) and
+//!   `webContents.getTitle` serves the synced page title (issue #90);
+//!   `screen.*` serves the host display snapshot (issue #96);
 //! * `ipcMain.handle`/`on` record the JS handler for observation via
 //!   [`ElectronHost::ipc_handler_channels`]. Registration — not invocation —
 //!   is the Slice 1 contract: invoking a JS handler needs a JS `Context` at
@@ -48,7 +52,7 @@ use boa_engine::{
     Context, JsError, JsNativeError, JsObject, JsResult, JsString, JsValue, NativeFunction,
     js_string,
 };
-use strake_electron_compat::{App, BrowserWindowOptions, WindowManager};
+use strake_electron_compat::{App, Bounds, BrowserWindowOptions, Screen, WindowManager};
 
 use crate::dom::{dom_ctx, to_rust_string};
 use crate::engine::ScriptEngine;
@@ -84,6 +88,15 @@ const ELECTRON_BOOTSTRAP_JS: &str = r#"
     electron.BrowserWindow = class BrowserWindow {
         constructor(options) {
             this.__strakeWindowId = globalThis.__strake_electron_window_create(options || {});
+            const id = this.__strakeWindowId;
+            this.webContents = {
+                send(channel, ...args) {
+                    globalThis.__strake_electron_window_web_contents_send(id, channel, ...args);
+                },
+                getTitle() {
+                    return globalThis.__strake_electron_window_get_title(id);
+                },
+            };
         }
         loadFile(path) {
             globalThis.__strake_electron_window_load_file(this.__strakeWindowId, path);
@@ -97,6 +110,32 @@ const ELECTRON_BOOTSTRAP_JS: &str = r#"
         close() {
             globalThis.__strake_electron_window_close(this.__strakeWindowId);
         }
+        setResizable(flag) {
+            globalThis.__strake_electron_window_set_resizable(this.__strakeWindowId, flag);
+        }
+        isVisible() {
+            return globalThis.__strake_electron_window_is_visible(this.__strakeWindowId);
+        }
+        setBounds(rect) {
+            globalThis.__strake_electron_window_set_bounds(this.__strakeWindowId, rect);
+        }
+        getBounds() {
+            return globalThis.__strake_electron_window_get_bounds(this.__strakeWindowId);
+        }
+    };
+    electron.screen = {
+        getPrimaryDisplay() {
+            return globalThis.__strake_electron_screen_get_primary_display();
+        },
+        getAllDisplays() {
+            return globalThis.__strake_electron_screen_get_all_displays();
+        },
+        getDisplayMatching(rect) {
+            return globalThis.__strake_electron_screen_get_display_matching(rect || {});
+        },
+        getDisplayNearestPoint(point) {
+            return globalThis.__strake_electron_screen_get_display_nearest_point(point || {});
+        },
     };
     electron.ipcMain = {
         handle(channel, handler) {
@@ -116,6 +155,9 @@ const ELECTRON_BOOTSTRAP_JS: &str = r#"
 struct ElectronHostState {
     app: App,
     windows: WindowManager,
+    /// Display snapshot backing `screen.*` (issue #96): the headless fallback
+    /// until the embedder installs real winit monitor metrics.
+    screen: Screen,
     /// The assembled `{ app, BrowserWindow, ipcMain }` object, built once at
     /// install so every `require('electron')` returns the identical object
     /// (Node module caching).
@@ -178,6 +220,7 @@ impl ElectronHost {
             shared: SharedElectronHost(Rc::new(RefCell::new(ElectronHostState {
                 app: App::new(app_name, app_version),
                 windows: WindowManager::new(),
+                screen: Screen::default(),
                 module: None,
                 app_listeners: HashMap::new(),
                 when_ready_resolvers: Vec::new(),
@@ -216,6 +259,21 @@ impl ElectronHost {
         self.shared.0.borrow().created_window_ids.clone()
     }
 
+    /// Content bounds of a window (`getBounds`), if it is live.
+    pub fn window_bounds(&self, id: u32) -> Option<strake_electron_compat::Bounds> {
+        self.shared.0.borrow().windows.get_bounds(id)
+    }
+
+    /// `resizable` flag of a window, if it is live.
+    pub fn window_resizable(&self, id: u32) -> Option<bool> {
+        self.shared
+            .0
+            .borrow()
+            .windows
+            .get(id)
+            .map(|win| win.is_resizable())
+    }
+
     /// Pending navigation target of a window (`loadFile`/`loadURL`).
     pub fn window_pending_url(&self, id: u32) -> Option<String> {
         self.shared
@@ -246,6 +304,25 @@ impl ElectronHost {
     pub fn pending_ipc_count(&self) -> usize {
         let state = self.shared.0.borrow();
         state.invoke_queue.len() + state.send_queue.len()
+    }
+
+    /// Queued main-to-renderer `webContents.send` payloads across all windows
+    /// (issue #91), drained by the pump into renderer `ipcRenderer.on`
+    /// listeners.
+    pub fn pending_main_send_count(&self) -> usize {
+        self.shared.0.borrow().windows.queued_main_send_count()
+    }
+
+    /// Install real display metrics (issue #96), replacing the headless
+    /// fallback snapshot that backs `screen.*`.
+    ///
+    /// Deferred producer note: nothing outside tests calls this yet — no code
+    /// converts winit monitor handles (position/size/scale factor) into a
+    /// [`Screen`], so the live shim keeps serving the `Screen::default`
+    /// 1024x768 fallback until that winit bridge lands (issue #96,
+    /// criterion 1) in a later slice.
+    pub fn set_screen(&self, screen: Screen) {
+        self.shared.0.borrow_mut().screen = screen;
     }
 
     /// Channels with at least one `ipcMain.on` listener, sorted.
@@ -490,9 +567,9 @@ fn options_bool(
 }
 
 /// `new BrowserWindow(options)`: create the compat-core window. Only
-/// `width`/`height`/`show`/`title` shape Slice 1 behavior; every other
-/// Electron option is accepted and ignored (Slice 2 binds the rest to
-/// `strake-shell`).
+/// `width`/`height`/`show`/`title`/`resizable` shape Slice 1 behavior; every
+/// other Electron option is accepted and ignored (later slices bind the rest
+/// to `strake-shell`).
 fn e_window_create(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let shared = electron_state(context)?;
     let mut options = BrowserWindowOptions::default();
@@ -500,6 +577,7 @@ fn e_window_create(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsRe
         options.width = options_u32(&obj, "width", 800, context)?;
         options.height = options_u32(&obj, "height", 600, context)?;
         options.show = options_bool(&obj, "show", true, context)?;
+        options.resizable = options_bool(&obj, "resizable", true, context)?;
         let title = obj.get(js_string!("title"), context)?;
         if !title.is_undefined() && !title.is_null() {
             options.title = to_rust_string(&title, context)?;
@@ -548,6 +626,221 @@ fn e_window_show(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResu
     let shared = electron_state(context)?;
     shared.0.borrow_mut().windows.show(id);
     Ok(JsValue::undefined())
+}
+
+/// Electron's "Object has been destroyed" for methods that require a live
+/// window. (`webContents.send` deliberately does NOT use this: issue #91
+/// mandates fire-and-forget soft failure for unreachable targets.)
+fn destroyed_window() -> JsError {
+    JsError::from(JsNativeError::error().with_message("Object has been destroyed"))
+}
+
+/// `win.setResizable(flag)` (issue #90). Unknown windows are ignored, like
+/// `show`/`hide` on a closed window.
+fn e_window_set_resizable(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let id = window_id_arg(args, context)?;
+    let flag = args.get(1).is_some_and(|value| value.to_boolean());
+    let shared = electron_state(context)?;
+    shared.0.borrow_mut().windows.set_resizable(id, flag);
+    Ok(JsValue::undefined())
+}
+
+/// `win.isVisible()` (issue #90). Unknown windows report `false`.
+fn e_window_is_visible(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let id = window_id_arg(args, context)?;
+    let shared = electron_state(context)?;
+    Ok(JsValue::from(shared.0.borrow().windows.is_visible(id)))
+}
+
+fn rect_number(options: &JsObject, name: &str, context: &mut Context) -> JsResult<f64> {
+    let value = options.get(JsString::from(name), context)?;
+    if value.is_undefined() || value.is_null() {
+        return Ok(0.0);
+    }
+    let number = value.to_number(context)?;
+    Ok(if number.is_finite() { number } else { 0.0 })
+}
+
+/// Read an `Electron.Rectangle` (`{ x, y, width, height }`) from a JS value.
+fn js_to_bounds(value: &JsValue, context: &mut Context) -> JsResult<Bounds> {
+    let Some(obj) = value.as_object() else {
+        return Err(JsError::from(
+            JsNativeError::typ().with_message("win.setBounds requires a rectangle object"),
+        ));
+    };
+    Ok(Bounds {
+        x: rect_number(&obj, "x", context)? as i32,
+        y: rect_number(&obj, "y", context)? as i32,
+        width: rect_number(&obj, "width", context)?.max(0.0) as u32,
+        height: rect_number(&obj, "height", context)?.max(0.0) as u32,
+    })
+}
+
+fn bounds_json(bounds: &Bounds) -> serde_json::Value {
+    serde_json::json!({
+        "x": bounds.x,
+        "y": bounds.y,
+        "width": bounds.width,
+        "height": bounds.height,
+    })
+}
+
+fn display_json(display: &strake_electron_compat::Display) -> serde_json::Value {
+    serde_json::json!({
+        "id": display.id,
+        "bounds": bounds_json(&display.bounds),
+        "workArea": bounds_json(&display.work_area),
+        "scaleFactor": display.scale_factor,
+    })
+}
+
+/// `win.setBounds(rect)` (issue #90). Throws "Object has been destroyed" for
+/// unknown windows, like `loadFile`.
+fn e_window_set_bounds(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let id = window_id_arg(args, context)?;
+    let rect = args.get(1).ok_or_else(|| {
+        JsError::from(
+            JsNativeError::typ().with_message("win.setBounds requires a rectangle object"),
+        )
+    })?;
+    let bounds = js_to_bounds(rect, context)?;
+    let shared = electron_state(context)?;
+    if !shared.0.borrow_mut().windows.set_bounds(id, bounds) {
+        return Err(destroyed_window());
+    }
+    Ok(JsValue::undefined())
+}
+
+/// `win.getBounds()` (issue #90): `{ x, y, width, height }`.
+fn e_window_get_bounds(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let id = window_id_arg(args, context)?;
+    let shared = electron_state(context)?;
+    let bounds = shared
+        .0
+        .borrow()
+        .windows
+        .get_bounds(id)
+        .ok_or_else(destroyed_window)?;
+    json_to_js(&bounds_json(&bounds), context)
+}
+
+/// `win.webContents.getTitle()` (issue #90): the loaded page's `<title>`.
+fn e_window_get_title(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let id = window_id_arg(args, context)?;
+    let shared = electron_state(context)?;
+    let state = shared.0.borrow();
+    let title = state
+        .windows
+        .get(id)
+        .ok_or_else(destroyed_window)?
+        .web_contents()
+        .get_title()
+        .to_string();
+    Ok(JsValue::from(js_string!(title.as_str())))
+}
+
+/// `win.webContents.send(channel, ...args)` (issue #91): queue JSON payloads
+/// on the target window for the pump. Unknown/closed windows fail softly
+/// (undefined, no throw), matching Electron's fire-and-forget posture. The
+/// argument list travels as one JSON array; the pump spreads it back into
+/// `(event, ...args)` for renderer `ipcRenderer.on` listeners.
+fn e_window_web_contents_send(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let id = window_id_arg(args, context)?;
+    let channel = require_string_arg(args.get(1..).unwrap_or(&[]), 0, "win.webContents.send")?;
+    let payloads = json_args(args.get(2..).unwrap_or(&[]), context)?;
+    let shared = electron_state(context)?;
+    shared.0.borrow_mut().windows.queue_web_contents_send(
+        id,
+        &channel,
+        serde_json::Value::Array(payloads),
+    );
+    Ok(JsValue::undefined())
+}
+
+/// `screen.getPrimaryDisplay()` (issue #96). `null` without metrics.
+fn e_screen_get_primary_display(
+    _: &JsValue,
+    _: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let shared = electron_state(context)?;
+    let state = shared.0.borrow();
+    match state.screen.get_primary_display() {
+        Some(display) => json_to_js(&display_json(display), context),
+        None => Ok(JsValue::null()),
+    }
+}
+
+/// `screen.getAllDisplays()` (issue #96).
+fn e_screen_get_all_displays(
+    _: &JsValue,
+    _: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let shared = electron_state(context)?;
+    let state = shared.0.borrow();
+    let displays: Vec<serde_json::Value> = state
+        .screen
+        .get_all_displays()
+        .iter()
+        .map(display_json)
+        .collect();
+    json_to_js(&serde_json::Value::Array(displays), context)
+}
+
+/// `screen.getDisplayMatching(rect)` (issue #96). `null` without metrics.
+fn e_screen_get_display_matching(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let bounds = match args.first() {
+        Some(rect) => js_to_display_match_rect(rect, context)?,
+        None => Bounds::default(),
+    };
+    let shared = electron_state(context)?;
+    let state = shared.0.borrow();
+    match state.screen.get_display_matching(&bounds) {
+        Some(display) => json_to_js(&display_json(display), context),
+        None => Ok(JsValue::null()),
+    }
+}
+
+/// `screen.getDisplayNearestPoint(point)` (issue #96). `null` without
+/// metrics. Only `x`/`y` are read; extra rectangle fields are ignored.
+fn e_screen_get_display_nearest_point(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let point = match args.first() {
+        Some(value) => js_to_display_match_rect(value, context)?,
+        None => Bounds::default(),
+    };
+    let shared = electron_state(context)?;
+    let state = shared.0.borrow();
+    match state.screen.get_display_nearest_point(point.x, point.y) {
+        Some(display) => json_to_js(&display_json(display), context),
+        None => Ok(JsValue::null()),
+    }
+}
+
+/// `getDisplayMatching` accepts a full rectangle or nothing; unlike
+/// `setBounds` a missing/non-object argument means "the zero rect", which
+/// still resolves to the primary display when metrics exist.
+fn js_to_display_match_rect(value: &JsValue, context: &mut Context) -> JsResult<Bounds> {
+    if value.is_undefined() || value.is_null() {
+        return Ok(Bounds::default());
+    }
+    js_to_bounds(value, context)
 }
 
 /// `win.close()`: destroy the window; the last close fires JS
@@ -678,6 +971,66 @@ impl crate::runtime::ScriptRuntime {
             "__strake_electron_window_close",
             1,
             e_window_close,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_window_set_resizable",
+            2,
+            e_window_set_resizable,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_window_is_visible",
+            1,
+            e_window_is_visible,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_window_set_bounds",
+            2,
+            e_window_set_bounds,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_window_get_bounds",
+            1,
+            e_window_get_bounds,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_window_get_title",
+            1,
+            e_window_get_title,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_window_web_contents_send",
+            2,
+            e_window_web_contents_send,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_screen_get_primary_display",
+            0,
+            e_screen_get_primary_display,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_screen_get_all_displays",
+            0,
+            e_screen_get_all_displays,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_screen_get_display_matching",
+            1,
+            e_screen_get_display_matching,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_screen_get_display_nearest_point",
+            1,
+            e_screen_get_display_nearest_point,
         );
         register_primitive(
             &mut self.context,
@@ -904,8 +1257,8 @@ fn e_ipc_renderer_send(_: &JsValue, args: &[JsValue], context: &mut Context) -> 
 }
 
 /// `ipcRenderer.on(channel, listener)`: register a renderer broadcast
-/// listener (invoked by the Slice-3 pump for main-originated sends once a
-/// `webContents.send` binding exists; recorded today for symmetry).
+/// listener, invoked by the pump for main-originated `webContents.send`
+/// payloads (issue #91).
 fn e_ipc_renderer_on(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let channel = require_string_arg(args, 0, "ipcRenderer.on")?;
     let listener = require_callable_arg(args, 1, "ipcRenderer.on")?;
@@ -986,12 +1339,21 @@ impl crate::runtime::ScriptRuntime {
         shared.0.borrow_mut().renderer_module = module;
     }
 
-    /// Pump queued renderer IPC through main-process handlers (issue #83):
-    /// each `invoke` runs its `ipcMain.handle` callback in this (main)
-    /// context and settles the renderer promise; each `send` fans out to
-    /// `ipcMain.on` listeners. Returns the number of pumped calls. All shared
-    /// borrows are statement-scoped takes, so re-entrant JS (handlers calling
-    /// back into Electron) cannot trip the `RefCell`s.
+    /// Pump queued renderer IPC through main-process handlers (issue #83),
+    /// then queued main-to-renderer `webContents.send` payloads into renderer
+    /// `ipcRenderer.on` listeners (issue #91): each `invoke` runs its
+    /// `ipcMain.handle` callback in this (main) context and settles the
+    /// renderer promise; each `send` fans out to `ipcMain.on` listeners; each
+    /// main-send invokes the renderer's channel listeners as
+    /// `(event, ...args)` in the renderer context. Returns the number of
+    /// pumped calls. All shared borrows are statement-scoped takes, so
+    /// re-entrant JS (handlers calling back into Electron) cannot trip the
+    /// `RefCell`s.
+    ///
+    /// Routing note: main-sends queue per target window in the compat core,
+    /// but renderers are not bound to windows yet, so the pump fans each
+    /// payload out to the attached renderer's channel listeners. Per-window
+    /// renderer binding rides with the multi-window transport (issue #15).
     pub(crate) fn pump_ipc_to(&mut self, renderer: &mut crate::runtime::ScriptRuntime) -> usize {
         let Some(shared) = self.context.get_data::<SharedElectronHost>().cloned() else {
             return 0;
@@ -1121,6 +1483,54 @@ impl crate::runtime::ScriptRuntime {
                     listener.call(&JsValue::undefined(), &call_args, &mut self.context)
                 {
                     record_callback_error(&mut self.context, "ipcMain.on listener", &error);
+                }
+            }
+        }
+
+        // Main-to-renderer leg (issue #91): drain every window's outbox and
+        // invoke the renderer's channel listeners as `(event, ...args)`. The
+        // queued payload is the `...args` array (see
+        // `e_window_web_contents_send`); a non-array payload (only possible
+        // from Rust callers) arrives as a single argument.
+        let main_sends = shared.0.borrow_mut().windows.drain_web_contents_sends();
+        for (_window_id, send) in main_sends {
+            pumped += 1;
+            let listeners = shared
+                .0
+                .borrow()
+                .renderer_listeners
+                .get(&send.channel)
+                .cloned()
+                .unwrap_or_default();
+            if listeners.is_empty() {
+                continue;
+            }
+            let mut call_args = Vec::new();
+            call_args.push(JsValue::from(
+                ObjectInitializer::new(&mut renderer.context).build(),
+            ));
+            let payloads = match &send.payload {
+                serde_json::Value::Array(items) => items.clone(),
+                single => vec![single.clone()],
+            };
+            for arg in &payloads {
+                match json_to_js(arg, &mut renderer.context) {
+                    Ok(value) => call_args.push(value),
+                    Err(error) => {
+                        record_callback_error(
+                            &mut renderer.context,
+                            "webContents.send argument",
+                            &error,
+                        );
+                        call_args.push(JsValue::null());
+                    }
+                }
+            }
+            for listener in listeners {
+                if let Err(error) =
+                    listener.call(&JsValue::undefined(), &call_args, &mut renderer.context)
+                {
+                    record_callback_error(&mut renderer.context, "ipcRenderer.on listener", &error);
                 }
             }
         }
