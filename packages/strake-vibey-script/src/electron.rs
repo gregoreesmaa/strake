@@ -64,8 +64,9 @@ use boa_engine::{
     js_string,
 };
 use strake_electron_compat::{
-    App, Bounds, BrowserWindowOptions, Clipboard, NotificationCenter, NotificationRequest,
-    PowerHub, PowerSaveBlockerKind, SafeStorage, Screen, WindowManager,
+    App, Bounds, BrowserWindowOptions, Clipboard, Enforcer, NotificationCenter,
+    NotificationRequest, PermissionManifest, PowerHub, PowerSaveBlockerKind, SafeStorage, Screen,
+    WindowManager,
 };
 // Re-exported for embedders driving the issue #92/#93 probes.
 pub use strake_electron_compat::{DeliveredNotification, PowerEvent};
@@ -223,9 +224,12 @@ const ELECTRON_BOOTSTRAP_JS: &str = r#"
 ///
 /// Real `main.js` files require `node:path` (`path.join(__dirname, ...)` is
 /// line 3 of the minimal template), read `process.platform`/`process.versions`
-/// guards, and call `url.format`. Full `node:` compat (notably `node:fs` and
-/// native addons) stays owned by issue #16: anything outside the three
-/// modules below still throws Node's "Cannot find module" error.
+/// guards, and call `url.format`. The pure modules below (`path`, `url`,
+/// `process`, `events`, `constants`, `buffer`, `stream`, `util`) evaluate
+/// here; the real `fs` shell evaluates on top in main-process installs only
+/// (issue #154) — renderer contexts keep resolving `fs` to "Cannot find
+/// module". Anything else (notably native addons, issue #144) still throws
+/// Node's "Cannot find module" error.
 ///
 /// Values are documented stand-ins, seeded from `__strake_node_info`
 /// (`{ platform, versions, appRoot, env }`, installed natively per context):
@@ -347,6 +351,9 @@ const NODE_STANDIN_BOOTSTRAP_JS: &str = r#"
     }
     const processModule = {
         platform: info.platform || "linux",
+        // Version-sniffing loaders (`graceful-fs` et al.) read
+        // `process.version`, not `process.versions` (issue #154).
+        version: "v" + (versions.node || "0.0.0-strake"),
         versions: {
             node: versions.node || "0.0.0-strake",
             chrome: versions.chrome || "0.0.0-strake",
@@ -423,6 +430,225 @@ const NODE_STANDIN_BOOTSTRAP_JS: &str = r#"
             listenerCount: (emitter, type) => emitter.listenerCount(type),
         };
     })();
+    // Load-time `constants` subset (issue #154): the POSIX-stable values
+    // plus the platform-varying `O_*` flags `graceful-fs` reads at load.
+    // Exotic flags (`O_DIRECTORY`, `O_SYNC`, …) land on demand.
+    const constantsModule = (() => {
+        const platform = info.platform || "linux";
+        const isWindows = platform === "win32";
+        const isMac = platform === "darwin";
+        return {
+            O_RDONLY: 0,
+            O_WRONLY: 1,
+            O_RDWR: 2,
+            O_CREAT: isWindows ? 256 : isMac ? 512 : 64,
+            O_EXCL: isWindows ? 1024 : isMac ? 2048 : 128,
+            O_TRUNC: isWindows ? 512 : isMac ? 1024 : 512,
+            O_APPEND: isWindows ? 8 : isMac ? 8 : 1024,
+            F_OK: 0,
+            R_OK: 4,
+            W_OK: 2,
+            X_OK: 1,
+            COPYFILE_EXCL: 1,
+            COPYFILE_FICLONE: 2,
+            COPYFILE_FICLONE_FORCE: 4,
+            S_IFMT: 61440,
+            S_IFREG: 32768,
+            S_IFDIR: 16384,
+            S_IFLNK: 40960,
+            S_IFCHR: 8192,
+            S_IFBLK: 24576,
+            S_IFIFO: 4096,
+            S_IFSOCK: 49152,
+        };
+    })();
+    // Minimal `Buffer` over `Uint8Array` (issue #154): alloc, from
+    // string/bytes, toString, length, slice. Encoding work rides the
+    // runtime's `TextEncoder`/`TextDecoder`/`atob`/`btoa`; hex and base64
+    // stay manual so exotic labels never matter.
+    const bufferModule = (() => {
+        const textEncoder = new TextEncoder();
+        const textDecoder = new TextDecoder();
+        let latin1Decoder = null;
+        try {
+            latin1Decoder = new TextDecoder("latin1");
+        } catch (e) {
+            latin1Decoder = null;
+        }
+        const HEX = "0123456789abcdef";
+        const hexEncode = (view) => {
+            let out = "";
+            for (let i = 0; i < view.length; i++) {
+                out += HEX[(view[i] >> 4) & 15] + HEX[view[i] & 15];
+            }
+            return out;
+        };
+        const hexDecode = (text) => {
+            const clean = String(text).replace(/\s+/g, "");
+            const bytes = [];
+            for (let i = 0; i + 1 < clean.length; i += 2) {
+                const byte = parseInt(clean.slice(i, i + 2), 16);
+                if (Number.isNaN(byte)) break;
+                bytes.push(byte);
+            }
+            return bytes;
+        };
+        const base64Encode = (view) => {
+            let binary = "";
+            for (let i = 0; i < view.length; i += 8192) {
+                binary += String.fromCharCode.apply(
+                    null,
+                    Array.prototype.slice.call(view.subarray(i, i + 8192))
+                );
+            }
+            return btoa(binary);
+        };
+        const base64Decode = (text) => {
+            const binary = atob(String(text));
+            const bytes = new Array(binary.length);
+            for (let i = 0; i < binary.length; i++) {
+                bytes[i] = binary.charCodeAt(i) & 255;
+            }
+            return bytes;
+        };
+        const normalizeEncoding = (encoding) => {
+            const name = String(encoding || "utf8").toLowerCase().replace(/[-_]/g, "");
+            if (name === "utf8") return "utf8";
+            return name;
+        };
+        const encodeString = (text, encoding) => {
+            const name = normalizeEncoding(encoding);
+            if (name === "utf8") return Array.from(textEncoder.encode(String(text)));
+            if (name === "hex") return hexDecode(text);
+            if (name === "base64") return base64Decode(text);
+            if (name === "base64url") {
+                return base64Decode(
+                    String(text).replace(/-/g, "+").replace(/_/g, "/")
+                );
+            }
+            if (name === "latin1" || name === "binary" || name === "ascii") {
+                const s = String(text);
+                const bytes = new Array(s.length);
+                for (let i = 0; i < s.length; i++) bytes[i] = s.charCodeAt(i) & 255;
+                return bytes;
+            }
+            throw new TypeError("Unknown encoding: " + encoding);
+        };
+        class Buffer extends Uint8Array {
+            static alloc(size, fill, encoding) {
+                const count = Number(size);
+                if (!Number.isInteger(count) || count < 0) {
+                    throw new RangeError("Invalid buffer size: " + size);
+                }
+                const out = new Buffer(count);
+                if (fill === undefined || fill === 0) return out;
+                if (typeof fill === "number") {
+                    out.fill(fill & 255);
+                    return out;
+                }
+                const pattern = encodeString(String(fill), encoding || "utf8");
+                if (pattern.length === 0) return out;
+                for (let i = 0; i < out.length; i++) out[i] = pattern[i % pattern.length];
+                return out;
+            }
+            static from(value, encoding) {
+                if (typeof value === "string") return new Buffer(encodeString(value, encoding || "utf8"));
+                if (typeof value === "number") {
+                    throw new TypeError("The first argument must be of type string or an instance of Buffer, ArrayBuffer, or Array.");
+                }
+                if (Array.isArray(value)) return new Buffer(value);
+                if (value instanceof ArrayBuffer) return new Buffer(value);
+                if (value && ArrayBuffer.isView(value)) {
+                    return new Buffer(value.buffer, value.byteOffset, value.byteLength);
+                }
+                throw new TypeError("The first argument must be of type string or an instance of Buffer, ArrayBuffer, or Array.");
+            }
+            static isBuffer(value) {
+                return value instanceof Buffer;
+            }
+            toString(encoding, start, end) {
+                const name = normalizeEncoding(encoding || "utf8");
+                const view = this.subarray(start === undefined ? 0 : start, end === undefined ? this.length : end);
+                if (name === "utf8") return textDecoder.decode(view);
+                if (name === "hex") return hexEncode(view);
+                if (name === "base64") return base64Encode(view);
+                if (name === "base64url") {
+                    return base64Encode(view).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+                }
+                if (name === "latin1" || name === "binary" || name === "ascii") {
+                    if (latin1Decoder !== null) return latin1Decoder.decode(view);
+                    let out = "";
+                    for (let i = 0; i < view.length; i++) out += String.fromCharCode(view[i]);
+                    return out;
+                }
+                throw new TypeError("Unknown encoding: " + encoding);
+            }
+        }
+        return { Buffer };
+    })();
+    // `stream` `.Stream` base (issue #154): an `EventEmitter` subclass with
+    // `pipe`, which is all `graceful-fs` needs at load; `Readable`/`Writable`
+    // file classes live on the `fs` shell where the native primitives are.
+    const streamModule = (() => {
+        class Stream extends eventsModule.EventEmitter {
+            pipe(dest) {
+                this.on("data", (chunk) => dest.write(chunk));
+                this.on("end", () => {
+                    if (typeof dest.end === "function") dest.end();
+                });
+                return dest;
+            }
+        }
+        return { Stream };
+    })();
+    // `util` subset (issue #154): `format` (`%s %d %i %f %j %%`, leftovers
+    // appended), `debuglog` (a `NODE_DEBUG`-gated logger), `inherits`.
+    const utilModule = (() => {
+        const inspectValue = (value) => {
+            if (typeof value === "string") return value;
+            try {
+                const json = JSON.stringify(value);
+                return json === undefined ? "undefined" : json;
+            } catch (e) {
+                return "[Circular]";
+            }
+        };
+        const format = (fmt, ...args) => {
+            if (typeof fmt !== "string") {
+                return [fmt, ...args].map(inspectValue).join(" ");
+            }
+            let i = 0;
+            const head = String(fmt).replace(/%[sdifjoO%]/g, (match) => {
+                if (match === "%%") return "%";
+                if (i >= args.length) return match;
+                const arg = args[i++];
+                if (match === "%s") return String(arg);
+                if (match === "%d") return Number(arg).toString();
+                if (match === "%i") return parseInt(arg, 10).toString();
+                if (match === "%f") return parseFloat(arg).toString();
+                return inspectValue(arg);
+            });
+            const tail = args.slice(i).map(inspectValue);
+            return tail.length > 0 ? head + " " + tail.join(" ") : head;
+        };
+        const debuglog = (set) => {
+            const name = String(set).toUpperCase();
+            return (...args) => {
+                const env = (globalThis.process && globalThis.process.env && globalThis.process.env.NODE_DEBUG) || "";
+                const enabled = env === "*" || String(env).toUpperCase().split(/[,\s]+/).indexOf(name) !== -1;
+                if (enabled) console.error(name + ": " + format(...args));
+            };
+        };
+        const inherits = (ctor, superCtor) => {
+            if (typeof ctor !== "function" || typeof superCtor !== "function") {
+                throw new TypeError("inherits requires constructor functions");
+            }
+            Object.setPrototypeOf(ctor.prototype, superCtor.prototype);
+            Object.setPrototypeOf(ctor, superCtor);
+            ctor.super_ = superCtor;
+        };
+        return { format, debuglog, inherits };
+    })();
     globalThis.__strake_node_modules = {
         "node:path": pathModule,
         path: pathModule,
@@ -432,7 +658,19 @@ const NODE_STANDIN_BOOTSTRAP_JS: &str = r#"
         process: processModule,
         "node:events": eventsModule,
         events: eventsModule,
+        "node:constants": constantsModule,
+        constants: constantsModule,
+        "node:buffer": bufferModule,
+        buffer: bufferModule,
+        "node:stream": streamModule,
+        stream: streamModule,
+        "node:util": utilModule,
+        util: utilModule,
     };
+    // Node's global `Buffer` (raw reads in Joplin startup use it bare).
+    if (typeof globalThis.Buffer === "undefined") {
+        globalThis.Buffer = bufferModule.Buffer;
+    }
     if (typeof globalThis.process === "undefined") {
         globalThis.process = processModule;
     }
@@ -444,6 +682,223 @@ const NODE_STANDIN_BOOTSTRAP_JS: &str = r#"
     if (typeof globalThis.__dirname === "undefined") {
         globalThis.__dirname = info.appRoot || "/";
     }
+})();
+"#;
+
+/// Real `node:fs` sync shell over the capability-gated `__strake_fs_*`
+/// native primitives (issue #154). Evaluated in main-process installs only,
+/// after the primitives are registered: renderer contexts never see `fs`
+/// (real Electron defaults to no node integration in renderers).
+///
+/// Coverage is the sync subset `fs-extra`/`graceful-fs` needs at load plus
+/// what Joplin startup calls: exists/access, recursive mkdir, read/write/
+/// append, stat/lstat (`Stats`), readdir (names only — `withFileTypes` is
+/// accepted and ignored), unlink/rename/copyFile, realpath, `constants`,
+/// and working `ReadStream`/`WriteStream` classes with `create*` factories.
+/// Async (`fs.promises`, callbacks) and watchers stay out of scope.
+const NODE_FS_BOOTSTRAP_JS: &str = r#"
+(function () {
+    // Coded-error factory for the native primitives: `{ code, errno,
+    // syscall, path }` on a real `Error`, so `catch (e) { e.code }` works
+    // as in Node.
+    globalThis.__strake_node_error = function (code, errno, syscall, path, message) {
+        const error = new Error(message);
+        error.code = code;
+        error.errno = errno;
+        error.syscall = syscall;
+        error.path = path;
+        return error;
+    };
+    const table = globalThis.__strake_node_modules;
+    const stream = table["node:stream"];
+    const bufferMod = table["node:buffer"];
+    const Buffer = bufferMod.Buffer;
+    const constants = table["node:constants"];
+    const toPath = (value) => {
+        if (typeof value === "string") return value;
+        if (value instanceof Uint8Array) return Buffer.from(value).toString();
+        if (value instanceof ArrayBuffer) return Buffer.from(value).toString();
+        throw new TypeError("Path must be a string");
+    };
+    const toBytes = (data, encoding) => {
+        if (typeof data === "string") return Buffer.from(data, encoding);
+        return Buffer.from(data);
+    };
+    class Stats {
+        constructor(data) {
+            this.size = data.size;
+            this.mode = data.mode;
+            this.mtimeMs = data.mtimeMs;
+            this.atimeMs = data.atimeMs;
+            this.ctimeMs = data.ctimeMs;
+            this.birthtimeMs = data.birthtimeMs;
+            this.mtime = new Date(data.mtimeMs);
+            this.atime = new Date(data.atimeMs);
+            this.ctime = new Date(data.ctimeMs);
+            this.birthtime = new Date(data.birthtimeMs);
+            this._file = data.isFile;
+            this._dir = data.isDir;
+            this._link = data.isSymlink;
+        }
+        isFile() { return this._file; }
+        isDirectory() { return this._dir; }
+        isSymbolicLink() { return this._link; }
+        isBlockDevice() { return false; }
+        isCharacterDevice() { return false; }
+        isFIFO() { return false; }
+        isSocket() { return false; }
+    }
+    class ReadStream extends stream.Stream {
+        constructor(path, options) {
+            super();
+            this.path = toPath(path);
+            queueMicrotask(() => this.open());
+        }
+        open() {
+            let bytes;
+            try {
+                bytes = __strake_fs_read(this.path);
+            } catch (error) {
+                this.emit("error", error);
+                return;
+            }
+            this.emit("open", 0);
+            const CHUNK = 64 * 1024;
+            for (let offset = 0; offset < bytes.length; offset += CHUNK) {
+                this.emit("data", Buffer.from(bytes.subarray(offset, offset + CHUNK)));
+            }
+            this.emit("end");
+            this.emit("close");
+        }
+        close(callback) {
+            this.emit("close");
+            if (typeof callback === "function") callback();
+        }
+    }
+    class WriteStream extends stream.Stream {
+        constructor(path, options) {
+            super();
+            this.path = toPath(path);
+            this._chunks = [];
+            this._ended = false;
+        }
+        write(chunk, encoding, callback) {
+            if (typeof encoding === "function") {
+                callback = encoding;
+                encoding = undefined;
+            }
+            const done = typeof callback === "function" ? callback : () => {};
+            if (this._ended) {
+                const late = new Error("write after end");
+                this.emit("error", late);
+                done(late);
+                return false;
+            }
+            try {
+                this._chunks.push(toBytes(chunk, encoding));
+            } catch (error) {
+                this.emit("error", error);
+                done(error);
+                return false;
+            }
+            done();
+            return true;
+        }
+        end(chunk, encoding, callback) {
+            if (typeof chunk === "function") {
+                callback = chunk;
+                chunk = undefined;
+                encoding = undefined;
+            } else if (typeof encoding === "function") {
+                callback = encoding;
+                encoding = undefined;
+            }
+            if (chunk !== undefined) this.write(chunk, encoding);
+            this._ended = true;
+            const done = typeof callback === "function" ? callback : () => {};
+            try {
+                for (let i = 0; i < this._chunks.length; i++) {
+                    __strake_fs_write(this.path, this._chunks[i], i > 0);
+                }
+            } catch (error) {
+                this.emit("error", error);
+                done(error);
+                return;
+            }
+            this._chunks = [];
+            this.emit("finish");
+            done();
+            this.emit("close");
+        }
+        close(callback) {
+            this.emit("close");
+            if (typeof callback === "function") callback();
+        }
+    }
+    const fs = {
+        constants,
+        Stats,
+        ReadStream,
+        WriteStream,
+        FileReadStream: ReadStream,
+        FileWriteStream: WriteStream,
+        existsSync(path) {
+            try {
+                return __strake_fs_exists(toPath(path)) === true;
+            } catch (e) {
+                return false;
+            }
+        },
+        accessSync(path, mode) {
+            __strake_fs_access(toPath(path), mode === undefined ? 0 : Number(mode));
+        },
+        mkdirSync(path, options) {
+            __strake_fs_mkdir(toPath(path), !!(options && options.recursive));
+        },
+        readFileSync(path, options) {
+            const bytes = __strake_fs_read(toPath(path));
+            const encoding = typeof options === "string" ? options : options && options.encoding;
+            const out = Buffer.from(bytes);
+            return encoding ? out.toString(encoding) : out;
+        },
+        writeFileSync(path, data, options) {
+            const encoding = typeof options === "string" ? options : options && options.encoding;
+            __strake_fs_write(toPath(path), toBytes(data, encoding), false);
+        },
+        appendFileSync(path, data, options) {
+            const encoding = typeof options === "string" ? options : options && options.encoding;
+            __strake_fs_write(toPath(path), toBytes(data, encoding), true);
+        },
+        statSync(path) {
+            return new Stats(__strake_fs_stat(toPath(path), true));
+        },
+        lstatSync(path) {
+            return new Stats(__strake_fs_stat(toPath(path), false));
+        },
+        readdirSync(path) {
+            return __strake_fs_readdir(toPath(path));
+        },
+        unlinkSync(path) {
+            __strake_fs_unlink(toPath(path));
+        },
+        renameSync(from, to) {
+            __strake_fs_rename(toPath(from), toPath(to));
+        },
+        copyFileSync(from, to) {
+            __strake_fs_copy(toPath(from), toPath(to));
+        },
+        realpathSync(path) {
+            return __strake_fs_realpath(toPath(path));
+        },
+        createReadStream(path, options) {
+            return new ReadStream(path, options);
+        },
+        createWriteStream(path, options) {
+            return new WriteStream(path, options);
+        },
+    };
+    table["node:fs"] = fs;
+    table["fs"] = fs;
 })();
 "#;
 
@@ -503,6 +958,10 @@ struct ElectronHostState {
     /// circular-require detection (issue #151). Empty during the top-level
     /// main-script eval, where `./x` resolves against the app root.
     require_stack: Vec<PathBuf>,
+    /// Capability grants for the `node:fs` sync primitives (issue #154):
+    /// deny-by-default, so a host without an explicit manifest refuses every
+    /// filesystem operation (`EACCES`, never an existence oracle).
+    permissions: Enforcer,
 }
 
 /// `powerMonitor` event names carried to JS listeners.
@@ -533,6 +992,15 @@ struct PendingSend {
 /// host data (mirroring `DomCtx`) so native primitives can reach it.
 #[derive(Clone)]
 pub(crate) struct SharedElectronHost(Rc<RefCell<ElectronHostState>>);
+
+impl SharedElectronHost {
+    /// Run `f` against the capability enforcer (issue #154). Statement-scoped
+    /// takes only: the borrow ends when `f` returns, so re-entrant JS cannot
+    /// trip the `RefCell`.
+    pub(crate) fn with_permissions<R>(&self, f: impl FnOnce(&mut Enforcer) -> R) -> R {
+        f(&mut self.0.borrow_mut().permissions)
+    }
+}
 
 /// Owns the Electron main-process compat core for one script context.
 ///
@@ -571,8 +1039,17 @@ impl ElectronHost {
                 safe_storage: SafeStorage::recording(),
                 module_cache: HashMap::new(),
                 require_stack: Vec::new(),
+                permissions: Enforcer::new(PermissionManifest::default()),
             }))),
         }
+    }
+
+    /// Grant filesystem (and future) capabilities to app code (issue #154):
+    /// the embedder-approved manifest behind `require('fs')`. Without this
+    /// call the host stays deny-by-default.
+    pub fn with_permissions(self, manifest: PermissionManifest) -> Self {
+        self.shared.0.borrow_mut().permissions = Enforcer::new(manifest);
+        self
     }
 
     pub(crate) fn shared(&self) -> SharedElectronHost {
@@ -716,7 +1193,7 @@ impl ElectronHost {
 }
 
 /// Fetch the host state from the Boa context's host data.
-fn electron_state(context: &mut Context) -> JsResult<SharedElectronHost> {
+pub(crate) fn electron_state(context: &mut Context) -> JsResult<SharedElectronHost> {
     context
         .get_data::<SharedElectronHost>()
         .cloned()
@@ -775,7 +1252,7 @@ fn fire_app_event(context: &mut Context, event: &str) {
     call_js_listeners(context, &format!("app '{event}' listener"), listeners);
 }
 
-fn require_string_arg(args: &[JsValue], index: usize, what: &str) -> JsResult<String> {
+pub(crate) fn require_string_arg(args: &[JsValue], index: usize, what: &str) -> JsResult<String> {
     args.get(index)
         .and_then(|value| value.as_string())
         .map(|s| s.to_std_string_escaped())
@@ -816,8 +1293,9 @@ fn window_id_arg(args: &[JsValue], context: &mut Context) -> JsResult<u32> {
 /// Look up a Node core stand-in (`node:path`, `node:url`, `node:process`,
 /// plus the unprefixed aliases) from the per-context
 /// `globalThis.__strake_node_modules` table (issue #108). Anything else is
-/// `None`, and the caller throws Node's "Cannot find module" error (full
-/// `node:` compat, notably `node:fs`, stays owned by issue #16).
+/// `None`, and the caller throws Node's "Cannot find module" error (`fs`
+/// resolves through its own shell per issue #154; anything else unserved
+/// stays a named miss).
 fn node_standin_module(context: &mut Context, specifier: &str) -> JsResult<Option<JsValue>> {
     let table = context
         .global_object()
@@ -837,9 +1315,9 @@ fn cannot_find_module(specifier: &str) -> JsError {
 }
 
 /// Node core modules that must never resolve via the file loader (issue
-/// #151): `node:`-prefixed cores beyond the stand-in table (notably
-/// `node:fs`, owned by issue #16) plus unprefixed core names. Resolving them
-/// from `node_modules` would silently mis-resolve a core as third-party.
+/// #151): `node:`-prefixed cores beyond the module table plus unprefixed
+/// core names. Resolving them from `node_modules` would silently mis-resolve
+/// a core as third-party.
 fn is_node_core(specifier: &str) -> bool {
     if specifier.starts_with("node:") {
         return true;
@@ -880,7 +1358,7 @@ fn is_node_core(specifier: &str) -> bool {
 /// App root for module resolution (issue #151): `__dirname` when the runner
 /// set it via `set_node_app_root`, else `__strake_node_info.appRoot`, else
 /// the process working directory.
-fn app_root_dir(context: &mut Context) -> PathBuf {
+pub(crate) fn app_root_dir(context: &mut Context) -> PathBuf {
     if let Ok(dirname) = context
         .global_object()
         .get(js_string!("__dirname"), context)
@@ -2232,6 +2710,76 @@ impl crate::runtime::ScriptRuntime {
         // Node core stand-ins (`node:path`, `process`, `url`, `__dirname`):
         // per-context objects for `require` outside `'electron'` (issue #108).
         self.install_node_standins();
+        // Real `node:fs` sync shell over the capability-gated native
+        // primitives (issue #154): main-process installs only, so renderers
+        // keep resolving `fs` to "Cannot find module".
+        register_primitive(
+            &mut self.context,
+            "__strake_fs_exists",
+            1,
+            crate::node_fs::fs_exists,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_fs_access",
+            2,
+            crate::node_fs::fs_access,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_fs_mkdir",
+            2,
+            crate::node_fs::fs_mkdir,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_fs_read",
+            1,
+            crate::node_fs::fs_read,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_fs_write",
+            3,
+            crate::node_fs::fs_write,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_fs_stat",
+            2,
+            crate::node_fs::fs_stat,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_fs_readdir",
+            1,
+            crate::node_fs::fs_readdir,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_fs_unlink",
+            1,
+            crate::node_fs::fs_unlink,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_fs_rename",
+            2,
+            crate::node_fs::fs_rename,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_fs_copy",
+            2,
+            crate::node_fs::fs_copy,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_fs_realpath",
+            1,
+            crate::node_fs::fs_realpath,
+        );
+        self.eval(NODE_FS_BOOTSTRAP_JS, "<strake-node-fs>");
 
         // Pin the assembled module so `require` returns the identical object.
         let module = self
@@ -2430,8 +2978,9 @@ fn e_require_renderer(_: &JsValue, args: &[JsValue], context: &mut Context) -> J
                     .into()
             });
     }
-    // Preloads and renderer scripts share the Node core stand-ins (issue
-    // #108); `node:fs` and friends still throw (owned by issue #16).
+    // Preloads and renderer scripts share the pure Node core stand-ins
+    // (issue #108, real `fs` stays main-only per issue #154); anything else
+    // still throws (native addons are owned by issue #144).
     if let Some(module) = node_standin_module(context, &specifier)? {
         return Ok(module);
     }
