@@ -366,8 +366,119 @@ impl EventHandler for DioxusEventHandler<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::events::NodeHandle;
     use dioxus::prelude::*;
     use dioxus_core::ScopeId;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    /// Regression pin for <https://github.com/gregoreesmaa/strake/issues/64>
+    /// (upstream <https://github.com/DioxusLabs/blitz/issues/692>): the
+    /// Select-shaped click flow — an `onclick` handler that reads its
+    /// mounted node and then mutates document state in the same handler
+    /// scope, followed by a rerender — must not panic with "RefCell already
+    /// borrowed". Event dispatch holds no document borrow across user code;
+    /// this pins that contract.
+    #[test]
+    fn click_handler_read_then_act_does_not_borrow_panic() {
+        use strake_dom::local_name;
+        use strake_traits::events::{
+            MouseEventButton, MouseEventButtons, PointerCoords, StrakePointerEvent,
+            StrakePointerId, UiEvent,
+        };
+
+        static CLICKS_DONE: AtomicUsize = AtomicUsize::new(0);
+
+        fn app() -> Element {
+            let mut handle = use_signal(|| None::<NodeHandle>);
+            let mut tick = use_signal(|| 0);
+            rsx! {
+                div {
+                    onmounted: move |evt: Event<MountedData>| {
+                        if let Some(h) = evt.downcast::<NodeHandle>() {
+                            handle.set(Some(h.clone()));
+                        }
+                    },
+                    button {
+                        onclick: move |_| {
+                            CLICKS_DONE.fetch_add(1, Ordering::SeqCst);
+                            // Select-like: inspect the mounted node, then act
+                            // on the document while the read guard is alive,
+                            // then trigger a rerender.
+                            if let Some(h) = handle.read().as_ref() {
+                                let node = h.node();
+                                let _ = node.final_layout().size;
+                                if let Ok(mut d) = h.doc.try_borrow_mut() {
+                                    d.set_focus_to(h.node_id());
+                                }
+                                tick.set(tick() + 1);
+                            }
+                        },
+                        "pick"
+                    }
+                }
+            }
+        }
+
+        fn pointer_at(x: f32, y: f32) -> StrakePointerEvent {
+            StrakePointerEvent {
+                id: StrakePointerId::Mouse,
+                is_primary: true,
+                coords: PointerCoords {
+                    page_x: x,
+                    page_y: y,
+                    screen_x: x,
+                    screen_y: y,
+                    client_x: x,
+                    client_y: y,
+                },
+                button: MouseEventButton::Main,
+                buttons: MouseEventButtons::from(MouseEventButton::Main),
+                mods: keyboard_types::Modifiers::default(),
+                details: Default::default(),
+                element: Default::default(),
+                active_pointers: Default::default(),
+            }
+        }
+
+        let vdom = VirtualDom::new(app);
+        let mut doc = DioxusDocument::new(vdom, DocumentConfig::default());
+        doc.initial_build();
+        doc.poll(None);
+        doc.inner.borrow_mut().resolve(0.0);
+
+        // Click the center of the button: find it by tag, read its box.
+        let (cx, cy) = {
+            let inner = doc.inner.borrow();
+            let mut found = None;
+            let mut stack = vec![doc.main_element_id];
+            while let Some(id) = stack.pop() {
+                let Some(node) = inner.get_node(id) else {
+                    continue;
+                };
+                if node
+                    .data
+                    .downcast_element()
+                    .is_some_and(|el| el.name.local == local_name!("button"))
+                {
+                    let layout = node.final_layout();
+                    found = Some((
+                        layout.location.x + layout.size.width / 2.0,
+                        layout.location.y + layout.size.height / 2.0,
+                    ));
+                    break;
+                }
+                stack.extend(node.children.iter().copied());
+            }
+            found.expect("probe button must exist")
+        };
+        doc.handle_ui_event(UiEvent::PointerDown(pointer_at(cx, cy)));
+        doc.handle_ui_event(UiEvent::PointerUp(pointer_at(cx, cy)));
+        doc.poll(None);
+        assert!(
+            CLICKS_DONE.load(Ordering::SeqCst) > 0,
+            "probe click never reached the button handler"
+        );
+    }
     use std::cell::RefCell;
     use std::collections::HashMap;
     use strake_dom::DocumentConfig;
