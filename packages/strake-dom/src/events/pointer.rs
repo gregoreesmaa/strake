@@ -380,6 +380,21 @@ pub(crate) fn handle_pointermove<F: FnMut(DomEvent)>(
     changed
 }
 
+/// Nearest ancestor-or-self that is a real (non-anonymous) element node, for
+/// focus decisions on hits that can land on text or anonymous boxes
+/// (issue #70).
+fn nearest_element_ancestor(doc: &BaseDocument, node_id: NodeId) -> Option<NodeId> {
+    let mut current = Some(node_id);
+    while let Some(id) = current {
+        let node = doc.nodes.get(id)?;
+        if !node.is_anonymous() && node.data.downcast_element().is_some() {
+            return Some(id);
+        }
+        current = node.parent;
+    }
+    None
+}
+
 pub(crate) fn handle_pointerdown(
     doc: &mut BaseDocument,
     _target: NodeId,
@@ -504,6 +519,23 @@ pub(crate) fn handle_pointerdown(
                 doc.shell_provider.request_redraw();
             } else {
                 doc.clear_text_selection();
+            }
+            // A main-button press on a focusable element (button, link, …)
+            // moves focus there, mirroring the text-input arm below and
+            // browser behavior (issue #70). The hit can land on a text
+            // child, so focusability is judged on the nearest element.
+            if button == MouseEventButton::Main {
+                if let Some(element_id) = nearest_element_ancestor(doc, actual_target) {
+                    if doc.nodes[element_id].is_focussable() {
+                        generate_focus_events(
+                            doc,
+                            &mut |doc| {
+                                doc.set_focus_to(element_id);
+                            },
+                            dispatch_event,
+                        );
+                    }
+                }
             }
         }
         ClickTarget::TextInput {
@@ -811,9 +843,15 @@ pub(crate) fn handle_click(
         false
     };
 
-    // If nothing is matched then clear focus
+    // If nothing is matched then clear focus — unless the click landed on a
+    // focusable element, which keeps the focus its pointerdown gave it
+    // (issue #70).
     if !matched {
-        generate_focus_events(doc, &mut |doc| doc.clear_focus(), dispatch_event);
+        let keep_focus =
+            nearest_element_ancestor(doc, target).is_some_and(|id| doc.nodes[id].is_focussable());
+        if !keep_focus {
+            generate_focus_events(doc, &mut |doc| doc.clear_focus(), dispatch_event);
+        }
     }
 
     // Dispatch double-click event if this is the second click in quick succession
