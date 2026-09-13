@@ -122,18 +122,18 @@ pub const TOP50: &[ApiEntry] = &[
     },
     ApiEntry {
         electron: "dialog.showMessageBox",
-        strake: "Deferred: needs #12 native dialogs",
-        status: Deferred("needs #12 native dialogs"),
+        strake: "Dialog::show_message_box",
+        status: Shimmed,
     },
     ApiEntry {
         electron: "dialog.showOpenDialog",
-        strake: "Deferred: needs #12 native dialogs",
-        status: Deferred("needs #12 native dialogs"),
+        strake: "Dialog::show_open_dialog",
+        status: Shimmed,
     },
     ApiEntry {
         electron: "dialog.showSaveDialog",
-        strake: "Deferred: needs #12 native dialogs",
-        status: Deferred("needs #12 native dialogs"),
+        strake: "Dialog::show_save_dialog",
+        status: Shimmed,
     },
     ApiEntry {
         electron: "globalShortcut.register",
@@ -172,13 +172,13 @@ pub const TOP50: &[ApiEntry] = &[
     },
     ApiEntry {
         electron: "nativeTheme.on(updated)",
-        strake: "Deferred: needs #12 theme bridge",
-        status: Deferred("needs #12 theme bridge"),
+        strake: "NativeTheme::on_updated",
+        status: Shimmed,
     },
     ApiEntry {
         electron: "nativeTheme.shouldUseDarkColors",
-        strake: "Deferred: needs #12 theme bridge",
-        status: Deferred("needs #12 theme bridge"),
+        strake: "NativeTheme::should_use_dark_colors",
+        status: Shimmed,
     },
     ApiEntry {
         electron: "powerMonitor",
@@ -217,13 +217,13 @@ pub const TOP50: &[ApiEntry] = &[
     },
     ApiEntry {
         electron: "shell.openExternal",
-        strake: "Deferred: needs #12 OS integration",
-        status: Deferred("needs #12 OS integration"),
+        strake: "OsShell::open_external",
+        status: Shimmed,
     },
     ApiEntry {
         electron: "shell.showItemInFolder",
-        strake: "Deferred: needs #12 OS integration",
-        status: Deferred("needs #12 OS integration"),
+        strake: "OsShell::show_item_in_folder",
+        status: Shimmed,
     },
     ApiEntry {
         electron: "win.blur",
@@ -370,12 +370,19 @@ const MVP_MUST: &[&str] = &[
     "app.lifecycle events",
     "app.quit",
     "app.whenReady",
+    "dialog.showMessageBox",
+    "dialog.showOpenDialog",
+    "dialog.showSaveDialog",
     "ipcMain.handle",
     "ipcMain.on",
     "ipcRenderer.invoke",
     "ipcRenderer.on",
     "ipcRenderer.removeListener",
     "ipcRenderer.send",
+    "nativeTheme.on(updated)",
+    "nativeTheme.shouldUseDarkColors",
+    "shell.openExternal",
+    "shell.showItemInFolder",
     "win.close",
     "win.hide",
     "win.loadFile",
@@ -393,6 +400,8 @@ fn coverage_freeze_is_sorted_unique_apis() {
     // powerSaveBlocker, safeStorage) and promote clipboard.readText/writeText
     // to Shimmed. Issue #107 adds BrowserWindow.getAllWindows (Shimmed) and
     // narrows the webPreferences note (preload recorded; sandbox still #18).
+    // Issue #21 step 2 promotes dialog.show*/nativeTheme.*/shell.* from
+    // Deferred to Shimmed (headless contracts; OS seats bind next, #12).
     assert_eq!(TOP50.len(), 65, "freeze grows only by reviewed diff");
     let names: Vec<_> = TOP50.iter().map(|entry| entry.electron).collect();
     let mut sorted = names.clone();

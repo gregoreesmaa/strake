@@ -21,19 +21,25 @@
 //! * [`Clipboard`] / [`NotificationCenter`] / [`PowerHub`] / [`SafeStorage`]
 //!   — OS bridges (issues #95/#92/#93/#94) fronting injectable backends so
 //!   headless CI stays hermetic while the runtime wires the native seat.
+//! * [`Dialog`] / [`OsShell`] / [`NativeTheme`] — `dialog`, `shell`, and
+//!   `nativeTheme` headless contracts (issue #21 step 2) over the same
+//!   backend-trait seam; OS panels/launchers/theme seats bind next (#12).
 //!
-//! Deliberately headless: real `winit` windows (`strake-shell`), native
-//! dialogs (`dialog`/`shell`, needs #12), and the TS bindings ride on top of
-//! this core in follow-ups.
+//! Deliberately headless: real `winit` windows (`strake-shell`), OS-native
+//! panels and menus (needs #12), and the TS bindings ride on top of this
+//! core in follow-ups.
 
 mod app;
 mod clipboard;
 mod coverage;
+mod dialog;
 mod ipc;
 mod menu;
 mod message_channel;
 mod napi;
+mod native_theme;
 mod notification;
+mod os_shell;
 mod permissions;
 mod power;
 mod safe_storage;
@@ -46,6 +52,11 @@ mod window;
 pub use app::{App, AppEventKind, AppPath};
 pub use clipboard::{Clipboard, ClipboardBackend, ClipboardError, MemoryClipboard};
 pub use coverage::{ApiEntry, SupportStatus, TOP50};
+pub use dialog::{
+    Dialog, DialogBackend, FileFilter, MemoryDialog, MessageBoxOptions, MessageBoxResult,
+    MessageBoxType, OpenDialogOptions, OpenDialogResult, OpenProperty, SaveDialogOptions,
+    SaveDialogResult, ScriptedDialog,
+};
 pub use ipc::{IpcBus, IpcError, ListenerId};
 pub use menu::{
     Accelerator, AcceleratorError, MenuError, MenuItemTemplate, MenuItemType, MenuRole,
@@ -56,10 +67,12 @@ pub use napi::{
     AddonLoad, AddonRequirements, IMPLEMENTED_SYMBOLS, NapiStatus, REQUIRED_SYMBOLS,
     check_addon_load, missing_symbols,
 };
+pub use native_theme::{NativeTheme, ThemeListenerId, ThemeSource};
 pub use notification::{
     DeliveredNotification, NotificationBackend, NotificationCenter, NotificationRequest,
     RecordingBackend,
 };
+pub use os_shell::{OsShell, OsShellBackend, OsShellError, RecordingOsShell};
 pub use permissions::{Decision, Enforcer, NetScope, PathScope, PermissionManifest, clean_path};
 pub use power::{
     PowerEvent, PowerHub, PowerListenerId, PowerMonitor, PowerSaveBlocker, PowerSaveBlockerKind,
