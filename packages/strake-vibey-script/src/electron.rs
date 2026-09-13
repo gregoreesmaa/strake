@@ -18,8 +18,8 @@
 //!   `EventEmitter`);
 //! * `new BrowserWindow(options)` creates a compat-core window (`width`,
 //!   `height`, `show`, `title`, `resizable` are honoured; the rest is accepted
-//!   and ignored); `loadFile`/`loadURL`/`show`/`close`/`setResizable`/
-//!   `isVisible`/`setBounds`/`getBounds` drive it, `webContents.send` queues
+//!   and ignored); `loadFile`/`loadURL`/`show`/`close`/`on('closed')`/
+//!   `setResizable`/`isVisible`/`setBounds`/`getBounds` drive it, `webContents.send` queues
 //!   main-to-renderer payloads per window (issue #91) and
 //!   `webContents.getTitle` serves the synced page title (issue #90);
 //!   `screen.*` serves the host display snapshot (issue #96);
@@ -107,6 +107,10 @@ const ELECTRON_BOOTSTRAP_JS: &str = r#"
         show() {
             globalThis.__strake_electron_window_show(this.__strakeWindowId);
         }
+        on(event, listener) {
+            globalThis.__strake_electron_window_on(this.__strakeWindowId, event, listener);
+            return this;
+        }
         close() {
             globalThis.__strake_electron_window_close(this.__strakeWindowId);
         }
@@ -173,6 +177,8 @@ struct ElectronHostState {
     ipc_listeners: HashMap<String, Vec<JsObject>>,
     /// Compat window ids in creation order, for embedder observation.
     created_window_ids: Vec<u32>,
+    /// `win.on('closed')` JS listeners by window id (issue #84).
+    window_closed_listeners: HashMap<u32, Vec<JsObject>>,
     /// The renderer `{ ipcRenderer }` module object (per-context twin of
     /// [`ElectronHostState::module`]; contexts cannot share JS objects).
     renderer_module: Option<JsObject>,
@@ -227,6 +233,7 @@ impl ElectronHost {
                 ipc_handlers: HashMap::new(),
                 ipc_listeners: HashMap::new(),
                 created_window_ids: Vec::new(),
+                window_closed_listeners: HashMap::new(),
                 renderer_module: None,
                 renderer_listeners: HashMap::new(),
                 invoke_queue: VecDeque::new(),
@@ -843,17 +850,57 @@ fn js_to_display_match_rect(value: &JsValue, context: &mut Context) -> JsResult<
     js_to_bounds(value, context)
 }
 
+/// `win.on(event, listener)` (issue #84): `closed` fires when this window
+/// closes; any other event name is accepted and never fires, matching the
+/// `app.on` philosophy for unimplemented surfaces. The JS wrapper returns the
+/// window so calls chain like Electron's `EventEmitter.on`.
+fn e_window_on(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let id = window_id_arg(args, context)?;
+    let event = require_string_arg(args.get(1..).unwrap_or(&[]), 0, "win.on")?;
+    let listener = require_callable_arg(args.get(1..).unwrap_or(&[]), 1, "win.on")?;
+    let shared = electron_state(context)?;
+    if event != "closed" {
+        return Ok(JsValue::undefined());
+    }
+    let mut state = shared.0.borrow_mut();
+    if state.windows.get(id).is_none() {
+        return Err(JsError::from(
+            JsNativeError::error().with_message("Object has been destroyed"),
+        ));
+    }
+    state
+        .window_closed_listeners
+        .entry(id)
+        .or_default()
+        .push(listener);
+    Ok(JsValue::undefined())
+}
+
 /// `win.close()`: destroy the window; the last close fires JS
 /// `window-all-closed` listeners and runs the compat shutdown flow
-/// (Electron's default quit).
+/// (Electron's default quit). Closing an unknown or already-destroyed id is
+/// an intentional idempotent silent no-op (no throw, no `window-all-closed`,
+/// no quit) so double-close is safe; contrast `win.on`, which throws
+/// "Object has been destroyed" for such ids like real Electron.
 fn e_window_close(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let id = window_id_arg(args, context)?;
     let shared = electron_state(context)?;
-    let last_closed = {
+    let (closed, last_closed) = {
         let mut state = shared.0.borrow_mut();
-        state.windows.close(id);
-        state.windows.window_count() == 0
+        let closed = state.windows.close(id);
+        let last_closed = closed && state.windows.window_count() == 0;
+        (closed, last_closed)
     };
+    // `closed` first (Electron order), then the app-level last-close flow.
+    if closed {
+        let listeners = shared
+            .0
+            .borrow_mut()
+            .window_closed_listeners
+            .remove(&id)
+            .unwrap_or_default();
+        call_js_listeners(context, "win 'closed' listener", listeners);
+    }
     if last_closed {
         shared.0.borrow_mut().app.note_window_closed(0);
         fire_app_event(context, "window-all-closed");
@@ -971,6 +1018,12 @@ impl crate::runtime::ScriptRuntime {
             "__strake_electron_window_close",
             1,
             e_window_close,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_window_on",
+            3,
+            e_window_on,
         );
         register_primitive(
             &mut self.context,
