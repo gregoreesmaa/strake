@@ -79,7 +79,7 @@ pub use power::{
 };
 pub use safe_storage::{KeychainBackend, RecordingKeychain, SafeStorage, SafeStorageError};
 pub use screen::{Display, Screen};
-pub use shell::{ShellError, ShellWindow};
+pub use shell::{FileOnlyNetProvider, ShellError, ShellWindow};
 pub use updater::{Artifact, ManifestError, UpdateManifest, Version};
 pub use web_storage::{
     Origin, STORAGE_QUOTA_BYTES, StorageArea, StorageAreaKind, StorageChange, StorageError,

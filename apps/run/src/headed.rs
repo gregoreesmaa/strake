@@ -2,10 +2,11 @@
 //!
 //! `--prove-ipc` proves everything headlessly. This module proves the headed
 //! second half named in [`crate`] docs: the booted window's entry page is
-//! handed to a real OS surface through [`ShellWindow`] →
-//! `into_window_config` → `View::init` on a live winit event loop, using the
-//! same [`StrakeApplication`] harness as the `rdme` viewer with the CPU
-//! softbuffer renderer.
+//! painted through the full renderer pipeline ([`paint_app_window`]: preload,
+//! page scripts, linked stylesheets) and handed to a real OS surface through
+//! [`ShellWindow`] attributes → `WindowConfig` → `View::init` on a live winit
+//! event loop, using the same [`StrakeApplication`] harness as the `rdme`
+//! viewer with the CPU softbuffer renderer.
 //!
 //! The run is self-terminating (AGENTS.md): after `open_secs` seconds a timer
 //! thread asks for close, the harness closes the compat window (which must
@@ -22,9 +23,9 @@ use std::time::Duration;
 use anyrender_vello_cpu::VelloCpuWindowRenderer;
 use strake_electron_compat::{App, AppEventKind, BrowserWindowOptions, ShellWindow, WindowManager};
 use strake_shell::{
-    StrakeApplication, StrakeShellEvent, StrakeShellProxy, create_default_event_loop,
+    StrakeApplication, StrakeShellEvent, StrakeShellProxy, WindowConfig, create_default_event_loop,
 };
-use strake_vibey_script::boot_app_dir;
+use strake_vibey_script::{boot_app_dir, paint_app_window};
 use winit::application::ApplicationHandler;
 use winit::event::{StartCause, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
@@ -218,7 +219,11 @@ pub fn prove_headed(app_dir: &Path, open_secs: u64) -> Result<(), String> {
         });
     }
 
-    let mut shell_window = ShellWindow::open(
+    // The compat window owns lifecycle + OS attributes; the paint document is
+    // built by `paint_app_window`, which runs the full renderer pipeline
+    // (issues #145, #146). It cannot live in `ShellWindow`: script execution
+    // needs `strake-vibey-script`, which already depends on the compat crate.
+    let shell_window = ShellWindow::open(
         Rc::clone(&manager),
         Rc::clone(&app),
         BrowserWindowOptions {
@@ -230,28 +235,95 @@ pub fn prove_headed(app_dir: &Path, open_secs: u64) -> Result<(), String> {
         },
     );
     let compat_id = shell_window.compat_id();
-    shell_window
-        .load_html(&html)
-        .map_err(|error| format!("headed: load_html: {error:?}"))?;
-    if !shell_window.has_painted() {
-        return Err(String::from("headed: entry page did not first-paint"));
+    // Resolve the window's preload file like boot does: an absolute path, or
+    // a name joined onto the app dir. A declared-but-missing preload fails
+    // the proof: silently painting without it is exactly issue #145.
+    let preload_path = window.preload.as_deref().map(Path::new).and_then(|raw| {
+        if raw.is_file() {
+            return Some(raw.to_path_buf());
+        }
+        raw.file_name()
+            .map(|name| app_dir.join(name))
+            .filter(|path| path.is_file())
+    });
+    if window.preload.is_some() && preload_path.is_none() {
+        return Err(format!(
+            "headed: preload {:?} not found under {}",
+            window.preload,
+            app_dir.display(),
+        ));
     }
-    println!(
-        "headed: first paint ok, title={:?}",
-        shell_window.page_title()
-    );
-    let body_text = shell_window
-        .document()
-        .and_then(|doc| doc.find_body_node())
-        .map(|node| node.text_content())
-        .unwrap_or_default();
-    println!("headed: body text before handoff: {body_text:?}");
-    if body_text.trim().is_empty() {
+    let preload_source = preload_path
+        .map(|path| std::fs::read_to_string(&path))
+        .transpose()
+        .map_err(|error| format!("headed: cannot read preload: {error}"))?;
+    let painted = paint_app_window(
+        &html,
+        &entry_path,
+        &report.app_name,
+        window.width,
+        window.height,
+        preload_source.as_deref(),
+    )
+    .map_err(|error| format!("headed: paint: {error}"))?;
+    if !painted.js_errors.is_empty() {
+        return Err(format!(
+            "headed: preload/page script errors: {:?}",
+            painted.js_errors
+        ));
+    }
+    println!("headed: first paint ok, title={:?}", painted.title);
+    println!("headed: body text before handoff: {:?}", painted.body_text);
+    if painted.body_text.trim().is_empty() {
         return Err(String::from("headed: entry body has no text content"));
     }
-    let config = shell_window
-        .into_window_config(VelloCpuWindowRenderer::new())
-        .map_err(|error| format!("headed: handoff: {error:?}"))?;
+    // Issue #145: preload DOM effects must reach the screen. The proof runs
+    // against apps whose preload stamps `process.versions` (the `0.0.0-strake`
+    // fallbacks until #144 lands a real ABI); a clean preload with no stamps
+    // in the painted body means the effects were dropped at handoff.
+    if painted.had_preload {
+        if !painted.body_text.contains("0.0.0-strake") {
+            return Err(String::from(
+                "headed: preload ran clean but version stamps are missing \
+                 from the painted body (preload effects dropped)",
+            ));
+        }
+        println!("headed: preload effects present (version stamps in painted body)");
+    }
+    // Issue #146: every linked same-origin stylesheet must have fetched, and
+    // an author style must have taken effect.
+    if painted.expected_stylesheets.is_empty() {
+        println!("headed: no linked same-origin stylesheets; author-style assertion skipped");
+    } else {
+        let missing: Vec<&String> = painted
+            .expected_stylesheets
+            .iter()
+            .filter(|url| !painted.served_urls.contains(url))
+            .collect();
+        if !missing.is_empty() {
+            return Err(format!(
+                "headed: linked stylesheets never fetched: {missing:?}"
+            ));
+        }
+        if painted.author_stylesheet_count == 0 {
+            return Err(String::from(
+                "headed: stylesheets fetched but no author style took effect",
+            ));
+        }
+        println!(
+            "headed: author styles applied ({} linked stylesheet(s) fetched, {} in cascade)",
+            painted.served_urls.len(),
+            painted.author_stylesheet_count,
+        );
+    }
+    let attributes = shell_window
+        .window_attributes()
+        .ok_or_else(|| String::from("headed: window closed before handoff"))?;
+    let config = WindowConfig::with_attributes(
+        Box::new(painted.document),
+        VelloCpuWindowRenderer::new(),
+        attributes,
+    );
     flags.handed_off.set(true);
 
     let event_loop = create_default_event_loop();

@@ -17,16 +17,80 @@
 
 use std::cell::RefCell;
 use std::fmt;
+use std::path::PathBuf;
 use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use strake_dom::{BaseDocument, DEFAULT_CSS, DocumentConfig};
 use strake_html::{DocumentHtmlParser, HtmlProvider};
+use strake_traits::net::{Bytes, NetHandler, NetProvider, Request};
 use strake_traits::shell::{ColorScheme, Viewport};
 use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::window::WindowAttributes;
 
 use crate::{App, Bounds, BrowserWindowOptions, Screen, WindowManager};
+
+/// A synchronous [`NetProvider`] that serves `file:` URLs straight from disk
+/// and fails everything else (issue #146).
+///
+/// Headed Electron proof windows load local app files: linked stylesheets,
+/// images, and fonts under the entry file resolve to `file:` URLs, which this
+/// provider serves inline without a network stack or async runtime. Remote
+/// (`http(s):`) subresources fail fast through [`NetHandler::error`] instead
+/// of hanging: render-blocking fetches drain (issue #65) and first paint
+/// proceeds with local styles only, matching the headed proof's "same-origin
+/// stylesheets apply, off-origin hrefs keep today's skip behavior" contract.
+/// Missing/unreadable files likewise report through `error`, never panics.
+#[derive(Debug, Default)]
+pub struct FileOnlyNetProvider {
+    served: Mutex<Vec<String>>,
+}
+
+impl FileOnlyNetProvider {
+    /// An empty provider (nothing served yet).
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// The `file:` URLs this provider has served bytes for, in fetch order.
+    /// Embedders (e.g. the headed proof) use this to assert that every
+    /// linked same-origin stylesheet actually fetched before first paint.
+    pub fn served_urls(&self) -> Vec<String> {
+        self.served
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+}
+
+impl NetProvider for FileOnlyNetProvider {
+    fn fetch(&self, _doc_id: usize, request: Request, handler: Box<dyn NetHandler>) {
+        let url = request.url.to_string();
+        if request.url.scheme() != "file" {
+            handler.error(
+                url.clone(),
+                format!("FileOnlyNetProvider skips off-origin subresource: {url}"),
+            );
+            return;
+        }
+        match request.url.to_file_path() {
+            Ok(path) => match std::fs::read(&path) {
+                Ok(bytes) => {
+                    self.served
+                        .lock()
+                        .unwrap_or_else(std::sync::PoisonError::into_inner)
+                        .push(url.clone());
+                    handler.bytes(url, Bytes::from(bytes));
+                }
+                Err(error) => handler.error(
+                    url.clone(),
+                    format!("cannot read {}: {error}", path.display()),
+                ),
+            },
+            Err(()) => handler.error(url.clone(), format!("invalid file URL: {url}")),
+        }
+    }
+}
 
 /// Failures opening or driving a [`ShellWindow`].
 #[derive(Debug)]
@@ -148,6 +212,30 @@ impl ShellWindow {
         self.doc.as_ref()
     }
 
+    /// Set the paint document's base URL for resolving linked resources
+    /// (stylesheets, images, fonts). Without one, relative hrefs skip their
+    /// fetch by design (issue #55); with one plus a real [`NetProvider`],
+    /// linked same-origin stylesheets fetch, ingest, and re-resolve before
+    /// first paint (issue #146). `url` must be absolute
+    /// (`BaseDocument::set_base_url` panics otherwise); form entry-file URLs
+    /// with `url::Url::from_file_path`, as [`Self::load_file`] does.
+    pub fn set_base_url(&mut self, url: &str) -> Result<(), ShellError> {
+        self.require_open()?;
+        let doc = self.doc.as_mut().ok_or(ShellError::Destroyed)?;
+        doc.set_base_url(url);
+        Ok(())
+    }
+
+    /// Set the paint document's network provider for subresource fetches.
+    /// The default provider is a no-op (linked resources skip); headed
+    /// Electron windows use [`FileOnlyNetProvider`] for local app files.
+    pub fn set_net_provider(&mut self, provider: Arc<dyn NetProvider>) -> Result<(), ShellError> {
+        self.require_open()?;
+        let doc = self.doc.as_mut().ok_or(ShellError::Destroyed)?;
+        doc.set_net_provider(provider);
+        Ok(())
+    }
+
     /// The page `<title>`, if the loaded HTML sets one.
     pub fn page_title(&self) -> Option<String> {
         self.doc
@@ -183,6 +271,10 @@ impl ShellWindow {
 
     /// `win.loadFile`: record the navigation in the compat core, then load
     /// the file through the DOM pipeline like [`ShellWindow::load_html`].
+    /// The entry file's `file://` URL becomes the document base (issue #146,
+    /// same as boot's first-paint path) so relative linked resources resolve
+    /// instead of skipping per issue #55. Unformable paths keep today's
+    /// skip behavior.
     pub fn load_file(&mut self, path: &str) -> Result<(), ShellError> {
         self.require_open()?;
         let html = std::fs::read_to_string(path).map_err(|source| ShellError::ReadFile {
@@ -191,6 +283,13 @@ impl ShellWindow {
         })?;
         if let Some(win) = self.manager.borrow_mut().get_mut(self.compat_id) {
             win.web_contents_mut().load_file(path);
+        }
+        let absolute = std::path::absolute(path).unwrap_or_else(|_| PathBuf::from(path));
+        if let Ok(url) = url::Url::from_file_path(&absolute)
+            && let Some(doc) = self.doc.as_mut()
+        {
+            // `from_file_path` output always parses; `set_base_url` is safe.
+            doc.set_base_url(url.as_str());
         }
         self.load_html(&html)
     }
@@ -599,6 +698,118 @@ mod tests {
                 .get_title(),
             "Fixture"
         );
+    }
+
+    /// Issue #146: `load_file` plants the entry file's `file://` URL as the
+    /// document base, so a linked same-origin stylesheet fetches through the
+    /// provider, ingests, and joins the cascade before first paint returns.
+    #[test]
+    fn load_file_sets_base_url_and_applies_linked_stylesheet() {
+        let dir = std::env::temp_dir().join(format!(
+            "strake-shell-css-loadfile-{}.d",
+            std::process::id()
+        ));
+        std::fs::create_dir_all(&dir).expect("fixture dir");
+        std::fs::write(
+            dir.join("theme.css"),
+            "body { background-color: rgb(1, 2, 3); }",
+        )
+        .expect("write css");
+        std::fs::write(
+            dir.join("app.html"),
+            "<!DOCTYPE html><html><head><title>Styled</title>\
+             <link rel=\"stylesheet\" href=\"theme.css\"></head>\
+             <body><p>styled</p></body></html>",
+        )
+        .expect("write html");
+        let path_str = dir.join("app.html").to_string_lossy().to_string();
+
+        let net = Arc::new(FileOnlyNetProvider::new());
+        let (manager, app) = handles();
+        let mut win = ShellWindow::open(Rc::clone(&manager), app, BrowserWindowOptions::default());
+        win.set_net_provider(Arc::clone(&net) as Arc<dyn NetProvider>)
+            .expect("provider");
+        win.load_file(&path_str).expect("load_file");
+
+        let doc = win.document().expect("document live");
+        assert!(
+            doc.base_url().as_str().ends_with("app.html"),
+            "entry file is the document base, got {}",
+            doc.base_url()
+        );
+        assert!(
+            !doc.has_pending_critical_resources(),
+            "synchronous file delivery settles before first paint returns"
+        );
+        assert!(
+            net.served_urls()
+                .iter()
+                .any(|url| url.ends_with("theme.css")),
+            "linked same-origin stylesheet fetched, served {:?}",
+            net.served_urls()
+        );
+        assert_eq!(
+            doc.author_stylesheets().count(),
+            1,
+            "fetched stylesheet ingests into the cascade"
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Issue #55 behavior is preserved: with no base URL the href cannot
+    /// resolve, so no fetch is issued even with a willing provider.
+    #[test]
+    fn load_html_without_base_url_skips_linked_fetch() {
+        let net = Arc::new(FileOnlyNetProvider::new());
+        let (manager, app) = handles();
+        let mut win = ShellWindow::open(manager, app, BrowserWindowOptions::default());
+        win.set_net_provider(Arc::clone(&net) as Arc<dyn NetProvider>)
+            .expect("provider");
+        win.load_html(
+            "<!DOCTYPE html><html><head>\
+             <link rel=\"stylesheet\" href=\"theme.css\"></head>\
+             <body><p>unstyled</p></body></html>",
+        )
+        .expect("load_html");
+        assert!(
+            net.served_urls().is_empty(),
+            "unresolvable href issues no fetch (issue #55)"
+        );
+        let doc = win.document().expect("live");
+        assert!(!doc.has_pending_critical_resources());
+        assert_eq!(doc.author_stylesheets().count(), 0);
+    }
+
+    /// Issue #146: off-origin stylesheets stay unfetched in headed proof
+    /// windows, and the failed fetch drains the render gate (issue #65)
+    /// instead of blocking first paint.
+    #[test]
+    fn off_origin_stylesheet_drains_without_blocking_first_paint() {
+        let net = Arc::new(FileOnlyNetProvider::new());
+        let (manager, app) = handles();
+        let mut win = ShellWindow::open(manager, app, BrowserWindowOptions::default());
+        win.set_net_provider(Arc::clone(&net) as Arc<dyn NetProvider>)
+            .expect("provider");
+        win.set_base_url("file:///tmp/strake-shell-offorigin/")
+            .expect("base");
+        win.load_html(
+            "<!DOCTYPE html><html><head>\
+             <link rel=\"stylesheet\" href=\"https://fonts.example.com/remote.css\"></head>\
+             <body><p>local only</p></body></html>",
+        )
+        .expect("load_html");
+        assert!(
+            net.served_urls().is_empty(),
+            "off-origin CSS stays unfetched"
+        );
+        let doc = win.document().expect("live");
+        assert!(
+            !doc.has_pending_critical_resources(),
+            "failed fetch drains the render gate (issue #65)"
+        );
+        assert!(win.has_painted());
+        assert_eq!(doc.author_stylesheets().count(), 0);
     }
 
     #[test]
