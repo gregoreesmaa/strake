@@ -13,6 +13,27 @@ pub(crate) struct Timer {
     pub interval: Option<Duration>,
     pub callback: JsObject,
     pub args: Vec<JsValue>,
+    /// HTML timer-task nesting level: 0 when scheduled outside a timer
+    /// callback, otherwise the firing timer's level + 1. Levels above
+    /// [`NESTING_CLAMP_LEVEL`] clamp the delay to
+    /// [`NESTING_CLAMP_DELAY`](issue #6 acceptance).
+    pub nesting: u32,
+}
+
+/// Nesting level above which `setTimeout`/`setInterval` delays clamp.
+pub(crate) const NESTING_CLAMP_LEVEL: u32 = 5;
+/// Minimum delay for deeply nested timers (HTML5, issue #6).
+pub(crate) const NESTING_CLAMP_DELAY: Duration = Duration::from_millis(4);
+
+/// Apply the HTML5 nesting clamp: timers scheduled from a timer task nested
+/// deeper than [`NESTING_CLAMP_LEVEL`] run no sooner than
+/// [`NESTING_CLAMP_DELAY`] out.
+pub(crate) fn clamp_delay(nesting: u32, delay: Duration) -> Duration {
+    if nesting > NESTING_CLAMP_LEVEL {
+        delay.max(NESTING_CLAMP_DELAY)
+    } else {
+        delay
+    }
 }
 
 #[derive(Default)]
@@ -37,6 +58,7 @@ impl TimerQueue {
         interval: Option<Duration>,
         callback: JsObject,
         args: Vec<JsValue>,
+        nesting: u32,
     ) -> u64 {
         self.next_id += 1;
         let id = self.next_id;
@@ -46,6 +68,7 @@ impl TimerQueue {
             interval,
             callback,
             args,
+            nesting,
         });
         id
     }
@@ -94,7 +117,9 @@ impl TimerQueue {
             }
         }
 
-        // Reschedule interval timers
+        // Reschedule interval timers (keeping the firing timer's nesting
+        // level, so an interval created by a deeply nested task stays
+        // clamped like the HTML `timeout()` steps require).
         for timer in &due {
             if let Some(interval) = timer.interval {
                 self.timers.push(Timer {
@@ -103,6 +128,7 @@ impl TimerQueue {
                     interval: timer.interval,
                     callback: timer.callback.clone(),
                     args: timer.args.clone(),
+                    nesting: timer.nesting,
                 });
             }
         }

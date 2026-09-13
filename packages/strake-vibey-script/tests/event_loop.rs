@@ -272,6 +272,52 @@ fn nested_zero_delay_timer_waits_for_next_poll() {
 }
 
 #[test]
+fn nested_timeout_past_five_levels_clamps_to_4ms() {
+    // HTML `timeout()` steps (issue #6 acceptance): a timeout scheduled from
+    // a timer task nested more than 5 levels deep clamps to a 4ms minimum.
+    // An 8-deep chain of zero-delay timeouts therefore advances virtual time
+    // by 0 for its first hops and by >= 4ms once the firing timer's nesting
+    // passes 5. Fully deterministic under the virtual clock.
+    use web_time::Duration;
+
+    let mut doc = doc_with_script(
+        r#"
+        function nest(depth) {
+            if (depth === 0) { __strake_send_message("done"); return; }
+            setTimeout(() => nest(depth - 1), 0);
+        }
+        nest(8);
+        "#,
+    );
+    doc.execute_scripts();
+    let mut prev = None;
+    let mut gaps = Vec::new();
+    while let Some(deadline) = doc.next_timer_deadline() {
+        if let Some(prev) = prev {
+            gaps.push(deadline.duration_since(prev));
+        }
+        prev = Some(deadline);
+        doc.advance_clock_to(deadline);
+        doc.poll(None);
+    }
+    assert_eq!(doc.take_messages(), vec!["done"]);
+    // 8 chained timeouts, 7 hops: hops scheduled while firing at nesting 0-4
+    // stay at 0ms; hops scheduled at firing nesting 5 and 6 (timer nesting 6
+    // and 7) clamp to 4ms.
+    assert_eq!(gaps.len(), 7, "one hop per chained timeout: {gaps:?}");
+    for (i, gap) in gaps.iter().enumerate() {
+        if i >= 5 {
+            assert!(
+                *gap >= Duration::from_millis(4),
+                "hop {i} clamps to >= 4ms: {gap:?}"
+            );
+        } else {
+            assert_eq!(*gap, Duration::ZERO, "hop {i} stays unclamped");
+        }
+    }
+}
+
+#[test]
 fn engine_trait_drives_backend_through_dyn_dispatch() {
     // The ScriptEngine seam (issue #4, Phase 0): the document's engine must
     // be drivable as a trait object, so a future QuickJS-ng backend can
