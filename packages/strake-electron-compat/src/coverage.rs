@@ -32,8 +32,8 @@ use SupportStatus::{Deferred, Native, Shimmed};
 ///
 /// Seeded as the top 50 for the Day-1 shim (issue #21); slice PRs grow the
 /// freeze by promoting Deferred entries or recording explicit new decisions
-/// (issues #92–#95 here), and the count test below pins the exact length so
-/// every addition is a reviewed diff.
+/// (issues #90–#96, #92–#95 here), and the count test below pins the exact
+/// length so every addition is a reviewed diff.
 pub const TOP50: &[ApiEntry] = &[
     ApiEntry {
         electron: "BrowserWindow constructor",
@@ -191,9 +191,24 @@ pub const TOP50: &[ApiEntry] = &[
         status: Shimmed,
     },
     ApiEntry {
+        electron: "screen.getAllDisplays",
+        strake: "Screen::get_all_displays",
+        status: Shimmed,
+    },
+    ApiEntry {
+        electron: "screen.getDisplayMatching",
+        strake: "Screen::get_display_matching",
+        status: Shimmed,
+    },
+    ApiEntry {
+        electron: "screen.getDisplayNearestPoint",
+        strake: "Screen::get_display_nearest_point",
+        status: Shimmed,
+    },
+    ApiEntry {
         electron: "screen.getPrimaryDisplay",
-        strake: "Deferred: winit monitor bridge",
-        status: Deferred("winit monitor bridge"),
+        strake: "Screen::get_primary_display",
+        status: Shimmed,
     },
     ApiEntry {
         electron: "shell.openExternal",
@@ -221,6 +236,11 @@ pub const TOP50: &[ApiEntry] = &[
         status: Shimmed,
     },
     ApiEntry {
+        electron: "win.getBounds",
+        strake: "WindowManager::get_bounds",
+        status: Shimmed,
+    },
+    ApiEntry {
         electron: "win.hide",
         strake: "WindowManager::hide",
         status: Shimmed,
@@ -233,6 +253,11 @@ pub const TOP50: &[ApiEntry] = &[
     ApiEntry {
         electron: "win.isMinimized",
         strake: "BrowserWindow::is_minimized",
+        status: Shimmed,
+    },
+    ApiEntry {
+        electron: "win.isVisible",
+        strake: "WindowManager::is_visible",
         status: Shimmed,
     },
     ApiEntry {
@@ -256,6 +281,11 @@ pub const TOP50: &[ApiEntry] = &[
         status: Shimmed,
     },
     ApiEntry {
+        electron: "win.on(closed)",
+        strake: "WindowManager::on_closed",
+        status: Shimmed,
+    },
+    ApiEntry {
         electron: "win.restore",
         strake: "WindowManager::restore",
         status: Shimmed,
@@ -266,9 +296,24 @@ pub const TOP50: &[ApiEntry] = &[
         status: Shimmed,
     },
     ApiEntry {
+        electron: "win.setBounds",
+        strake: "WindowManager::set_bounds",
+        status: Shimmed,
+    },
+    ApiEntry {
+        electron: "win.setMenuBarVisibility",
+        strake: "Deferred: needs #12 native menus",
+        status: Deferred("needs #12 native menus"),
+    },
+    ApiEntry {
         electron: "win.setProgressBar",
         strake: "Deferred: OS taskbar bridge",
         status: Deferred("OS taskbar bridge"),
+    },
+    ApiEntry {
+        electron: "win.setResizable",
+        strake: "WindowManager::set_resizable",
+        status: Shimmed,
     },
     ApiEntry {
         electron: "win.setTitle",
@@ -284,6 +329,11 @@ pub const TOP50: &[ApiEntry] = &[
         electron: "win.webContents.executeJavaScript",
         strake: "Deferred: renderer JS-engine binding",
         status: Deferred("renderer JS-engine binding"),
+    },
+    ApiEntry {
+        electron: "win.webContents.getTitle",
+        strake: "WebContents::get_title",
+        status: Shimmed,
     },
     ApiEntry {
         electron: "win.webContents.openDevTools",
@@ -331,16 +381,19 @@ const MVP_MUST: &[&str] = &[
 
 #[test]
 fn coverage_freeze_is_sorted_unique_apis() {
-    // Seeded at 50 for the Day-1 shim; issues #92–#95 add four entries
-    // (Notification, powerMonitor, powerSaveBlocker, safeStorage) and
-    // promote clipboard.readText/writeText to Shimmed.
-    assert_eq!(TOP50.len(), 54, "freeze grows only by reviewed diff");
+    // Seeded at 50 for the Day-1 shim; issues #90/#96 add nine entries
+    // (window geometry, webContents title, screen enumeration, plus the
+    // setMenuBarVisibility deferral decision); issue #84 adds win.on(closed).
+    // Issues #92–#95 add four entries (Notification, powerMonitor,
+    // powerSaveBlocker, safeStorage) and promote clipboard.readText/writeText
+    // to Shimmed.
+    assert_eq!(TOP50.len(), 64, "freeze grows only by reviewed diff");
     let names: Vec<_> = TOP50.iter().map(|entry| entry.electron).collect();
     let mut sorted = names.clone();
     sorted.sort_unstable();
     assert_eq!(names, sorted, "keep the freeze table sorted for review");
     sorted.dedup();
-    assert_eq!(sorted.len(), 54, "no duplicate Electron APIs");
+    assert_eq!(sorted.len(), 64, "no duplicate Electron APIs");
 }
 
 #[test]
