@@ -551,6 +551,47 @@ fn input_selection_offsets() {
     assert_eq!(text_of_selector(&doc, "#out"), "true|1-3|2-5|null");
 }
 
+/// Issue #63: `getBoundingClientRect` must include CSS transforms (CSSOM),
+/// so pointer element-coordinates derived from it stay transform-invariant.
+#[test]
+fn bounding_rect_includes_own_transform() {
+    let mut doc = doc_from_html(
+        r#"
+        <html><body style="margin:0">
+            <div id="box" style="width:100px; height:50px; margin-left:20px; margin-top:10px; transform: translate(50px, 20px);"></div>
+            <script>
+                const r = document.getElementById("box").getBoundingClientRect();
+                __strake_send_message("rect:" + [r.x, r.y, r.width, r.height].map(Math.round).join(","));
+            </script>
+        </body></html>
+        "#,
+    );
+    assert!(doc.take_js_errors().is_empty());
+    // Layout box at (20,10) shifted by translate(50,20).
+    assert_eq!(doc.take_messages(), vec!["rect:70,30,100,50"]);
+}
+
+/// Issue #63: an ancestor's transform shifts the whole subtree's rects.
+#[test]
+fn bounding_rect_includes_ancestor_transform() {
+    let mut doc = doc_from_html(
+        r#"
+        <html><body style="margin:0">
+            <div id="p" style="transform: translateX(10px);">
+                <div id="c" style="width:40px; height:20px; margin-left:5px; margin-top:7px;"></div>
+            </div>
+            <script>
+                const r = document.getElementById("c").getBoundingClientRect();
+                __strake_send_message("rect:" + [r.x, r.y, r.width, r.height].map(Math.round).join(","));
+            </script>
+        </body></html>
+        "#,
+    );
+    assert!(doc.take_js_errors().is_empty());
+    // Layout box at (5,7) shifted by the parent's translateX(10).
+    assert_eq!(doc.take_messages(), vec!["rect:15,7,40,20"]);
+}
+
 // Interface constructors referenced by `instanceof` probes exist as globals.
 #[test]
 fn interface_constructor_globals() {
