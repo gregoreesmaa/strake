@@ -159,7 +159,7 @@ fn space_activates_focused_button_on_key_up_only() {
     assert_eq!(up_only, 1, "Space key-up must click once");
 }
 
-/// Range sliders consume keys for stepping (issue #456): Enter/Space adjust
+/// Range sliders consume keys for stepping (issue #51): Enter/Space adjust
 /// nothing and must not click.
 #[test]
 fn enter_space_on_range_steps_nothing_and_clicks_nothing() {

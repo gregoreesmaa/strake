@@ -28,7 +28,7 @@ pub(crate) fn handle_key_or_input_event<F: FnMut(DomEvent)>(
             return;
         }
 
-        // Enter activates the focused control on key down (issue #839). Like
+        // Enter activates the focused control on key down (issue #70). Like
         // Tab above, this runs after `:focus-visible` arming in the caller.
         if event.state.is_pressed() && event.key == Key::Enter {
             try_keyboard_activate(doc, target, event.modifiers, &mut dispatch_event);
@@ -95,7 +95,7 @@ pub(crate) fn handle_key_or_input_event<F: FnMut(DomEvent)>(
 }
 
 /// Space activates the focused control on key *up*, so holding Space does not
-/// repeat-activate (issue #839). KeyUp otherwise has no default action.
+/// repeat-activate (issue #70). KeyUp otherwise has no default action.
 pub(crate) fn handle_keyup(
     doc: &mut BaseDocument,
     target: NodeId,
@@ -111,7 +111,7 @@ pub(crate) fn handle_keyup(
 }
 
 /// Dispatch a synthetic click on the focused control for keyboard activation
-/// (issue #839): Enter on key down, Space on key up. Text inputs consume
+/// (issue #70): Enter on key down, Space on key up. Text inputs consume
 /// these keys for editing, so they never activate. Queuing the click reaches
 /// script handlers first and then the click default action (checkbox
 /// toggling, details expansion, link navigation) exactly like a mouse click,
@@ -134,7 +134,7 @@ fn try_keyboard_activate(
         return;
     }
     let tag = element.name.local.clone();
-    // Range sliders consume keys for stepping (issue #456); Enter/Space must
+    // Range sliders consume keys for stepping (issue #51); Enter/Space must
     // not click them.
     let activatable = tag == local_name!("button")
         || tag == local_name!("summary")

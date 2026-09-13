@@ -382,7 +382,7 @@ pub(crate) fn handle_pointermove<F: FnMut(DomEvent)>(
 
 /// Nearest ancestor-or-self that is a real (non-anonymous) element node, for
 /// focus decisions on hits that can land on text or anonymous boxes
-/// (issue #839).
+/// (issue #70).
 fn nearest_element_ancestor(doc: &BaseDocument, node_id: NodeId) -> Option<NodeId> {
     let mut current = Some(node_id);
     while let Some(id) = current {
@@ -522,7 +522,7 @@ pub(crate) fn handle_pointerdown(
             }
             // A main-button press on a focusable element (button, link, …)
             // moves focus there, mirroring the text-input arm below and
-            // browser behavior (issue #839). The hit can land on a text
+            // browser behavior (issue #70). The hit can land on a text
             // child, so focusability is judged on the nearest element.
             if button == MouseEventButton::Main {
                 if let Some(element_id) = nearest_element_ancestor(doc, actual_target) {
@@ -845,7 +845,7 @@ pub(crate) fn handle_click(
 
     // If nothing is matched then clear focus — unless the click landed on a
     // focusable element, which keeps the focus its pointerdown gave it
-    // (issue #839).
+    // (issue #70).
     if !matched {
         let keep_focus =
             nearest_element_ancestor(doc, target).is_some_and(|id| doc.nodes[id].is_focussable());
