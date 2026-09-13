@@ -765,3 +765,52 @@ fn close_unknown_or_destroyed_id_is_silent_noop() {
     assert_eq!(host.window_count(), 0);
     assert!(host.is_quit(), "the one legitimate last-close still quits");
 }
+
+#[test]
+fn node_events_standin_covers_emitter_basics() {
+    // Issue #16 canary slice: `require('node:events')` serves an
+    // EventEmitter with Node's on/once/off/emit/listenerCount semantics.
+    let (mut doc, _host) = main_doc();
+    drop(doc.take_messages());
+    doc.eval(
+        "const { EventEmitter } = require('node:events'); \
+         const { EventEmitter: Bare } = require('events'); \
+         const em = new EventEmitter(); \
+         __strake_send_message('ctor:' + (em instanceof EventEmitter) + '/' + (EventEmitter === Bare)); \
+         let calls = []; \
+         const a = (x) => calls.push('a' + x); \
+         const b = (x) => calls.push('b' + x); \
+         em.on('ev', a); \
+         em.once('ev', b); \
+         __strake_send_message('emit1:' + em.emit('ev', 1)); \
+         __strake_send_message('emit2:' + em.emit('ev', 2)); \
+         __strake_send_message('calls:' + calls.join(',')); \
+         __strake_send_message('count:' + em.listenerCount('ev') + '/' + em.listeners('ev').length); \
+         em.off('ev', a); \
+         __strake_send_message('emit3:' + em.emit('ev', 3)); \
+         em.on('other', a); \
+         em.removeAllListeners('other'); \
+         __strake_send_message('emit4:' + em.emit('other')); \
+         em.on('x', a); \
+         em.removeAllListeners(); \
+         __strake_send_message('emit5:' + em.emit('x'));",
+    );
+    let js_errors = doc.take_js_errors();
+    assert!(
+        js_errors.is_empty(),
+        "events stand-in must not throw, got {js_errors:?}"
+    );
+    assert_eq!(
+        doc.take_messages(),
+        vec![
+            "ctor:true/true",
+            "emit1:true",
+            "emit2:true",
+            "calls:a1,b1,a2",
+            "count:1/1",
+            "emit3:false",
+            "emit4:false",
+            "emit5:false",
+        ]
+    );
+}

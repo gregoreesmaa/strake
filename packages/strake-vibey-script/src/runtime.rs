@@ -848,6 +848,11 @@ impl crate::engine::ScriptEngine for ScriptRuntime {
             if cancelled {
                 continue;
             }
+            // Mark the firing timer's nesting level so `setTimeout` /
+            // `setInterval` scheduled from this callback nest correctly
+            // (issue #6). Cleared right after the call: scheduling outside
+            // any timer task nests at 0.
+            self.ctx.state.borrow_mut().timer_nesting = Some(timer.nesting);
             if let Err(error) =
                 timer
                     .callback
@@ -855,6 +860,7 @@ impl crate::engine::ScriptEngine for ScriptRuntime {
             {
                 report_js_error(&self.ctx, "timer callback", &error);
             }
+            self.ctx.state.borrow_mut().timer_nesting = None;
             // HTML spec: a microtask checkpoint runs after *each* task, so a
             // microtask queued by one timer runs before the next timer's
             // callback (issue #4). Draining once after the batch let later
@@ -1385,7 +1391,12 @@ fn set_timeout(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult
     };
     let mut state = ctx.state.borrow_mut();
     let now = state.clock.now();
-    let id = state.timers.add(now, delay, None, callback, rest);
+    // HTML `timeout()` steps (issue #6): a timeout scheduled from a timer
+    // task nests one level deeper than the firing timer, and nesting past
+    // level 5 clamps the delay to a 4ms minimum.
+    let nesting = state.timer_nesting.map(|level| level + 1).unwrap_or(0);
+    let delay = crate::timers::clamp_delay(nesting, delay);
+    let id = state.timers.add(now, delay, None, callback, rest, nesting);
     Ok(JsValue::from(id as f64))
 }
 
@@ -1396,7 +1407,13 @@ fn set_interval(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResul
     };
     let mut state = ctx.state.borrow_mut();
     let now = state.clock.now();
-    let id = state.timers.add(now, delay, Some(delay), callback, rest);
+    // Same nesting clamp as `setTimeout` (issue #6): the HTML `timeout()`
+    // steps cover both.
+    let nesting = state.timer_nesting.map(|level| level + 1).unwrap_or(0);
+    let delay = crate::timers::clamp_delay(nesting, delay);
+    let id = state
+        .timers
+        .add(now, delay, Some(delay), callback, rest, nesting);
     Ok(JsValue::from(id as f64))
 }
 
@@ -1423,6 +1440,7 @@ fn request_animation_frame(
         None,
         callback,
         vec![timestamp],
+        0,
     );
     Ok(JsValue::from(id as f64))
 }
