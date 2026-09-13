@@ -627,6 +627,51 @@ impl DocumentMutator<'_> {
         Some(parent_id)
     }
 
+    /// Ids of a subtree (the node itself, its descendants, and owned
+    /// anonymous blocks), collected before a drop deallocates them.
+    fn collect_subtree_ids(&self, node_id: NodeId) -> HashSet<NodeId> {
+        let mut ids = HashSet::new();
+        let mut stack = vec![node_id];
+        while let Some(id) = stack.pop() {
+            if !ids.insert(id) {
+                continue;
+            }
+            let Some(node) = self.doc.nodes.get(id) else {
+                continue;
+            };
+            stack.extend(node.children.iter().copied());
+            stack.extend(node.anonymous_blocks.iter().copied());
+        }
+        ids
+    }
+
+    /// Purge dropped ids from ancestors' derived paint lists (issue #62).
+    /// `paint_children` and stacking-context hoisted children rebuild on the
+    /// next resolve, but hit tests running before then dereference these
+    /// lists through `Node::with` and panic on stale ids. Starts at
+    /// `from_id` (the removal parent, whose own lists name the dropped
+    /// children) and walks to the root, since hoisted entries bubble past
+    /// their DOM parent into ancestor stacking contexts. `negative_z_count`
+    /// is recomputed with the lists; `content_area` stays stale until the
+    /// next resolve rebuilds every stacking context.
+    fn purge_derived_paint_refs(&mut self, from_id: NodeId, dropped: &HashSet<NodeId>) {
+        let mut current = Some(from_id);
+        while let Some(id) = current {
+            let Some(node) = self.doc.nodes.get_mut(id) else {
+                break;
+            };
+            if let Some(list) = node.paint_children.borrow_mut().as_mut() {
+                list.retain(|child| !dropped.contains(child));
+            }
+            if let Some(sc) = node.stacking_context.as_mut() {
+                sc.children
+                    .retain(|child| !dropped.contains(&child.node_id));
+                sc.sort();
+            }
+            current = node.parent;
+        }
+    }
+
     pub fn remove_and_drop_node(&mut self, node_id: NodeId) -> Option<Node> {
         self.remove_and_drop_node_with(node_id, &mut |_| {})
     }
@@ -640,6 +685,9 @@ impl DocumentMutator<'_> {
     ) -> Option<Node> {
         let hooks = self.doc.mutation_hooks.clone();
         let node_is_in_document = self.doc.nodes[node_id].flags.is_in_document();
+        // Collect the doomed ids before the drop deallocates them, so the
+        // derived paint lists below can be purged (issue #62).
+        let dropped = self.collect_subtree_ids(node_id);
         self.process_removed_subtree(node_id);
 
         let node = self.doc.drop_node_ignoring_parent_with(node_id, on_drop);
@@ -664,6 +712,7 @@ impl DocumentMutator<'_> {
             }
 
             parent.children.retain(|id| *id != node_id);
+            self.purge_derived_paint_refs(parent_id, &dropped);
             self.maybe_record_node(parent_id);
             hooks.node_removed(parent_id, node_id);
             hooks.queue_mutation_record(MutationRecord::ChildList {
@@ -696,10 +745,17 @@ impl DocumentMutator<'_> {
         let children = mem::take(&mut parent.children);
         self.mutations_occurred |= parent_is_in_doc && !children.is_empty();
         let removed: Vec<NodeId> = children.iter().copied().collect();
+        // Collect every doomed id (children plus their subtrees) before the
+        // drops below deallocate them (issue #62).
+        let mut dropped = HashSet::new();
+        for child_id in removed.iter().copied() {
+            dropped.extend(self.collect_subtree_ids(child_id));
+        }
         for child_id in children {
             self.process_removed_subtree(child_id);
             let _ = self.doc.drop_node_ignoring_parent(child_id);
         }
+        self.purge_derived_paint_refs(node_id, &dropped);
         self.maybe_record_node(node_id);
         if !removed.is_empty() {
             for child_id in removed.iter().copied() {
