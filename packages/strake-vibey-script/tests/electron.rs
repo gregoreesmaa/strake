@@ -766,6 +766,74 @@ fn close_unknown_or_destroyed_id_is_silent_noop() {
     assert!(host.is_quit(), "the one legitimate last-close still quits");
 }
 
+/// `process.env` inherits the host environ as a plain string map (Node
+/// semantics): reads see host variables, feature flags pass through, and
+/// writes stay on the snapshot.
+#[test]
+fn process_env_passes_through_host_environ() {
+    // Read-only check (no env mutation: tests run in parallel threads, and
+    // mutating the shared environ would race other tests' snapshots).
+    let path = std::env::var("PATH").unwrap_or_default();
+    let host = ElectronHost::new("QuickStart", "1.0.0");
+    let mut doc =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    doc.install_electron(&host);
+    doc.eval(
+        "__strake_send_message('typeof:' + typeof process.env); \
+         __strake_send_message('path:' + process.env.PATH); \
+         __strake_send_message('has:' + ('PATH' in process.env)); \
+         __strake_send_message('missing:' + process.env.STRAKE_TEST_ENV_DEFINITELY_ABSENT); \
+         process.env.STRAKE_TEST_ENV_WRITE = 'written'; \
+         __strake_send_message('write:' + process.env.STRAKE_TEST_ENV_WRITE);",
+    );
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "process.env must not throw, got {errors:?}"
+    );
+    assert_eq!(
+        doc.take_messages(),
+        vec![
+            "typeof:object".to_string(),
+            format!("path:{path}"),
+            // Portable across OS case rules: on Windows the variable is
+            // `Path` and the snapshot Proxy answers `PATH`; elsewhere the
+            // exact-case key exists.
+            "has:true".to_string(),
+            "missing:undefined".to_string(),
+            "write:written".to_string(),
+        ]
+    );
+    assert!(
+        std::env::var("STRAKE_TEST_ENV_WRITE").is_err(),
+        "snapshot writes must not leak into the host environ"
+    );
+}
+
+/// Node's `global` aliases the global object: `@electron/remote` reads
+/// `const { Promise } = global` at load.
+#[test]
+fn node_global_alias_matches_global_this() {
+    let host = ElectronHost::new("QuickStart", "1.0.0");
+    let mut doc =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    doc.install_electron(&host);
+    doc.eval(
+        "__strake_send_message('same:' + (global === globalThis)); \
+         __strake_send_message('process:' + (global.process === process));",
+    );
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "global alias must not throw, got {errors:?}"
+    );
+    assert_eq!(doc.take_messages(), vec!["same:true", "process:true"]);
+}
+
 #[test]
 fn node_events_standin_covers_emitter_basics() {
     // Issue #16 canary slice: `require('node:events')` serves an
@@ -961,4 +1029,74 @@ fn require_never_misresolves_core_or_native() {
         errors[0]
     );
     let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Required files evaluate in a per-file CommonJS function scope (Node
+/// parity): top-level `const`/`let`/`class` must not collide across files
+/// sharing the loader. Joplin boot hit this as `duplicate lexical
+/// declaration` when `@electron/remote`'s `server.js` and its siblings each
+/// declared TS-helper `const`s at top level.
+#[test]
+fn require_scopes_each_file_like_node() {
+    let root = loader_temp_dir("scope");
+    std::fs::write(
+        root.join("alpha.js"),
+        "const helper = 'alpha'; let counter = 1; class Box { v() { return helper + counter; } } \
+         module.exports = { box: new Box(), top: this === module.exports };",
+    )
+    .expect("alpha writes");
+    std::fs::write(
+        root.join("beta.js"),
+        "const helper = 'beta'; let counter = 41; class Box { v() { return helper + counter; } } \
+         module.exports = { box: new Box(), top: this === module.exports };",
+    )
+    .expect("beta writes");
+    let mut doc = loader_doc_at(&root);
+    doc.eval(
+        "const a = require('./alpha.js'); \
+         const b = require('./beta.js'); \
+         __strake_send_message('a:' + a.box.v()); \
+         __strake_send_message('b:' + b.box.v()); \
+         __strake_send_message('top:' + (a.top && b.top)); \
+         __strake_send_message('leak:' + (typeof helper === 'undefined' && typeof Box === 'undefined'));",
+    );
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "same-named top-level bindings must not collide, got {errors:?}"
+    );
+    assert_eq!(
+        doc.take_messages(),
+        vec!["a:alpha1", "b:beta41", "top:true", "leak:true"]
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Boa 0.22 rejects bare `of`/`let` arrow params (valid per spec, emitted by
+/// real bundlers — Joplin's `main.bundle.js`): eval must transparently retry
+/// a parenthesized copy and run it, reporting no errors.
+#[test]
+fn keyword_arrow_params_evaluate_via_fallback() {
+    let host = ElectronHost::new("KeywordArrow", "1.0.0");
+    let mut doc =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    doc.install_electron(&host);
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "electron bootstrap must install cleanly"
+    );
+    doc.eval(
+        "function y(f) { return f; } \
+         var zh = y(of => of + 1); \
+         var lh = y(let => let * 2); \
+         __strake_send_message('kw:' + zh(41) + '/' + lh(21));",
+    );
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "keyword arrow params must evaluate without throwing, got {errors:?}"
+    );
+    assert_eq!(doc.take_messages(), vec!["kw:42/42"]);
 }

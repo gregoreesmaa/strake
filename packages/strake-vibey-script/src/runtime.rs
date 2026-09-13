@@ -400,6 +400,12 @@ const BOOTSTRAP_JS: &str = r#"
 
 /// Record an unhandled JavaScript error in the runtime state, for the embedder
 /// to collect via [`ScriptDocument::take_js_errors`](crate::ScriptDocument::take_js_errors)
+/// Parse-only check: `true` when `code` fails to parse (nothing in it ran,
+/// so a normalized retry is safe). Wraps [`boa_engine::script::Script`].
+fn parse_fails(context: &mut Context, code: &str) -> bool {
+    boa_engine::script::Script::parse(Source::from_bytes(code), None, context).is_err()
+}
+
 fn report_js_error(ctx: &DomCtx, what: &str, error: &boa_engine::JsError) {
     #[cfg(feature = "tracing")]
     tracing::error!("Uncaught JS error in {what}: {error}");
@@ -660,6 +666,25 @@ impl ScriptRuntime {
 
     fn eval_internal(&mut self, code: &str, description: &str) {
         if let Err(error) = self.context.eval(Source::from_bytes(code)) {
+            // Boa 0.22 cannot parse bare `of`/`let` arrow params (valid per
+            // spec, emitted by real bundlers): retry a parenthesized copy —
+            // but ONLY when the original failed to parse, so partially
+            // executed code never runs twice.
+            if parse_fails(&mut self.context, code) {
+                if let Some(repaired) =
+                    crate::keyword_arrow::repair_keyword_arrow_params(code, &mut self.context)
+                {
+                    // The repair loop only returns parsing sources, so any
+                    // failure below is a genuine runtime error in the app.
+                    match self.context.eval(Source::from_bytes(&repaired)) {
+                        Ok(_) => return,
+                        Err(retry_error) => {
+                            report_js_error(&self.ctx, description, &retry_error);
+                            return;
+                        }
+                    }
+                }
+            }
             report_js_error(&self.ctx, description, &error);
         }
     }

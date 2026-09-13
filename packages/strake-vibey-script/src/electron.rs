@@ -228,7 +228,7 @@ const ELECTRON_BOOTSTRAP_JS: &str = r#"
 /// modules below still throws Node's "Cannot find module" error.
 ///
 /// Values are documented stand-ins, seeded from `__strake_node_info`
-/// (`{ platform, versions, appRoot }`, installed natively per context):
+/// (`{ platform, versions, appRoot, env }`, installed natively per context):
 /// `platform` follows Node's names (`darwin`/`win32`/`linux`), `versions`
 /// carries Strake-marked strings until a real Node ABI exists, and
 /// `__dirname` defaults to the app root (per-file module semantics need the
@@ -293,6 +293,58 @@ const NODE_STANDIN_BOOTSTRAP_JS: &str = r#"
             return out;
         },
     };
+    // Host environment snapshot (plain string map): `process.env.FOO`
+    // reads and feature flags (`JOPLIN_SOURCE_MAP_DISABLED`) work as in
+    // Node; writes stay on the snapshot and never touch the host. On
+    // Windows the OS (and Node) resolve names case-insensitively (`Path`
+    // answers `PATH`), so the snapshot gets a case-insensitive Proxy there
+    // while enumeration keeps the exact-case keys.
+    let processEnv = info.env || {};
+    if ((info.platform || "linux") === "win32") {
+        // Null-prototype map: a hostile `__proto__` lookup must miss
+        // instead of hitting `Object.prototype`.
+        const canonicalKey = Object.create(null);
+        for (const key of Object.keys(processEnv)) canonicalKey[key.toLowerCase()] = key;
+        processEnv = new Proxy(processEnv, {
+            get(target, prop, receiver) {
+                if (typeof prop === "string" && !(prop in target)) {
+                    const hit = canonicalKey[prop.toLowerCase()];
+                    return hit === undefined ? undefined : target[hit];
+                }
+                return target[prop];
+            },
+            set(target, prop, value) {
+                if (typeof prop === "string" && !(prop in target)) {
+                    const hit = canonicalKey[prop.toLowerCase()];
+                    if (hit !== undefined) {
+                        target[hit] = value;
+                        return true;
+                    }
+                    canonicalKey[prop.toLowerCase()] = String(prop);
+                }
+                target[prop] = value;
+                return true;
+            },
+            has(target, prop) {
+                if (typeof prop === "string" && !(prop in target)) {
+                    return canonicalKey[prop.toLowerCase()] !== undefined;
+                }
+                return prop in target;
+            },
+            deleteProperty(target, prop) {
+                if (typeof prop === "string") {
+                    const hit = canonicalKey[prop.toLowerCase()];
+                    if (hit !== undefined) {
+                        delete target[hit];
+                        delete canonicalKey[prop.toLowerCase()];
+                        return true;
+                    }
+                }
+                delete target[prop];
+                return true;
+            },
+        });
+    }
     const processModule = {
         platform: info.platform || "linux",
         versions: {
@@ -301,6 +353,7 @@ const NODE_STANDIN_BOOTSTRAP_JS: &str = r#"
             electron: versions.electron || "0.0.0-strake",
         },
         argv: [],
+        env: processEnv,
         cwd() {
             return info.appRoot || "/";
         },
@@ -382,6 +435,11 @@ const NODE_STANDIN_BOOTSTRAP_JS: &str = r#"
     };
     if (typeof globalThis.process === "undefined") {
         globalThis.process = processModule;
+    }
+    // Node's `global` alias for the global object (`const { Promise } =
+    // global` in `@electron/remote`): self-reference, exactly as in Node.
+    if (typeof globalThis.global === "undefined") {
+        globalThis.global = globalThis;
     }
     if (typeof globalThis.__dirname === "undefined") {
         globalThis.__dirname = info.appRoot || "/";
@@ -1074,8 +1132,13 @@ fn load_resolved_file(
     let dirname_js = JsValue::from(js_string!(parent_dir.to_string_lossy().as_ref()));
     let filename_js = JsValue::from(js_string!(path.to_string_lossy().as_ref()));
     let eval_result = (|| -> JsResult<JsValue> {
-        global.set(js_string!("__dirname"), dirname_js, false, context)?;
-        global.set(js_string!("__filename"), filename_js, false, context)?;
+        global.set(js_string!("__dirname"), dirname_js.clone(), false, context)?;
+        global.set(
+            js_string!("__filename"),
+            filename_js.clone(),
+            false,
+            context,
+        )?;
         global.set(
             js_string!("module"),
             JsValue::from(module_obj.clone()),
@@ -1088,7 +1151,30 @@ fn load_resolved_file(
             false,
             context,
         )?;
-        context.eval(Source::from_bytes(&source))?;
+        // CommonJS function wrapper (Node parity): each file evaluates in its
+        // own function scope, so top-level `const`/`let`/`class` never
+        // collide across files sharing the global scope (Joplin boot hit
+        // `duplicate lexical declaration` via `@electron/remote`'s siblings).
+        // `this` is `module.exports`, as in Node.
+        let wrapped = format!(
+            "(function (exports, require, module, __filename, __dirname) {{\n{source}\n}})"
+        );
+        let wrapper = context.eval(Source::from_bytes(&wrapped))?;
+        let wrapper = wrapper
+            .as_object()
+            .filter(|obj| obj.is_callable())
+            .ok_or_else(|| {
+                JsError::from(JsNativeError::typ().with_message("module wrapper is not callable"))
+            })?;
+        let require_fn = global.get(js_string!("require"), context)?;
+        let call_args = [
+            JsValue::from(exports_obj.clone()),
+            require_fn,
+            JsValue::from(module_obj.clone()),
+            filename_js,
+            dirname_js,
+        ];
+        wrapper.call(&JsValue::from(exports_obj.clone()), &call_args, context)?;
         module_obj.get(js_string!("exports"), context)
     })();
     // Always restore the shadowed globals and pop the stack, even on throw.
@@ -1890,6 +1976,9 @@ impl crate::runtime::ScriptRuntime {
         let app_root = std::env::current_dir()
             .map(|cwd| cwd.to_string_lossy().into_owned())
             .unwrap_or_else(|_| String::from("/"));
+        // Host environment, as in Node (`process.env` inherits the parent
+        // environ). `vars` skips non-Unicode entries, keeping this JSON-safe.
+        let env: std::collections::BTreeMap<String, String> = std::env::vars().collect();
         let info = serde_json::json!({
             "platform": platform,
             "versions": {
@@ -1898,6 +1987,7 @@ impl crate::runtime::ScriptRuntime {
                 "electron": "0.0.0-strake",
             },
             "appRoot": app_root,
+            "env": env,
         });
         // The literal above always converts; on failure the bootstrap falls
         // back to its own defaults instead of breaking the install.
