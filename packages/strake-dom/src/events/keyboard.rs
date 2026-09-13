@@ -28,7 +28,7 @@ pub(crate) fn handle_key_or_input_event<F: FnMut(DomEvent)>(
             return;
         }
 
-        // Range slider keys (issue #456). Consumed here so arrows adjust the
+        // Range slider keys (issue #51). Consumed here so arrows adjust the
         // focused slider instead of scrolling or editing.
         if matches!(
             event.key,
@@ -98,7 +98,7 @@ pub(crate) fn handle_key_or_input_event<F: FnMut(DomEvent)>(
     }
 }
 
-/// Adjust a focused range slider with keyboard input (issue #456). Returns
+/// Adjust a focused range slider with keyboard input (issue #51). Returns
 /// true when the key was consumed by a slider: arrows step by `step`,
 /// Home/End jump to the ends. Dispatches an `input` event on change.
 fn handle_range_key(

@@ -1,4 +1,4 @@
-//! Regression pins for <https://github.com/gregoreesmaa/strake/issues/456>:
+//! Regression pins for <https://github.com/gregoreesmaa/strake/issues/51>:
 //! `<input type="range">` renders a slider and responds to pointer drags
 //! and keyboard input.
 

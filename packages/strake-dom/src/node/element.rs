@@ -337,7 +337,7 @@ pub enum SpecialElementType {
     None,
 }
 
-/// Slider state for `<input type="range">` (issue #456).
+/// Slider state for `<input type="range">` (issue #51).
 #[derive(Copy, Clone, Debug)]
 pub struct RangeInputData {
     pub value: f64,
@@ -426,7 +426,7 @@ pub enum SpecialElementData {
     TextInput(TextInputData),
     /// Checkbox checked state
     CheckboxInput(bool),
-    /// `<input type="range">` slider state (issue #456)
+    /// `<input type="range">` slider state (issue #51)
     RangeInput(RangeInputData),
     /// Selected files
     #[cfg(feature = "file-input")]
