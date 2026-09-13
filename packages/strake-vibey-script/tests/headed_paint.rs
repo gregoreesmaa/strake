@@ -172,19 +172,57 @@ fn paint_fetches_remote_webfonts_hermetically() {
         while std::time::Instant::now() < deadline && served < 10 {
             match listener.accept() {
                 Ok((mut stream, _)) => {
+                    // Accepted sockets inherit the listener's non-blocking
+                    // mode: restore blocking so the read below waits for the
+                    // request bytes instead of racing them (`accept` fires on
+                    // connection establishment, before the client has sent
+                    // anything — a single immediate read can hit WouldBlock
+                    // and drop the connection, which fails loudly on Windows
+                    // loopback and flakily elsewhere).
+                    let _ = stream.set_nonblocking(false);
                     let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(2)));
-                    let mut buf = vec![0u8; 8192];
-                    let path = match stream.read(&mut buf) {
-                        Ok(n) => String::from_utf8_lossy(&buf[..n])
-                            .lines()
-                            .next()
-                            .unwrap_or_default()
-                            .split_whitespace()
-                            .nth(1)
-                            .unwrap_or_default()
-                            .to_string(),
-                        Err(_) => continue,
-                    };
+                    // Read until the end of the request headers (GET has no
+                    // body), tolerating segmented delivery.
+                    let mut buf = Vec::new();
+                    let mut chunk = [0u8; 1024];
+                    let read_deadline =
+                        std::time::Instant::now() + std::time::Duration::from_secs(5);
+                    loop {
+                        match stream.read(&mut chunk) {
+                            Ok(0) => break,
+                            Ok(n) => {
+                                buf.extend_from_slice(&chunk[..n]);
+                                if buf.windows(4).any(|window| window == b"\r\n\r\n") {
+                                    break;
+                                }
+                            }
+                            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => {
+                                continue;
+                            }
+                            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                                if std::time::Instant::now() >= read_deadline {
+                                    break;
+                                }
+                                std::thread::sleep(std::time::Duration::from_millis(5));
+                                continue;
+                            }
+                            Err(_) => break,
+                        }
+                        if buf.len() > 16384 || std::time::Instant::now() >= read_deadline {
+                            break;
+                        }
+                    }
+                    let path = String::from_utf8_lossy(&buf)
+                        .lines()
+                        .next()
+                        .unwrap_or_default()
+                        .split_whitespace()
+                        .nth(1)
+                        .unwrap_or_default()
+                        .to_string();
+                    if path.is_empty() {
+                        continue;
+                    }
                     let (status, content_type, body): (&str, &str, Vec<u8>) =
                         if path == "/fonts.css" {
                             let css = format!(
