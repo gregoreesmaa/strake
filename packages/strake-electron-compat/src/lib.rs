@@ -30,17 +30,20 @@ mod app;
 mod clipboard;
 mod coverage;
 mod ipc;
+mod message_channel;
 mod notification;
 mod power;
 mod safe_storage;
 mod screen;
 mod shell;
+mod web_storage;
 mod window;
 
 pub use app::{App, AppEventKind, AppPath};
 pub use clipboard::{Clipboard, ClipboardBackend, ClipboardError, MemoryClipboard};
 pub use coverage::{ApiEntry, SupportStatus, TOP50};
 pub use ipc::{IpcBus, IpcError, ListenerId};
+pub use message_channel::{MessageChannel, Port};
 pub use notification::{
     DeliveredNotification, NotificationBackend, NotificationCenter, NotificationRequest,
     RecordingBackend,
@@ -51,6 +54,10 @@ pub use power::{
 pub use safe_storage::{KeychainBackend, RecordingKeychain, SafeStorage, SafeStorageError};
 pub use screen::{Display, Screen};
 pub use shell::{ShellError, ShellWindow};
+pub use web_storage::{
+    Origin, STORAGE_QUOTA_BYTES, StorageArea, StorageAreaKind, StorageChange, StorageError,
+    StoragePartition, WebStorage,
+};
 pub use window::{
     Bounds, BrowserWindow, BrowserWindowOptions, MainSend, TitleBarStyle, WebContents,
     WindowManager,
