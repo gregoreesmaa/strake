@@ -194,16 +194,40 @@ impl BaseDocument {
             .map(|d| d.contains(style::selector_parser::RestyleDamage::RECALCULATE_OVERFLOW))
             .unwrap_or(false)
         {
+            // No overflow recalculation is needed for this subtree, but the
+            // cached transform must still refresh and the recursion must
+            // continue: style-only animation frames (CSS transitions and
+            // animations) change computed values without overflow damage
+            // anywhere, so pruning here would leave animated descendants
+            // stale forever (issue #71 / upstream blitz#840). Scrollable
+            // overflow is unaffected by paint-only changes, so it stays
+            // cached while the children's rects are discarded.
+            let transform = self.nodes[node_id].set_transform(scale as f32);
+
+            let layout_children = std::mem::take(self.nodes[node_id].layout_children.get_mut());
+            if let Some(ref children) = layout_children {
+                for &child_id in children {
+                    self.resolve_transforms(child_id);
+                }
+            }
+            if let Some(before) = self.nodes[node_id].before() {
+                self.resolve_transforms(before);
+            }
+            if let Some(after) = self.nodes[node_id].after() {
+                self.resolve_transforms(after);
+            }
+            *self.nodes[node_id].layout_children.get_mut() = layout_children;
+
             let node = &self.nodes[node_id];
             let location = node.final_layout().location.map(|v| v as f64 * scale);
-
-            let mut transform = Affine::translate((location.x, location.y));
-            if let Some(t) = node.transform().as_deref() {
-                transform *= *t
-            }
+            let full = if let Some(t) = transform {
+                Affine::translate((location.x, location.y)) * t
+            } else {
+                Affine::translate((location.x, location.y))
+            };
 
             let overflow = *node.scrollable_overflow();
-            return transform.transform_rect_bbox(overflow);
+            return full.transform_rect_bbox(overflow);
         }
 
         let transform = self.nodes[node_id].set_transform(scale as f32);

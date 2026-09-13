@@ -1207,6 +1207,52 @@ fn create_checkbox_input(doc: &mut BaseDocument, input_element_id: NodeId) {
     }
 }
 
+/// Whether an inline-level element must generate a box-tree box instead of
+/// being shaped purely by the inline (parley) layout (issue #71).
+///
+/// Absolutely-positioned inline elements are out of flow: recursing through
+/// them like ordinary inline spans drops them from `layout_children`
+/// entirely, so they are never laid out, painted, or transform-cached.
+/// Likewise, a positioned inline element hosting absolutely-positioned
+/// descendants must be present in the box tree: it is their containing
+/// block, and the out-of-flow reparenting pass can only graft onto boxes
+/// reachable through `layout_children`.
+fn inline_element_needs_box(nodes: &crate::NodeTree, node_id: NodeId) -> bool {
+    let Some(node) = nodes.get(node_id) else {
+        return false;
+    };
+    let position = node
+        .primary_styles()
+        .map(|s| s.clone_position())
+        .unwrap_or(PositionProperty::Static);
+    if position.is_absolutely_positioned() {
+        return true;
+    }
+    if matches!(position, PositionProperty::Static) {
+        return false;
+    }
+    // Positioned (relative/sticky) inline element: box-tree presence is only
+    // needed when it actually hosts out-of-flow descendants.
+    let mut stack: Vec<NodeId> = node.children.iter().copied().collect();
+    stack.extend(node.before());
+    stack.extend(node.after());
+    while let Some(id) = stack.pop() {
+        let Some(child) = nodes.get(id) else {
+            continue;
+        };
+        if child
+            .primary_styles()
+            .is_some_and(|s| s.clone_position().is_absolutely_positioned())
+        {
+            return true;
+        }
+        stack.extend(child.children.iter().copied());
+        stack.extend(child.before());
+        stack.extend(child.after());
+    }
+    false
+}
+
 /// Find and return the "layout_children" (inline boxes) for an inline layout
 /// without actually constructing the layout. This allows us to defer the expensive
 /// construction of the Parley layout (which invokes text shaping) to a paralell phase.
@@ -1249,6 +1295,8 @@ pub(crate) fn find_inline_layout_embedded_boxes(
         node_id: NodeId,
         layout_children: &mut ThinVec<NodeId>,
     ) {
+        // Read-only predicate first: `node` below borrows `nodes` mutably.
+        let needs_box = inline_element_needs_box(nodes, node_id);
         let node = &mut nodes[node_id];
 
         // Set layout_parent for node.
@@ -1283,7 +1331,12 @@ pub(crate) fn find_inline_layout_embedded_boxes(
                     (DisplayOutside::Inline, DisplayInside::Flow) => {
                         let tag_name = &element_data.name.local;
 
-                        if is_replaced_element(tag_name)
+                        if needs_box {
+                            // Out-of-flow content (issue #71): the inline
+                            // layout cannot shape it, so it becomes a regular
+                            // box-tree child like a replaced element.
+                            layout_children.push(node_id);
+                        } else if is_replaced_element(tag_name)
                             || *tag_name == local_name!("input")
                             || *tag_name == local_name!("textarea")
                             || *tag_name == local_name!("button")
@@ -1488,7 +1541,20 @@ pub(crate) fn build_inline_layout_into(
                     (DisplayOutside::Inline, DisplayInside::Flow) => {
                         let tag_name = &element_data.name.local;
 
-                        if is_replaced_element(tag_name)
+                        if inline_element_needs_box(nodes, node_id) {
+                            // Mirror of the box-tree collection above (issue
+                            // #71): lifted subtrees shape no inline content of
+                            // their own; their boxes paint via the box tree.
+                            builder.push_inline_box(InlineBox {
+                                id: node_id.as_u64(),
+                                kind: box_kind,
+                                // Overridden by push_inline_box method
+                                index: 0,
+                                // Width and height are set during layout
+                                width: 0.0,
+                                height: 0.0,
+                            });
+                        } else if is_replaced_element(tag_name)
                             || *tag_name == local_name!("input")
                             || *tag_name == local_name!("textarea")
                             || *tag_name == local_name!("button")
