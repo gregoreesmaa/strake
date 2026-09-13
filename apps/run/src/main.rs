@@ -17,22 +17,71 @@ use std::path::PathBuf;
 
 use strake_vibey_script::{IpcProof, boot_app_dir, boot_app_dir_with_ipc_proof};
 
+#[cfg(feature = "headed")]
+mod headed;
+
 fn usage() -> ! {
-    eprintln!("usage: strake-run [--prove-ipc] <app-dir>");
+    eprintln!("usage: strake-run [--prove-ipc] [--prove-headed [--headed-secs N]] <app-dir>");
     std::process::exit(2);
 }
 
 fn main() {
-    let mut args = std::env::args().skip(1);
+    // Index-based parsing (`--headed-secs` consumes the following argument):
+    // a `for` loop cannot advance the iterator mid-body, and
+    // `while let ... = args.next()` trips `clippy::while_let_on_iterator`.
+    let args: Vec<String> = std::env::args().skip(1).collect();
     let mut prove_ipc = false;
+    #[cfg(feature = "headed")]
+    let mut prove_headed = false;
+    #[cfg(feature = "headed")]
+    let mut headed_secs = 6u64;
     let mut dir: Option<String> = None;
-    for arg in args.by_ref() {
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
         if arg == "--prove-ipc" {
             prove_ipc = true;
+        } else if arg == "--prove-headed" {
+            #[cfg(feature = "headed")]
+            {
+                prove_headed = true;
+            }
+            #[cfg(not(feature = "headed"))]
+            {
+                eprintln!("strake-run: --prove-headed needs the `headed` feature");
+                std::process::exit(2);
+            }
+        } else if arg == "--headed-secs" {
+            #[cfg(feature = "headed")]
+            {
+                i += 1;
+                headed_secs = args.get(i).map(|n| n.parse().unwrap_or(6)).unwrap_or(6);
+            }
+            #[cfg(not(feature = "headed"))]
+            {
+                eprintln!("strake-run: --headed-secs needs the `headed` feature");
+                std::process::exit(2);
+            }
         } else if dir.is_none() {
-            dir = Some(arg);
+            dir = Some(arg.clone());
         } else {
             usage();
+        }
+        i += 1;
+    }
+    #[cfg(feature = "headed")]
+    if prove_headed {
+        let Some(dir) = dir else { usage() };
+        if prove_ipc {
+            eprintln!("strake-run: --prove-ipc and --prove-headed are exclusive");
+            std::process::exit(2);
+        }
+        match headed::prove_headed(&PathBuf::from(&dir), headed_secs) {
+            Ok(()) => return,
+            Err(error) => {
+                eprintln!("strake-run: {error}");
+                std::process::exit(1);
+            }
         }
     }
     let Some(dir) = dir else { usage() };
