@@ -32,12 +32,14 @@ mod coverage;
 mod ipc;
 mod menu;
 mod message_channel;
+mod napi;
 mod notification;
 mod permissions;
 mod power;
 mod safe_storage;
 mod screen;
 mod shell;
+mod updater;
 mod web_storage;
 mod window;
 
@@ -50,6 +52,10 @@ pub use menu::{
     MenuTemplate, Modifier, parse_accelerator,
 };
 pub use message_channel::{MessageChannel, Port};
+pub use napi::{
+    AddonLoad, AddonRequirements, IMPLEMENTED_SYMBOLS, NapiStatus, REQUIRED_SYMBOLS,
+    check_addon_load, missing_symbols,
+};
 pub use notification::{
     DeliveredNotification, NotificationBackend, NotificationCenter, NotificationRequest,
     RecordingBackend,
@@ -61,6 +67,7 @@ pub use power::{
 pub use safe_storage::{KeychainBackend, RecordingKeychain, SafeStorage, SafeStorageError};
 pub use screen::{Display, Screen};
 pub use shell::{ShellError, ShellWindow};
+pub use updater::{Artifact, ManifestError, UpdateManifest, Version};
 pub use web_storage::{
     Origin, STORAGE_QUOTA_BYTES, StorageArea, StorageAreaKind, StorageChange, StorageError,
     StoragePartition, WebStorage,
