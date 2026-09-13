@@ -42,8 +42,13 @@ pub const TOP50: &[ApiEntry] = &[
     },
     ApiEntry {
         electron: "BrowserWindow webPreferences",
-        strake: "Deferred: needs #18 N-API preload sandbox",
+        strake: "WebPreferences::preload recorded; sandboxed execution needs #18",
         status: Deferred("needs #18 N-API preload sandbox"),
+    },
+    ApiEntry {
+        electron: "BrowserWindow.getAllWindows",
+        strake: "WindowManager::live_ids",
+        status: Shimmed,
     },
     ApiEntry {
         electron: "Menu.buildFromTemplate",
@@ -386,14 +391,15 @@ fn coverage_freeze_is_sorted_unique_apis() {
     // setMenuBarVisibility deferral decision); issue #84 adds win.on(closed).
     // Issues #92–#95 add four entries (Notification, powerMonitor,
     // powerSaveBlocker, safeStorage) and promote clipboard.readText/writeText
-    // to Shimmed.
-    assert_eq!(TOP50.len(), 64, "freeze grows only by reviewed diff");
+    // to Shimmed. Issue #107 adds BrowserWindow.getAllWindows (Shimmed) and
+    // narrows the webPreferences note (preload recorded; sandbox still #18).
+    assert_eq!(TOP50.len(), 65, "freeze grows only by reviewed diff");
     let names: Vec<_> = TOP50.iter().map(|entry| entry.electron).collect();
     let mut sorted = names.clone();
     sorted.sort_unstable();
     assert_eq!(names, sorted, "keep the freeze table sorted for review");
     sorted.dedup();
-    assert_eq!(sorted.len(), 64, "no duplicate Electron APIs");
+    assert_eq!(sorted.len(), 65, "no duplicate Electron APIs");
 }
 
 #[test]
