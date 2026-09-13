@@ -55,6 +55,7 @@ mod html;
 mod iframe;
 /// Integration of taffy and the DOM.
 mod layout;
+mod mutation_hooks;
 mod mutator;
 mod query_selector;
 mod resolve;
@@ -98,6 +99,7 @@ pub use markup5ever::{
     LocalName, Namespace, NamespaceStaticSet, Prefix, PrefixStaticSet, QualName, local_name,
     namespace_prefix, namespace_url, ns,
 };
+pub use mutation_hooks::{MutationHooks, MutationRecord, NoopMutationHooks};
 pub use mutator::DocumentMutator;
 pub use node::{Attribute, DocumentData, ElementData, Node, NodeData, TextNodeData};
 pub use parley::FontContext;

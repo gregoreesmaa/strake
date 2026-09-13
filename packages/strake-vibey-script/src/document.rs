@@ -282,6 +282,20 @@ impl ScriptDocument {
         self.runtime.pump_ipc_to(&mut renderer.runtime)
     }
 
+    /// Dispatch a notification click to this renderer document's
+    /// `Notification` `onclick` handler (issue #92). Returns `false` for
+    /// unknown delivery ids. No-op (`false`) without an Electron host.
+    pub fn dispatch_notification_click(&mut self, id: u64) -> bool {
+        self.runtime.dispatch_notification_click(id)
+    }
+
+    /// Dispatch queued power events to this main-process document's
+    /// `powerMonitor.on` listeners (issue #93 probe). Returns the number of
+    /// dispatched events. No-op (returns 0) without an Electron host.
+    pub fn dispatch_power_events(&mut self) -> usize {
+        self.runtime.dispatch_power_events()
+    }
+
     /// Drain messages sent from JavaScript via the global
     /// `__strake_send_message(message)` native function.
     ///
