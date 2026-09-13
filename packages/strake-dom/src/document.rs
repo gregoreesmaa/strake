@@ -20,6 +20,7 @@ use crate::{
     NoopMutationHooks, StyleThreading, TextNodeData,
 };
 use cursor_icon::CursorIcon;
+use kurbo::Affine;
 use linebender_resource_handle::Blob;
 use markup5ever::{LocalName, local_name};
 use parley::{FontContext, PlainEditorDriver};
@@ -2263,13 +2264,46 @@ impl BaseDocument {
         }
 
         let node = self.get_node(node_id)?;
-        let pos = node.absolute_position(0.0, 0.0);
+        let size = node.unrounded_layout().size;
+
+        // CSSOM `getBoundingClientRect` reflects transforms (issue #63):
+        // accumulate each layout ancestor's cached 2D transform (computed
+        // against its own border box, mirroring paint's composition) over
+        // the layout border box. Cached translations are stored in device
+        // px, so unscale them back to CSS px like `hit_inner` does.
+        let scale = self.viewport().scale_f64();
+        let mut chain = Vec::new();
+        let mut current = Some(node_id);
+        while let Some(id) = current {
+            let Some(ancestor) = self.get_node(id) else {
+                break;
+            };
+            chain.push(id);
+            current = ancestor.layout_parent.get();
+        }
+        let mut matrix = Affine::IDENTITY;
+        for id in chain.iter().rev() {
+            // `chain` only holds ids resolved above.
+            let ancestor = self.get_node(*id).unwrap_or(node);
+            let layout = ancestor.final_layout();
+            let scroll = ancestor.scroll_offset();
+            let local = Affine::translate((
+                f64::from(layout.location.x) - scroll.x,
+                f64::from(layout.location.y) - scroll.y,
+            ));
+            let cached = ancestor.transform().as_deref().copied().unwrap_or_default();
+            let [m11, m12, m21, m22, m41, m42] = cached.as_coeffs();
+            let transform = Affine::new([m11, m12, m21, m22, m41 / scale, m42 / scale]);
+            matrix *= local * transform;
+        }
+        let local_box = kurbo::Rect::new(0.0, 0.0, f64::from(size.width), f64::from(size.height));
+        let visual = matrix.transform_rect_bbox(local_box);
 
         Some(BoundingRect {
-            x: pos.x as f64 - self.viewport_scroll.x,
-            y: pos.y as f64 - self.viewport_scroll.y,
-            width: node.unrounded_layout().size.width as f64,
-            height: node.unrounded_layout().size.height as f64,
+            x: visual.x0 - self.viewport_scroll.x,
+            y: visual.y0 - self.viewport_scroll.y,
+            width: visual.width(),
+            height: visual.height(),
         })
     }
 
