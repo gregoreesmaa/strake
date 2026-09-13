@@ -21,4 +21,5 @@ strake-dom = { workspace = true }
 strake-html = { workspace = true }
 strake-shell = { workspace = true }
 strake-traits = { workspace = true }
+url = { workspace = true }
 winit = { workspace = true }
