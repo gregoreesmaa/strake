@@ -90,3 +90,32 @@ fn node_app_root_overrides_dirname() {
         ]
     );
 }
+
+#[test]
+fn boot_app_dir_with_ipc_proof_round_trips_through_booted_processes() {
+    let (report, proof) = strake_vibey_script::boot_app_dir_with_ipc_proof(&fixture_app_dir())
+        .expect("fixture app boots with proof");
+    assert!(
+        report.js_errors.is_empty(),
+        "main.js must run cleanly, got {:?}",
+        report.js_errors
+    );
+    assert_eq!(report.windows.len(), 1, "exactly one window");
+    assert_eq!(proof.pumped, 1, "exactly one probe call pumps");
+    assert_eq!(
+        proof.reply.as_deref(),
+        Some("strake:pong"),
+        "renderer promise settles with the main reply"
+    );
+    assert!(
+        proof.main_errors.is_empty(),
+        "probe registration must not throw, got {:?}",
+        proof.main_errors
+    );
+    assert!(
+        proof.renderer_errors.is_empty(),
+        "probe invocation must not throw, got {:?}",
+        proof.renderer_errors
+    );
+    assert!(proof.succeeded());
+}

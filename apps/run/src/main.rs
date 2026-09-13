@@ -8,20 +8,43 @@
 //! consumes the reported window ids via `ShellWindow::attach`.
 //!
 //! Exit status is 0 only when the boot, the main script, and every preload
-//! ran without errors; the full report prints either way.
+//! ran without errors; the full report prints either way. With
+//! `--prove-ipc`, one IPC round-trip is additionally driven through the
+//! booted app's own main/renderer pair (issue #84), and exit status is 0
+//! only when that round-trip genuinely succeeds.
 
 use std::path::PathBuf;
 
-use strake_vibey_script::boot_app_dir;
+use strake_vibey_script::{IpcProof, boot_app_dir, boot_app_dir_with_ipc_proof};
 
 fn usage() -> ! {
-    eprintln!("usage: strake-run <app-dir>");
+    eprintln!("usage: strake-run [--prove-ipc] <app-dir>");
     std::process::exit(2);
 }
 
 fn main() {
-    let dir = std::env::args().nth(1).unwrap_or_else(|| usage());
-    let report = match boot_app_dir(&PathBuf::from(&dir)) {
+    let mut args = std::env::args().skip(1);
+    let mut prove_ipc = false;
+    let mut dir: Option<String> = None;
+    for arg in args.by_ref() {
+        if arg == "--prove-ipc" {
+            prove_ipc = true;
+        } else if dir.is_none() {
+            dir = Some(arg);
+        } else {
+            usage();
+        }
+    }
+    let Some(dir) = dir else { usage() };
+    let mut ipc_proof = IpcProof::default();
+    let report = match if prove_ipc {
+        boot_app_dir_with_ipc_proof(&PathBuf::from(&dir)).map(|(report, proof)| {
+            ipc_proof = proof;
+            report
+        })
+    } else {
+        boot_app_dir(&PathBuf::from(&dir))
+    } {
         Ok(report) => report,
         Err(error) => {
             eprintln!("strake-run: {error}");
@@ -66,11 +89,29 @@ fn main() {
         }
     }
 
+    if prove_ipc {
+        match &ipc_proof.reply {
+            Some(reply) => println!(
+                "ipc: round-trip reply {reply:?} (pumped {})",
+                ipc_proof.pumped
+            ),
+            None => println!("ipc: round-trip FAILED (pumped {})", ipc_proof.pumped),
+        }
+        for error in ipc_proof
+            .main_errors
+            .iter()
+            .chain(ipc_proof.renderer_errors.iter())
+        {
+            println!("  - {error}");
+        }
+    }
+
     let failed = !report.js_errors.is_empty()
         || report
             .windows
             .iter()
-            .any(|window| !window.preload_errors.is_empty());
+            .any(|window| !window.preload_errors.is_empty())
+        || (prove_ipc && !ipc_proof.succeeded());
     if failed {
         std::process::exit(1);
     }
