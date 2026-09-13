@@ -54,6 +54,19 @@ pub enum TitleBarStyle {
     HiddenInset,
 }
 
+/// `webPreferences` subset (issue #109).
+///
+/// Only `preload` is recorded: the embedder drains it (see
+/// [`WindowManager::pending_preloads`]) and executes the file after document
+/// creation, before renderer scripts. Every other `webPreferences` sub-key is
+/// accepted by the bindings and ignored here; sandboxed execution with Node
+/// integration stays deferred to issue #18.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct WebPreferences {
+    /// Absolute (or app-relative) path of the preload script, if given.
+    pub preload: Option<String>,
+}
+
 /// `BrowserWindowConstructorOptions` (MVP subset).
 #[derive(Debug, Clone, PartialEq)]
 pub struct BrowserWindowOptions {
@@ -82,6 +95,9 @@ pub struct BrowserWindowOptions {
     pub show: bool,
     /// Window title.
     pub title: String,
+    /// `webPreferences` subset (issue #109): `preload` is recorded, every
+    /// other sub-key is accepted and ignored.
+    pub web_preferences: WebPreferences,
 }
 
 impl Default for BrowserWindowOptions {
@@ -99,6 +115,7 @@ impl Default for BrowserWindowOptions {
             background_color: None,
             show: true,
             title: String::new(),
+            web_preferences: WebPreferences::default(),
         }
     }
 }
@@ -351,6 +368,37 @@ impl WindowManager {
     /// Number of live windows.
     pub fn window_count(&self) -> usize {
         self.windows.len()
+    }
+
+    /// Ids of live windows in ascending creation order
+    /// (`BrowserWindow.getAllWindows()`, issue #107). Closed windows vanish
+    /// from the list; an empty manager yields an empty list.
+    pub fn live_ids(&self) -> Vec<u32> {
+        let mut ids: Vec<u32> = self.windows.keys().copied().collect();
+        ids.sort_unstable();
+        ids
+    }
+
+    /// `(window id, preload path)` for live windows that declared a
+    /// `webPreferences.preload` (issue #109), in ascending window-id order.
+    /// The embedder drains this after creating the renderer document and
+    /// executes each file before renderer scripts; sandboxed execution stays
+    /// deferred to issue #18.
+    pub fn pending_preloads(&self) -> Vec<(u32, String)> {
+        let mut ids: Vec<u32> = self.windows.keys().copied().collect();
+        ids.sort_unstable();
+        ids.into_iter()
+            .filter_map(|id| {
+                let preload = self
+                    .windows
+                    .get(&id)?
+                    .options
+                    .web_preferences
+                    .preload
+                    .clone()?;
+                Some((id, preload))
+            })
+            .collect()
     }
 
     /// `new BrowserWindow(options)`: register and return its id.
@@ -922,4 +970,44 @@ fn web_contents_send_queues_per_window_fifo() {
         "drain empties every outbox"
     );
     assert!(manager.drain_web_contents_sends().is_empty());
+}
+
+#[test]
+fn live_ids_tracks_create_and_close_for_get_all_windows() {
+    // Issue #107: `BrowserWindow.getAllWindows()` reflects live windows.
+    let mut manager = manager();
+    assert!(manager.live_ids().is_empty(), "empty when none");
+    let a = manager.create(BrowserWindowOptions::default());
+    let b = manager.create(BrowserWindowOptions::default());
+    assert_eq!(manager.live_ids(), vec![a, b], "one entry per live window");
+    assert!(manager.close(a));
+    assert_eq!(manager.live_ids(), vec![b], "closed windows vanish");
+    assert!(manager.close(b));
+    assert!(manager.live_ids().is_empty(), "empty again when none");
+}
+
+#[test]
+fn pending_preloads_records_web_preferences_preload() {
+    // Issue #109: `webPreferences.preload` is recorded per window for the
+    // embedder to execute before renderer scripts.
+    let mut manager = manager();
+    assert!(manager.pending_preloads().is_empty());
+    let plain = manager.create(BrowserWindowOptions::default());
+    let _ = plain;
+    let with_preload = manager.create(BrowserWindowOptions {
+        web_preferences: WebPreferences {
+            preload: Some(String::from("/app/preload.js")),
+        },
+        ..Default::default()
+    });
+    assert_eq!(
+        manager.pending_preloads(),
+        vec![(with_preload, String::from("/app/preload.js"))],
+        "only windows declaring a preload are listed"
+    );
+    assert!(manager.close(with_preload));
+    assert!(
+        manager.pending_preloads().is_empty(),
+        "closed windows drop out"
+    );
 }

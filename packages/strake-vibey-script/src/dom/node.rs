@@ -39,6 +39,17 @@ pub(crate) fn init_node_proto(proto: &JsObject, context: &mut Context) {
         Some(set_text_content),
         context,
     );
+    // `innerText` (preload compat, issue #109): alias of `textContent`.
+    // Simplification: no render-tree visibility filtering (hidden elements
+    // still contribute text); matching layout-dependent `innerText` needs
+    // the Stylo/Taffy layout tree and stays future work.
+    define_accessor(
+        proto,
+        "innerText",
+        Some(text_content),
+        Some(set_text_content),
+        context,
+    );
     define_accessor(
         proto,
         "nodeValue",

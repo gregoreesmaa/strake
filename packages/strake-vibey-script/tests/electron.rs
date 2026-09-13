@@ -392,6 +392,324 @@ fn methods_on_destroyed_window_throw() {
     assert_eq!(doc.take_messages(), vec!["soft-visible:false"]);
 }
 
+/// Issue #108: Node core stand-ins resolve headlessly with documented
+/// Strake values. `node:fs` (owned by issue #16) still throws.
+#[test]
+fn node_core_standins_resolve() {
+    let host = ElectronHost::new("QuickStart", "1.0.0");
+    let mut doc =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    doc.install_electron(&host);
+    doc.eval(
+        "const path = require('node:path'); \
+         __strake_send_message('join:' + path.join('/app', 'preload.js')); \
+         __strake_send_message('join-rel:' + path.join('a', 'b', '..', 'c')); \
+         __strake_send_message('dir:' + path.dirname('/app/preload.js')); \
+         __strake_send_message('base:' + path.basename('/app/preload.js')); \
+         __strake_send_message('abs:' + path.isAbsolute('/x')); \
+         __strake_send_message('sep:' + path.sep); \
+         const url = require('node:url'); \
+         __strake_send_message('fmt:' + url.format({ pathname: '/app/index.html', protocol: 'file:', slashes: true })); \
+         __strake_send_message('platform:' + process.platform); \
+         __strake_send_message('versions:' + [process.versions.node, process.versions.chrome, process.versions.electron].every((v) => typeof v === 'string' && v.length > 0)); \
+         __strake_send_message('dirname-global:' + (typeof __dirname === 'string')); \
+         __strake_send_message('process-require:' + (require('node:process') === process)); \
+         __strake_send_message('path-alias:' + (require('path') === path)); \
+         __strake_send_message('url-alias:' + (require('url') === url));",
+    );
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "node stand-ins must not throw"
+    );
+    let expected_platform = match std::env::consts::OS {
+        "macos" => "darwin",
+        "windows" => "win32",
+        _ => "linux",
+    };
+    let messages = doc.take_messages();
+    assert_eq!(messages.len(), 13, "one line per probe, got {messages:?}");
+    assert_eq!(
+        &messages[..7],
+        [
+            "join:/app/preload.js",
+            "join-rel:a/c",
+            "dir:/app",
+            "base:preload.js",
+            "abs:true",
+            "sep:/",
+            "fmt:file:///app/index.html",
+        ]
+    );
+    assert_eq!(messages[7], format!("platform:{expected_platform}"));
+    assert_eq!(
+        &messages[8..],
+        [
+            "versions:true",
+            "dirname-global:true",
+            "process-require:true",
+            "path-alias:true",
+            "url-alias:true",
+        ]
+    );
+}
+
+/// Issue #107: `BrowserWindow.getAllWindows()` returns one facade per live
+/// window (empty when none), reflecting create/close through `install_electron`.
+#[test]
+fn get_all_windows_reflects_lifecycle() {
+    let host = ElectronHost::new("QuickStart", "1.0.0");
+    let mut doc =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    doc.install_electron(&host);
+    doc.eval(
+        "const { BrowserWindow } = require('electron'); \
+         __strake_send_message('empty:' + BrowserWindow.getAllWindows().length); \
+         const wA = new BrowserWindow({ show: false }); \
+         const wB = new BrowserWindow({ show: false }); \
+         const all = BrowserWindow.getAllWindows(); \
+         __strake_send_message('count:' + all.length); \
+         __strake_send_message('instanceof:' + (all[0] instanceof BrowserWindow)); \
+         __strake_send_message('ids:' + all.map((w) => w.__strakeWindowId).join(',')); \
+         all[0].close(); \
+         __strake_send_message('after:' + BrowserWindow.getAllWindows().length);",
+    );
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "getAllWindows lifecycle must not throw"
+    );
+    assert_eq!(
+        doc.take_messages(),
+        vec![
+            "empty:0",
+            "count:2",
+            "instanceof:true",
+            "ids:0,1",
+            "after:1",
+        ]
+    );
+    assert_eq!(host.live_window_ids(), vec![1]);
+    doc.eval(
+        "require('electron').BrowserWindow.getAllWindows()[0].close(); \
+         __strake_send_message('final:' + require('electron').BrowserWindow.getAllWindows().length);",
+    );
+    assert!(doc.take_js_errors().is_empty());
+    assert_eq!(doc.take_messages(), vec!["final:0"]);
+    assert!(host.live_window_ids().is_empty());
+}
+
+/// Issue #109: `webPreferences` is accepted on window creation (no throw),
+/// `preload` is recorded for the embedder queue, unknown sub-keys soft-ignore.
+#[test]
+fn web_preferences_preload_recorded_unknown_keys_ignored() {
+    let host = ElectronHost::new("QuickStart", "1.0.0");
+    let mut doc =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    doc.install_electron(&host);
+    doc.eval(
+        "const { BrowserWindow } = require('electron'); \
+         const w = new BrowserWindow({ show: false, webPreferences: { preload: '/app/preload.js', sandbox: true, unknownFutureKey: {} } }); \
+         __strake_send_message('created:' + (typeof w.__strakeWindowId === 'number'));",
+    );
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "webPreferences must be accepted without throwing"
+    );
+    assert_eq!(doc.take_messages(), vec!["created:true"]);
+    let preload = host.window_preload(0).expect("preload path is recorded");
+    assert!(
+        preload.ends_with("preload.js"),
+        "recorded preload path, got {preload}"
+    );
+    assert_eq!(
+        host.pending_preloads(),
+        vec![(0, preload)],
+        "embedder drain queue carries the preload"
+    );
+}
+
+/// Verbatim `main.js` from gregoreesmaa/strake-minimal-repro@main
+/// (commit 314e53a253c808b812ae9eb13703c9d88026e578): the standard
+/// electron-quick-start shape. No stubs: `node:path`, `process`, and
+/// `__dirname` resolve through the issue #108 stand-ins.
+const MINIMAL_REPRO_MAIN_JS: &str = r#"
+const { app, BrowserWindow } = require('electron')
+const path = require('node:path')
+
+function createWindow () {
+  // Create the browser window.
+  const mainWindow = new BrowserWindow({
+    width: 800,
+    height: 600,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js')
+    }
+  })
+
+  // and load the index.html of the app.
+  mainWindow.loadFile('index.html')
+
+  // Open the DevTools.
+  // mainWindow.webContents.openDevTools()
+}
+
+// This method will be called when Electron has finished
+// initialization and is ready to create browser windows.
+// Some APIs can only be used after this event occurs.
+app.whenReady().then(() => {
+  createWindow()
+
+  app.on('activate', function () {
+    // On macOS it's common to re-create a window in the app when the
+    // dock icon is clicked and there are no other windows open.
+    if (BrowserWindow.getAllWindows().length === 0) createWindow()
+  })
+})
+
+// Quit when all windows are closed, except on macOS. There, it's common
+// for applications and their menu bar to stay active until the user quits
+// explicitly with Cmd + Q.
+app.on('window-all-closed', function () {
+  if (process.platform !== 'darwin') app.quit()
+})
+
+// In this file you can include the rest of your app's specific main process
+// code. You can also put them in separate files and require them here.
+"#;
+
+/// Issue #111: the minimal-repro boot canary. Ready → one 800x600 window →
+/// `loadFile('index.html')` recorded → zero JS errors. Preload/DOM behavior
+/// is pinned by `minimal_repro_preload_fills_version_spans`, not here.
+#[test]
+fn minimal_repro_main_boots() {
+    let host = ElectronHost::new("minimal-repro", "1.0.0");
+    let mut doc =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    doc.install_electron(&host);
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "electron bootstrap must install cleanly"
+    );
+    doc.eval(MINIMAL_REPRO_MAIN_JS);
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "verbatim minimal-repro main.js must evaluate without throwing"
+    );
+    assert_eq!(host.window_count(), 0, "no window before ready");
+
+    doc.mark_electron_ready();
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "ready → createWindow must not throw"
+    );
+    assert_eq!(host.window_count(), 1, "exactly one 800x600 window");
+    assert_eq!(host.created_window_ids(), vec![0]);
+    assert_eq!(
+        host.window_bounds(0).map(|b| (b.width, b.height)),
+        Some((800, 600))
+    );
+    let pending = host
+        .window_pending_url(0)
+        .expect("loadFile records a navigation target");
+    assert!(
+        pending.ends_with("index.html"),
+        "loadFile resolves to index.html, got {pending}"
+    );
+    // Issue #107 acceptance through the real boot path.
+    assert_eq!(host.live_window_ids(), vec![0]);
+    doc.eval(
+        "__strake_send_message('all:' + require('electron').BrowserWindow.getAllWindows().length);",
+    );
+    assert!(doc.take_js_errors().is_empty());
+    // Issue #109 acceptance through the real boot path.
+    let preload = host.window_preload(0).expect("preload recorded");
+    assert!(
+        preload.ends_with("preload.js"),
+        "preload joins __dirname, got {preload}"
+    );
+    assert_eq!(doc.take_messages(), vec!["all:1"]);
+
+    // `activate` re-create path: close the window, then re-run the guard
+    // expression from main.js — it must observe zero windows.
+    doc.eval(
+        "require('electron').BrowserWindow.getAllWindows()[0].close(); \
+         __strake_send_message('activate-sees:' + require('electron').BrowserWindow.getAllWindows().length);",
+    );
+    assert!(doc.take_js_errors().is_empty());
+    assert_eq!(doc.take_messages(), vec!["activate-sees:0"]);
+    assert_eq!(host.window_count(), 0);
+}
+
+/// Verbatim `preload.js` from gregoreesmaa/strake-minimal-repro@main
+/// (commit 314e53a253c808b812ae9eb13703c9d88026e578).
+const MINIMAL_REPRO_PRELOAD_JS: &str = r#"
+window.addEventListener('DOMContentLoaded', () => {
+  const replaceText = (selector, text) => {
+    const element = document.getElementById(selector)
+    if (element) element.innerText = text
+  }
+
+  for (const type of ['chrome', 'node', 'electron']) {
+    replaceText(`${type}-version`, process.versions[type])
+  }
+})
+"#;
+
+/// Issue #109: the verbatim preload executes in renderer scope after document
+/// creation, before page scripts, filling the version spans on
+/// `DOMContentLoaded`. The spans are empty before `execute_scripts` fires the
+/// event, proving execution order.
+#[test]
+fn minimal_repro_preload_fills_version_spans() {
+    let host = ElectronHost::new("minimal-repro", "1.0.0");
+    let mut doc = ScriptDocument::from_html(
+        "<html><body>Node.js <span id=\"node-version\"></span>, Chromium <span id=\"chrome-version\"></span>, Electron <span id=\"electron-version\"></span>.</body></html>",
+        DocumentConfig::default(),
+    )
+    .without_timer_thread()
+    .with_virtual_time();
+    doc.install_electron_renderer(&host);
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "renderer bootstrap must install cleanly"
+    );
+    doc.eval(MINIMAL_REPRO_PRELOAD_JS);
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "verbatim preload.js must register without throwing"
+    );
+    doc.eval(
+        "__strake_send_message('before:' + document.getElementById('node-version').innerText);",
+    );
+    doc.execute_scripts();
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "DOMContentLoaded dispatch must not throw"
+    );
+    doc.eval(
+        "__strake_send_message('node:' + document.getElementById('node-version').innerText); \
+         __strake_send_message('chrome:' + document.getElementById('chrome-version').innerText); \
+         __strake_send_message('electron:' + document.getElementById('electron-version').innerText);",
+    );
+    assert!(doc.take_js_errors().is_empty());
+    assert_eq!(
+        doc.take_messages(),
+        vec![
+            "before:",
+            "node:0.0.0-strake",
+            "chrome:0.0.0-strake",
+            "electron:0.0.0-strake",
+        ]
+    );
+}
+
 #[test]
 fn close_unknown_or_destroyed_id_is_silent_noop() {
     // Issue #84 follow-up: `win.close()` on an unknown or already-destroyed

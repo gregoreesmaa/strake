@@ -317,7 +317,7 @@ mod tests {
     fn revisibled_hibernated_worker_wakes_without_respawn() {
         let mut sim = supervisor();
         let id = sim.add_surface(spec(), Duration::from_secs(0)).unwrap();
-        sim.set_visible(id, false, Duration::from_secs(0));
+        assert!(sim.set_visible(id, false, Duration::from_secs(0)).is_ok());
         sim.poll(HIBERNATE_AFTER);
         assert_eq!(sim.worker_state(), WorkerState::Hibernated);
         assert!(sim.set_visible(id, true, HIBERNATE_AFTER).is_ok());

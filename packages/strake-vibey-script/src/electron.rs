@@ -17,8 +17,11 @@
 //!   names (any other name is accepted and never fires, matching Electron's
 //!   `EventEmitter`);
 //! * `new BrowserWindow(options)` creates a compat-core window (`width`,
-//!   `height`, `show`, `title`, `resizable` are honoured; the rest is accepted
-//!   and ignored); `loadFile`/`loadURL`/`show`/`close`/`on('closed')`/
+//!   `height`, `show`, `title`, `resizable`, `webPreferences.preload` are
+//!   honoured — the preload path is recorded for the embedder, issue #109;
+//!   the rest is accepted and ignored);
+//!   `BrowserWindow.getAllWindows()` rehydrates one facade per live window
+//!   (issue #107); `loadFile`/`loadURL`/`show`/`close`/`on('closed')`/
 //!   `setResizable`/`isVisible`/`setBounds`/`getBounds` drive it, `webContents.send` queues
 //!   main-to-renderer payloads per window (issue #91) and
 //!   `webContents.getTitle` serves the synced page title (issue #90);
@@ -99,9 +102,21 @@ const ELECTRON_BOOTSTRAP_JS: &str = r#"
     };
     electron.BrowserWindow = class BrowserWindow {
         constructor(options) {
-            this.__strakeWindowId = globalThis.__strake_electron_window_create(options || {});
-            const id = this.__strakeWindowId;
-            this.webContents = {
+            BrowserWindow.__strakeInitInstance(
+                this,
+                globalThis.__strake_electron_window_create(options || {}),
+            );
+        }
+        static getAllWindows() {
+            return globalThis.__strake_electron_windows_all().map((id) => {
+                const win = Object.create(BrowserWindow.prototype);
+                BrowserWindow.__strakeInitInstance(win, id);
+                return win;
+            });
+        }
+        static __strakeInitInstance(self, id) {
+            self.__strakeWindowId = id;
+            self.webContents = {
                 send(channel, ...args) {
                     globalThis.__strake_electron_window_web_contents_send(id, channel, ...args);
                 },
@@ -200,6 +215,109 @@ const ELECTRON_BOOTSTRAP_JS: &str = r#"
         },
     };
     globalThis.__strake_electron_module = electron;
+})();
+"#;
+
+/// Node.js core stand-ins for main-process scripts (issue #108).
+///
+/// Real `main.js` files require `node:path` (`path.join(__dirname, ...)` is
+/// line 3 of the minimal template), read `process.platform`/`process.versions`
+/// guards, and call `url.format`. Full `node:` compat (notably `node:fs` and
+/// native addons) stays owned by issue #16: anything outside the three
+/// modules below still throws Node's "Cannot find module" error.
+///
+/// Values are documented stand-ins, seeded from `__strake_node_info`
+/// (`{ platform, versions, appRoot }`, installed natively per context):
+/// `platform` follows Node's names (`darwin`/`win32`/`linux`), `versions`
+/// carries Strake-marked strings until a real Node ABI exists, and
+/// `__dirname` defaults to the app root (per-file module semantics need the
+/// issue #16 loader; the `#110` runner sets the app root before eval).
+const NODE_STANDIN_BOOTSTRAP_JS: &str = r#"
+(function () {
+    const info = globalThis.__strake_node_info || {};
+    const versions = info.versions || {};
+    const split = (p) => String(p).split("/").filter((seg) => seg.length > 0);
+    const normalizeSegs = (segs, absolute) => {
+        const out = [];
+        for (const seg of segs) {
+            if (seg === "." || seg === "") continue;
+            if (seg === "..") {
+                if (out.length > 0 && out[out.length - 1] !== "..") out.pop();
+                else if (!absolute) out.push("..");
+            } else {
+                out.push(seg);
+            }
+        }
+        return out;
+    };
+    const join = (...parts) => {
+        const flat = parts.map((p) => String(p)).join("/");
+        const absolute = flat.startsWith("/");
+        const joined = (absolute ? "/" : "") + normalizeSegs(split(flat), absolute).join("/");
+        return joined === "" ? "." : joined;
+    };
+    const dirname = (p) => {
+        const s = String(p);
+        const idx = s.replace(/\/+$/, "").lastIndexOf("/");
+        if (idx < 0) return ".";
+        if (idx === 0) return "/";
+        return s.slice(0, idx);
+    };
+    const basename = (p, ext) => {
+        const s = String(p).replace(/\/+$/, "").split("/").pop() || "";
+        if (ext && s.endsWith(ext)) return s.slice(0, s.length - ext.length);
+        return s;
+    };
+    const pathModule = {
+        join,
+        normalize: (p) => join(String(p)),
+        dirname,
+        basename,
+        isAbsolute: (p) => String(p).startsWith("/"),
+        sep: "/",
+        delimiter: ":",
+    };
+    const urlModule = {
+        format(obj) {
+            if (typeof obj === "string") return obj;
+            const o = obj || {};
+            if (o.href) return o.href;
+            let out = o.protocol || "";
+            if (!out.endsWith(":") && out !== "") out += ":";
+            const host = o.host || o.hostname || "";
+            if (o.slashes || (host !== "" && out.startsWith("file"))) out += "//";
+            else if (host !== "") out += "//";
+            out += host;
+            out += o.pathname || o.path || "";
+            return out;
+        },
+    };
+    const processModule = {
+        platform: info.platform || "linux",
+        versions: {
+            node: versions.node || "0.0.0-strake",
+            chrome: versions.chrome || "0.0.0-strake",
+            electron: versions.electron || "0.0.0-strake",
+        },
+        argv: [],
+        cwd() {
+            return info.appRoot || "/";
+        },
+    };
+    globalThis.__strake_node_modules = {
+        "node:path": pathModule,
+        path: pathModule,
+        "node:url": urlModule,
+        url: urlModule,
+        "node:process": processModule,
+        process: processModule,
+    };
+    if (typeof globalThis.process === "undefined") {
+        globalThis.process = processModule;
+    }
+    if (typeof globalThis.__dirname === "undefined") {
+        globalThis.__dirname = info.appRoot || "/";
+    }
 })();
 "#;
 
@@ -370,6 +488,29 @@ impl ElectronHost {
             .map(str::to_string)
     }
 
+    /// Ids of live windows in ascending creation order
+    /// (`BrowserWindow.getAllWindows()`, issue #107).
+    pub fn live_window_ids(&self) -> Vec<u32> {
+        self.shared.0.borrow().windows.live_ids()
+    }
+
+    /// Recorded `webPreferences.preload` path of a window, if it declared
+    /// one and is still live (issue #109).
+    pub fn window_preload(&self, id: u32) -> Option<String> {
+        self.shared
+            .0
+            .borrow()
+            .windows
+            .get(id)
+            .and_then(|win| win.options().web_preferences.preload.clone())
+    }
+
+    /// `(window id, preload path)` for live windows declaring a preload, in
+    /// ascending window-id order: the embedder's execution queue (issue #109).
+    pub fn pending_preloads(&self) -> Vec<(u32, String)> {
+        self.shared.0.borrow().windows.pending_preloads()
+    }
+
     /// Channels with an `ipcMain.handle` registration, sorted.
     pub fn ipc_handler_channels(&self) -> Vec<String> {
         let mut channels: Vec<String> = self
@@ -535,27 +676,52 @@ fn window_id_arg(args: &[JsValue], context: &mut Context) -> JsResult<u32> {
     }
 }
 
-/// `require(specifier)`: only `'electron'` resolves; anything else throws
-/// Node's "Cannot find module" error.
+/// Look up a Node core stand-in (`node:path`, `node:url`, `node:process`,
+/// plus the unprefixed aliases) from the per-context
+/// `globalThis.__strake_node_modules` table (issue #108). Anything else is
+/// `None`, and the caller throws Node's "Cannot find module" error (full
+/// `node:` compat, notably `node:fs`, stays owned by issue #16).
+fn node_standin_module(context: &mut Context, specifier: &str) -> JsResult<Option<JsValue>> {
+    let table = context
+        .global_object()
+        .get(js_string!("__strake_node_modules"), context)?;
+    let Some(table) = table.as_object() else {
+        return Ok(None);
+    };
+    let module = table.get(js_string!(specifier), context)?;
+    if module.is_undefined() || module.is_null() {
+        return Ok(None);
+    }
+    Ok(Some(module))
+}
+
+fn cannot_find_module(specifier: &str) -> JsError {
+    JsError::from(JsNativeError::error().with_message(format!("Cannot find module '{specifier}'")))
+}
+
+/// `require(specifier)`: `'electron'` plus the Node core stand-ins
+/// (`node:path`, `node:url`, `node:process`); anything else throws Node's
+/// "Cannot find module" error.
 fn e_require(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let specifier = require_string_arg(args, 0, "require")?;
-    if specifier != "electron" {
-        return Err(JsError::from(
-            JsNativeError::error().with_message(format!("Cannot find module '{specifier}'")),
-        ));
+    if specifier == "electron" {
+        let shared = electron_state(context)?;
+        return shared
+            .0
+            .borrow()
+            .module
+            .clone()
+            .map(JsValue::from)
+            .ok_or_else(|| {
+                JsNativeError::error()
+                    .with_message("Electron module not initialised")
+                    .into()
+            });
     }
-    let shared = electron_state(context)?;
-    shared
-        .0
-        .borrow()
-        .module
-        .clone()
-        .map(JsValue::from)
-        .ok_or_else(|| {
-            JsNativeError::error()
-                .with_message("Electron module not initialised")
-                .into()
-        })
+    if let Some(module) = node_standin_module(context, &specifier)? {
+        return Ok(module);
+    }
+    Err(cannot_find_module(&specifier))
 }
 
 /// `app.whenReady()`: an already-resolved promise once ready, otherwise a
@@ -663,10 +829,31 @@ fn options_bool(
     Ok(value.to_boolean())
 }
 
+/// Read `webPreferences.preload` from a `BrowserWindow` options object
+/// (issue #109). The option is accepted and its path recorded on the compat
+/// window for the embedder to execute before renderer scripts; every other
+/// `webPreferences` sub-key is accepted and ignored (soft-ignore with the
+/// documented note on [`strake_electron_compat::WebPreferences`]).
+fn read_web_preferences(
+    obj: &JsObject,
+    options: &mut BrowserWindowOptions,
+    context: &mut Context,
+) -> JsResult<()> {
+    let prefs = obj.get(js_string!("webPreferences"), context)?;
+    let Some(prefs) = prefs.as_object() else {
+        return Ok(());
+    };
+    let preload = prefs.get(js_string!("preload"), context)?;
+    if !preload.is_undefined() && !preload.is_null() {
+        options.web_preferences.preload = Some(to_rust_string(&preload, context)?);
+    }
+    Ok(())
+}
+
 /// `new BrowserWindow(options)`: create the compat-core window. Only
-/// `width`/`height`/`show`/`title`/`resizable` shape Slice 1 behavior; every
-/// other Electron option is accepted and ignored (later slices bind the rest
-/// to `strake-shell`).
+/// `width`/`height`/`show`/`title`/`resizable`/`webPreferences.preload` shape
+/// behavior; every other Electron option is accepted and ignored (later
+/// slices bind the rest to `strake-shell`).
 fn e_window_create(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let shared = electron_state(context)?;
     let mut options = BrowserWindowOptions::default();
@@ -679,11 +866,28 @@ fn e_window_create(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsRe
         if !title.is_undefined() && !title.is_null() {
             options.title = to_rust_string(&title, context)?;
         }
+        read_web_preferences(&obj, &mut options, context)?;
     }
     let mut state = shared.0.borrow_mut();
     let id = state.windows.create(options);
     state.created_window_ids.push(id);
     Ok(JsValue::from(id as f64))
+}
+
+/// `BrowserWindow.getAllWindows()` (issue #107): ids of live windows in
+/// ascending creation order; the JS wrapper rehydrates one facade per id, so
+/// an empty manager yields an empty array.
+fn e_windows_all(_: &JsValue, _: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let shared = electron_state(context)?;
+    let ids: Vec<JsValue> = shared
+        .0
+        .borrow()
+        .windows
+        .live_ids()
+        .into_iter()
+        .map(|id| JsValue::from(id as f64))
+        .collect();
+    Ok(JsValue::from(JsArray::from_iter(ids, context)))
 }
 
 /// Look up a live window or throw Electron's "Object has been destroyed".
@@ -1251,10 +1455,51 @@ fn register_primitive(
 }
 
 impl crate::runtime::ScriptRuntime {
+    /// Seed `globalThis.__strake_node_info` and evaluate the Node core
+    /// stand-ins (issue #108). Runs per context: main and renderer installs
+    /// each build their own module objects because contexts must never share
+    /// JS objects.
+    fn install_node_standins(&mut self) {
+        let platform = match std::env::consts::OS {
+            "macos" => "darwin",
+            "windows" => "win32",
+            _ => "linux",
+        };
+        let app_root = std::env::current_dir()
+            .map(|cwd| cwd.to_string_lossy().into_owned())
+            .unwrap_or_else(|_| String::from("/"));
+        let info = serde_json::json!({
+            "platform": platform,
+            "versions": {
+                "node": "0.0.0-strake",
+                "chrome": "0.0.0-strake",
+                "electron": "0.0.0-strake",
+            },
+            "appRoot": app_root,
+        });
+        // The literal above always converts; on failure the bootstrap falls
+        // back to its own defaults instead of breaking the install.
+        if let Ok(info) = json_to_js(&info, &mut self.context) {
+            let _ = self.context.global_object().set(
+                js_string!("__strake_node_info"),
+                info,
+                false,
+                &mut self.context,
+            );
+        }
+        self.eval(NODE_STANDIN_BOOTSTRAP_JS, "<strake-node-standins>");
+    }
+
     /// Install the Electron host: primitives, the `require` global, and the
     /// assembled module object (idempotent: reinstalling replaces the host).
     pub(crate) fn install_electron_host(&mut self, shared: &SharedElectronHost) {
         register_primitive(&mut self.context, "require", 1, e_require);
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_windows_all",
+            0,
+            e_windows_all,
+        );
         register_primitive(
             &mut self.context,
             "__strake_electron_app_when_ready",
@@ -1452,6 +1697,9 @@ impl crate::runtime::ScriptRuntime {
 
         self.context.insert_data(shared.clone());
         self.eval(ELECTRON_BOOTSTRAP_JS, "<strake-electron-bootstrap>");
+        // Node core stand-ins (`node:path`, `process`, `url`, `__dirname`):
+        // per-context objects for `require` outside `'electron'` (issue #108).
+        self.install_node_standins();
 
         // Pin the assembled module so `require` returns the identical object.
         let module = self
@@ -1636,23 +1884,26 @@ fn json_args(args: &[JsValue], context: &mut Context) -> JsResult<Vec<serde_json
 /// must never leak across).
 fn e_require_renderer(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let specifier = require_string_arg(args, 0, "require")?;
-    if specifier != "electron" {
-        return Err(JsError::from(
-            JsNativeError::error().with_message(format!("Cannot find module '{specifier}'")),
-        ));
+    if specifier == "electron" {
+        let shared = electron_state(context)?;
+        return shared
+            .0
+            .borrow()
+            .renderer_module
+            .clone()
+            .map(JsValue::from)
+            .ok_or_else(|| {
+                JsNativeError::error()
+                    .with_message("Electron renderer module not initialised")
+                    .into()
+            });
     }
-    let shared = electron_state(context)?;
-    shared
-        .0
-        .borrow()
-        .renderer_module
-        .clone()
-        .map(JsValue::from)
-        .ok_or_else(|| {
-            JsNativeError::error()
-                .with_message("Electron renderer module not initialised")
-                .into()
-        })
+    // Preloads and renderer scripts share the Node core stand-ins (issue
+    // #108); `node:fs` and friends still throw (owned by issue #16).
+    if let Some(module) = node_standin_module(context, &specifier)? {
+        return Ok(module);
+    }
+    Err(cannot_find_module(&specifier))
 }
 
 /// `ipcRenderer.invoke(channel, ...args)`: queue the call and return the
@@ -1825,6 +2076,8 @@ impl crate::runtime::ScriptRuntime {
             RENDERER_BOOTSTRAP_JS,
             "<strake-electron-renderer-bootstrap>",
         );
+        // Preloads run in renderer scope and share the stand-ins (issue #108).
+        self.install_node_standins();
 
         let module = self
             .context

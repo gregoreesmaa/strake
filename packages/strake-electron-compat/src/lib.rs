@@ -74,5 +74,5 @@ pub use web_storage::{
 };
 pub use window::{
     Bounds, BrowserWindow, BrowserWindowOptions, MainSend, TitleBarStyle, WebContents,
-    WindowManager,
+    WebPreferences, WindowManager,
 };
