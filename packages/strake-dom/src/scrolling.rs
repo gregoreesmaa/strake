@@ -302,15 +302,13 @@ impl BaseDocument {
                     let root_id = root.id;
                     let layout = *root.final_layout();
                     let scale = self.viewport.scale() as f64;
+                    // Transform-aware bounds, matching `scroll_state` (issue #72).
+                    let transformed = *root.scrollable_overflow();
                     let event = StrakeScrollEvent {
                         scroll_top: offset.y,
                         scroll_left: offset.x,
-                        scroll_width: layout.size.width.max(layout.scrollable_overflow_rect.right)
-                            as i32,
-                        scroll_height: layout
-                            .size
-                            .height
-                            .max(layout.scrollable_overflow_rect.bottom)
+                        scroll_width: (layout.size.width as f64).max(transformed.x1 / scale) as i32,
+                        scroll_height: (layout.size.height as f64).max(transformed.y1 / scale)
                             as i32,
                         client_width: (self.viewport.window_size.0 as f64 / scale) as i32,
                         client_height: (self.viewport.window_size.1 as f64 / scale) as i32,
@@ -447,21 +445,23 @@ impl BaseDocument {
                 // both the root element itself and any content which overflows it (e.g. when
                 // the root element has a fixed height but its content is taller). A document
                 // without a root element has no scrollable content.
+                let scale = self.viewport.scale() as f64;
                 let (content_width, content_height) = match self.try_root_element() {
                     Some(root) => {
                         let layout = root.final_layout();
+                        // Transform-aware bounds (css-overflow-3 §3.3): the
+                        // layout-time rect ignores transforms, so content
+                        // pulled back inside the window by its transform
+                        // (e.g. a translate-centered modal) would otherwise
+                        // grant phantom scroll range (issue #72).
+                        let transformed = root.scrollable_overflow();
                         (
-                            layout.size.width.max(layout.scrollable_overflow_rect.right) as f64,
-                            layout
-                                .size
-                                .height
-                                .max(layout.scrollable_overflow_rect.bottom)
-                                as f64,
+                            (layout.size.width as f64).max(transformed.x1 / scale),
+                            (layout.size.height as f64).max(transformed.y1 / scale),
                         )
                     }
                     None => (0.0, 0.0),
                 };
-                let scale = self.viewport.scale() as f64;
                 let window_width = self.viewport.window_size.0 as f64 / scale;
                 let window_height = self.viewport.window_size.1 as f64 / scale;
                 let max = Point {
