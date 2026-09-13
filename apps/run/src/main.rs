@@ -26,14 +26,19 @@ fn usage() -> ! {
 }
 
 fn main() {
-    let mut args = std::env::args().skip(1);
+    // Index-based parsing (`--headed-secs` consumes the following argument):
+    // a `for` loop cannot advance the iterator mid-body, and
+    // `while let ... = args.next()` trips `clippy::while_let_on_iterator`.
+    let args: Vec<String> = std::env::args().skip(1).collect();
     let mut prove_ipc = false;
     #[cfg(feature = "headed")]
     let mut prove_headed = false;
     #[cfg(feature = "headed")]
     let mut headed_secs = 6u64;
     let mut dir: Option<String> = None;
-    while let Some(arg) = args.next() {
+    let mut i = 0;
+    while i < args.len() {
+        let arg = &args[i];
         if arg == "--prove-ipc" {
             prove_ipc = true;
         } else if arg == "--prove-headed" {
@@ -49,7 +54,8 @@ fn main() {
         } else if arg == "--headed-secs" {
             #[cfg(feature = "headed")]
             {
-                headed_secs = args.next().map(|n| n.parse().unwrap_or(6)).unwrap_or(6);
+                i += 1;
+                headed_secs = args.get(i).map(|n| n.parse().unwrap_or(6)).unwrap_or(6);
             }
             #[cfg(not(feature = "headed"))]
             {
@@ -57,10 +63,11 @@ fn main() {
                 std::process::exit(2);
             }
         } else if dir.is_none() {
-            dir = Some(arg);
+            dir = Some(arg.clone());
         } else {
             usage();
         }
+        i += 1;
     }
     #[cfg(feature = "headed")]
     if prove_headed {
