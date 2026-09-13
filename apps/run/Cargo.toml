@@ -11,3 +11,21 @@ path = "src/main.rs"
 
 [dependencies]
 strake-vibey-script = { workspace = true }
+anyrender_vello_cpu = { workspace = true, features = ["softbuffer_window_renderer"], optional = true }
+strake-electron-compat = { workspace = true, optional = true }
+strake-shell = { workspace = true, optional = true }
+# System fonts for Parley text shaping: without `system-fonts` the font
+# collection holds only the bullet glyph font, text lays out at zero height,
+# and headed windows present blank (the `rdme`/browser apps opt in the same
+# way). Headed proof is meaningless without real text.
+strake-dom = { workspace = true, features = ["system-fonts"], optional = true }
+winit = { workspace = true, optional = true }
+
+[features]
+headed = [
+    "dep:anyrender_vello_cpu",
+    "dep:strake-electron-compat",
+    "dep:strake-shell",
+    "dep:strake-dom",
+    "dep:winit",
+]
