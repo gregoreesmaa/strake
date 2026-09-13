@@ -45,7 +45,8 @@ mod state;
 mod timers;
 
 pub use app_boot::{
-    AppBootReport, BootError, BootedWindow, IpcProof, boot_app_dir, boot_app_dir_with_ipc_proof,
+    AppBootReport, BootError, BootedWindow, IpcProof, boot_app_dir, boot_app_dir_with_host,
+    boot_app_dir_with_ipc_proof,
 };
 pub use document::ScriptDocument;
 pub use electron::ElectronHost;

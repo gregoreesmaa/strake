@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use strake_dom::DocumentConfig;
-use strake_vibey_script::{ScriptDocument, boot_app_dir};
+use strake_vibey_script::{ScriptDocument, boot_app_dir, boot_app_dir_with_host};
 
 fn fixture_app_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/mini-app")
@@ -45,6 +45,27 @@ fn boot_app_dir_reports_window_first_paint_and_preload() {
         win.preload_errors.is_empty(),
         "preload must execute cleanly, got {:?}",
         win.preload_errors
+    );
+}
+
+/// Issue #147: `boot_app_dir_with_host` returns the report plus a host
+/// carrying the booted window registry, for headed paint to snapshot.
+#[test]
+fn boot_app_dir_with_host_carries_booted_windows() {
+    let (report, host) = boot_app_dir_with_host(&fixture_app_dir()).expect("fixture app boots");
+    assert_eq!(report.app_name, "mini-app");
+    assert_eq!(
+        host.window_count(),
+        report.windows.len(),
+        "host carries every booted window"
+    );
+    assert_eq!(host.live_window_ids(), vec![0]);
+    let pending = host
+        .window_pending_url(0)
+        .expect("booted window has an entry target");
+    assert!(
+        pending.ends_with("index.html"),
+        "host entry target matches report, got {pending}"
     );
 }
 

@@ -1052,6 +1052,86 @@ impl ElectronHost {
         self
     }
 
+    /// Snapshot the boot main-process state for one headed paint (issue
+    /// #147): a fresh host carrying the app identity (plus readiness), the
+    /// display snapshot, the capability grants, and a re-created window
+    /// registry — but none of the boot context's JS-bound registrations
+    /// (module objects, `ipcMain`/`app`/window listeners, queued calls, the
+    /// module cache), which cannot cross Boa contexts. Paint snapshots
+    /// instead of sharing because renderer installs overwrite the shared
+    /// `renderer_module` slot: installing paint into the live boot host
+    /// would clobber the boot renderer.
+    ///
+    /// Window ids reassign from zero in ascending creation order (count and
+    /// order preserved; ids match whenever no window was closed). Per-window
+    /// options, bounds, resizability, titles, visibility, opener links, and
+    /// pending navigation targets carry over; transient chrome state
+    /// (minimized/maximized/focused) and queued main-to-renderer sends do
+    /// not — headed paint is a fresh render, not a session restore.
+    /// `ipcMain` handlers stay behind with the boot context (JS functions
+    /// cannot cross contexts); `ipcRenderer.invoke` from a paint preload
+    /// queues with no pump, exactly like a boot preload before its pump.
+    pub fn snapshot_for_paint(&self) -> Self {
+        let state = self.shared.0.borrow();
+        let mut app = App::new(state.app.name(), state.app.version());
+        if state.app.is_ready() {
+            app.mark_ready();
+        }
+        let mut windows = WindowManager::new();
+        let mut id_map: HashMap<u32, u32> = HashMap::new();
+        for old_id in state.windows.live_ids() {
+            let Some(win) = state.windows.get(old_id) else {
+                continue;
+            };
+            // Parents predate children in ascending id order, so a mapped
+            // opener is always live already; a dead opener falls back to a
+            // top-level window rather than dropping the child.
+            let new_id = win
+                .opener()
+                .and_then(|old_opener| id_map.get(&old_opener))
+                .and_then(|new_opener| windows.open_child(*new_opener, win.options().clone()))
+                .unwrap_or_else(|| windows.create(win.options().clone()));
+            id_map.insert(old_id, new_id);
+            windows.set_bounds(new_id, win.bounds());
+            windows.set_resizable(new_id, win.is_resizable());
+            windows.set_title(new_id, win.title());
+            if win.is_visible() {
+                windows.show(new_id);
+            } else {
+                windows.hide(new_id);
+            }
+            if let Some(target) = win.web_contents().pending_url() {
+                // Both setters normalize idempotently, so a recorded target
+                // restores byte-identically.
+                if let Some(restored) = windows.get_mut(new_id) {
+                    if target.starts_with("file://") {
+                        restored.web_contents_mut().load_file(target);
+                    } else {
+                        restored.web_contents_mut().load_url(target);
+                    }
+                }
+            }
+            let doc_title = win.web_contents().get_title().to_string();
+            if let Some(restored) = windows.get_mut(new_id) {
+                restored
+                    .web_contents_mut()
+                    .set_document_title(Some(doc_title));
+            }
+        }
+        let screen = state.screen.clone();
+        let permissions = state.permissions.clone();
+        drop(state);
+        let snapshot = Self::new("", "");
+        {
+            let mut fresh = snapshot.shared.0.borrow_mut();
+            fresh.app = app;
+            fresh.windows = windows;
+            fresh.screen = screen;
+            fresh.permissions = permissions;
+        }
+        snapshot
+    }
+
     pub(crate) fn shared(&self) -> SharedElectronHost {
         self.shared.clone()
     }
@@ -2835,7 +2915,15 @@ const RENDERER_BOOTSTRAP_JS: &str = r#"
             globalThis.__strake_ipc_renderer_on(channel, listener);
         },
     };
-    globalThis.__strake_electron_renderer_module = { ipcRenderer };
+    // Read-only main-process window observation for preloads (issue #147):
+    // `getAllWindows()` paints the booted count headed and booted alike.
+    // Construction and mutation stay main-process-only; facades carry `id`.
+    const rendererBrowserWindow = {
+        getAllWindows() {
+            return globalThis.__strake_electron_windows_all().map((id) => ({ id }));
+        },
+    };
+    globalThis.__strake_electron_renderer_module = { ipcRenderer, BrowserWindow: rendererBrowserWindow };
     // Web Notifications shape bound to the compat NotificationCenter
     // (issue #92): construction records the delivery, `onclick` assignment
     // registers the click handler the embedder dispatches.
@@ -3130,6 +3218,14 @@ impl crate::runtime::ScriptRuntime {
     /// main-process document and any number of renderer pages.
     pub(crate) fn install_electron_renderer_host(&mut self, shared: &SharedElectronHost) {
         register_primitive(&mut self.context, "require", 1, e_require_renderer);
+        // Read-only window observation for the renderer `BrowserWindow`
+        // namespace (issue #147); creation and mutation stay main-only.
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_windows_all",
+            0,
+            e_windows_all,
+        );
         register_primitive(
             &mut self.context,
             "__strake_ipc_renderer_invoke",

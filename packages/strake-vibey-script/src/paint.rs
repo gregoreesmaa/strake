@@ -138,13 +138,19 @@ fn linked_file_stylesheets(doc: &BaseDocument, base_url: &str) -> Vec<String> {
 ///
 /// `html` is the entry page source, `entry_path` its file (the document
 /// base), `preload_source` the window's preload when the window declares one.
-/// Runs preload first, then page scripts (the boot order, issue #145), then
-/// pumps the fetch/ingest loop until linked same-origin stylesheets settle
-/// and re-resolves to first paint (issue #146).
+/// `host` is the boot main-process host that ran the app's `main` script:
+/// the paint snapshots its window registry, app identity, display, and
+/// capability grants (see [`ElectronHost::snapshot_for_paint`]), so a
+/// preload observing main-process state paints headed exactly what the
+/// headless boot observed. The live boot host is never installed into the
+/// paint document and never mutated by it. Runs preload first, then page
+/// scripts (the boot order, issue #145), then pumps the fetch/ingest loop
+/// until linked same-origin stylesheets settle and re-resolves to first
+/// paint (issue #146).
 pub fn paint_app_window(
     html: &str,
     entry_path: &Path,
-    app_name: &str,
+    host: &ElectronHost,
     width: u32,
     height: u32,
     preload_source: Option<&str>,
@@ -169,11 +175,15 @@ pub fn paint_app_window(
     )
     .without_timer_thread()
     .with_virtual_time();
-    // A fresh renderer host: the preload observes `process.versions` (with
-    // the `0.0.0-strake` fallbacks the proof asserts) exactly like the
-    // conformance-covered boot renderer.
-    let host = ElectronHost::new(app_name, "0.0.0");
-    document.install_electron_renderer(&host);
+    // A snapshot of the boot host, installed as this document's renderer
+    // host (issue #147): the preload observes the booted window registry
+    // (`getAllWindows()`), while `process.versions` keeps the
+    // `0.0.0-strake` runtime fallbacks the proof asserts — app identity
+    // never leaks into the runtime versions. The boot host itself is
+    // untouched: renderer installs overwrite the shared `renderer_module`
+    // slot, so sharing would clobber the boot renderer.
+    let snapshot = host.snapshot_for_paint();
+    document.install_electron_renderer(&snapshot);
     // Renderer-bootstrap noise is discarded, like boot.
     document.take_js_errors();
     // Preload runs after document creation, before page scripts

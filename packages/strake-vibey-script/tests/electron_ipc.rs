@@ -128,14 +128,21 @@ fn invoke_round_trip_settles_renderer_promises() {
 }
 
 #[test]
-fn renderer_module_is_ipc_only() {
+fn renderer_module_exposes_no_main_primitives() {
+    // Issue #147 added a read-only `BrowserWindow` observer (getAllWindows)
+    // to the renderer module; `app`, `ipcMain`, and window construction
+    // stay main-process-only.
     let (_main, mut renderer, _host) = harness();
     renderer.eval(
         "const modr = require('electron'); \
          __strake_send_message('ipcRenderer:' + typeof modr.ipcRenderer); \
          __strake_send_message('app:' + typeof modr.app); \
          __strake_send_message('ipcMain:' + typeof modr.ipcMain); \
-         __strake_send_message('BW:' + typeof modr.BrowserWindow);",
+         __strake_send_message('BW:' + typeof modr.BrowserWindow); \
+         __strake_send_message('getAll:' + typeof modr.BrowserWindow.getAllWindows); \
+         let constructed = 'built'; \
+         try { new modr.BrowserWindow({}); } catch (e) { constructed = 'throws'; } \
+         __strake_send_message('construct:' + constructed);",
     );
     assert!(renderer.take_js_errors().is_empty());
     assert_eq!(
@@ -144,7 +151,9 @@ fn renderer_module_is_ipc_only() {
             "ipcRenderer:object",
             "app:undefined",
             "ipcMain:undefined",
-            "BW:undefined",
+            "BW:object",
+            "getAll:function",
+            "construct:throws",
         ]
     );
 }
