@@ -3,9 +3,9 @@
 Increment 1: inventory of Electron's `spec/` against the frozen shim surface
 (`TOP50` in `packages/strake-electron-compat/src/coverage.rs`), the harness
 that boots canary apps, and the first ported batch (lifecycle + windows +
-IPC; OS bridges such as clipboard/safe-storage/power/`Notification` follow
-with the #12-dependent implementations). Later increments port `dialog`/
-`shell`/`nativeTheme` once #12 lands.
+IPC; OS bridges (clipboard/safe-storage/power/`Notification`, #98) are
+ported (headless recorder backends; native seat wires later). Later
+increments port `dialog`/`shell`/`nativeTheme` once #12 lands.
 
 ## Harness
 
@@ -28,11 +28,11 @@ with the #12-dependent implementations). Later increments port `dialog`/
 | `api-app-spec` lifecycle (`ready`, `window-all-closed`, `activate`, `quit`, `getName`/`getVersion`/`getPath`) | `App`, `app.on/whenReady` | `electron.rs`: quickstart, ready idempotency, quit flow | Ported |
 | `api-browser-window-spec` construction, defaults (800x600, show, resizable), show/hide, bounds, `setTitle`, `closed` | `WindowManager`, `BrowserWindowOptions`, `win.on` | `electron.rs`: geometry parity, canary boot, destroyed-window throws; compat `window_state_transitions`, `closed_listeners_*` | Ported |
 | `api-ipc-main/ipc-renderer-spec` `handle`/`invoke`, `send`/`on`, `webContents.send` | `IpcBus`, `WebContents` outbox, `pump_ipc` | `electron_ipc.rs`: full round-trip suite incl. main→renderer and soft-fail | Ported |
-| `api-clipboard-spec` `readText`/`writeText`/`clear` | Deferred: bind strake-shell native clipboard | — | Gap: spec + shim land with the OS-bridge implementation |
-| `api-safe-storage-spec` | Deferred | — | Gap: spec + shim land with the OS-bridge implementation |
-| `api-power-monitor-spec`, `powerSaveBlocker` | Deferred | — | Gap: spec + shim land with the OS-bridge implementation |
+| `api-clipboard-spec` `readText`/`writeText`/`clear` | `Clipboard`/`MemoryClipboard` + shim | `electron.rs`: `os_bridges_clipboard_safe_storage_power`; compat `memory_clipboard_round_trips_and_clears` | Ported |
+| `api-safe-storage-spec` | `SafeStorage` + `RecordingKeychain` + shim | `electron.rs`: `os_bridges_*`; compat `recording_backend_round_trips_strings`, `garbage_ciphertext_fails_to_decrypt`, `base64_codec_vectors` | Ported |
+| `api-power-monitor-spec`, `powerSaveBlocker` | `PowerHub`/`PowerMonitor`/`PowerSaveBlocker` + shim | `electron.rs`: `os_bridges_*` (inject + dispatch); compat `synthetic_sleep_resume_reaches_listeners`, `throwing_listener_is_isolated`, `blocker_tracks_lifetimes` | Ported |
 | `api-screen-spec` | `Screen`/`Display` + shim | `window_geometry_*` shim test; compat/placement units | Ported |
-| Web `Notification` | Deferred: renderer binding | — | Gap: spec + binding land with the OS-bridge implementation |
+| Web `Notification` | `NotificationCenter` + shim (`new Notification`/`onclick`) | `electron_ipc.rs`: `notification_click_fires_onclick`, `notification_click_flushes_async_continuations`; compat `notify_records_delivery_then_click_dispatch`, `deliveries_keep_fifo_order` | Ported |
 | `api-dialog`, `shell`, `nativeTheme`, `Menu`/`Tray`, `globalShortcut` | Deferred (needs #12 / OS bridges) | — | Gap: spec ports land with the implementations |
 | `webContents` (`executeJavaScript`, `openDevTools`, `print`) | Deferred (renderer binding, devtools UI, #12 printing) | — | Gap |
 
