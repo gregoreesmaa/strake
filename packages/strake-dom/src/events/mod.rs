@@ -3,6 +3,7 @@ mod focus;
 mod ime;
 mod keyboard;
 mod pointer;
+mod titlebar;
 
 use crate::util::Point;
 pub use driver::{EventDriver, EventHandler, NoopEventHandler};
@@ -12,6 +13,7 @@ use keyboard::{KeyboardOrTextInputEvent, handle_key_or_input_event, handle_keyup
 pub(crate) use pointer::DragMode;
 use pointer::{handle_click, handle_pointerdown, handle_pointermove, handle_pointerup};
 use strake_traits::events::{DomEvent, DomEventData, PointerCoords, UiEvent};
+pub(crate) use titlebar::titlebar_resize_at_client;
 
 use crate::{BaseDocument, events::pointer::handle_wheel};
 

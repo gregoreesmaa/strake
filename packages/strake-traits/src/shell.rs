@@ -60,6 +60,53 @@ pub trait ShellProvider: Send + Sync + 'static {
     /// Begin an interactive user-driven move of the window (call from a
     /// mousedown handler on a drag region)
     fn drag_window(&self) {}
+    /// Whether the window currently has OS decorations (titlebar, borders).
+    /// Frameless move/resize paths are gated on this returning `false`.
+    fn is_window_decorated(&self) -> bool {
+        true
+    }
+    /// Begin an interactive user-driven resize of the window in `direction`
+    /// (call from a mousedown handler on an edge/corner band).
+    fn drag_resize_window(&self, direction: ResizeDirection) {
+        let _ = direction;
+    }
+    /// Enter (`true`) or leave (`false`) borderless fullscreen.
+    fn set_fullscreen(&self, fullscreen: bool) {
+        let _ = fullscreen;
+    }
+    fn is_window_fullscreen(&self) -> bool {
+        false
+    }
+}
+
+/// Resize orientation for [`ShellProvider::drag_resize_window`], mirroring
+/// `winit::window::ResizeDirection` without depending on winit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum ResizeDirection {
+    East,
+    North,
+    NorthEast,
+    NorthWest,
+    South,
+    SouthEast,
+    SouthWest,
+    West,
+}
+
+impl ResizeDirection {
+    /// The resize cursor for hovering the corresponding edge/corner band.
+    pub fn cursor_icon(self) -> CursorIcon {
+        match self {
+            ResizeDirection::East => CursorIcon::EResize,
+            ResizeDirection::North => CursorIcon::NResize,
+            ResizeDirection::NorthEast => CursorIcon::NeResize,
+            ResizeDirection::NorthWest => CursorIcon::NwResize,
+            ResizeDirection::South => CursorIcon::SResize,
+            ResizeDirection::SouthEast => CursorIcon::SeResize,
+            ResizeDirection::SouthWest => CursorIcon::SwResize,
+            ResizeDirection::West => CursorIcon::WResize,
+        }
+    }
 }
 
 pub struct DummyShellProvider;

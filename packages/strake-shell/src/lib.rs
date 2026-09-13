@@ -151,6 +151,34 @@ impl ShellProvider for StrakeShellProvider {
     fn drag_window(&self) {
         let _ = self.window.drag_window();
     }
+    fn is_window_decorated(&self) -> bool {
+        self.window.is_decorated()
+    }
+    fn drag_resize_window(&self, direction: strake_traits::shell::ResizeDirection) {
+        use strake_traits::shell::ResizeDirection as Dir;
+        use winit::window::ResizeDirection as WinitDir;
+        let dir = match direction {
+            Dir::East => WinitDir::East,
+            Dir::North => WinitDir::North,
+            Dir::NorthEast => WinitDir::NorthEast,
+            Dir::NorthWest => WinitDir::NorthWest,
+            Dir::South => WinitDir::South,
+            Dir::SouthEast => WinitDir::SouthEast,
+            Dir::SouthWest => WinitDir::SouthWest,
+            Dir::West => WinitDir::West,
+        };
+        let _ = self.window.drag_resize_window(dir);
+    }
+    fn set_fullscreen(&self, fullscreen: bool) {
+        self.window.set_fullscreen(if fullscreen {
+            Some(winit::monitor::Fullscreen::Borderless(None))
+        } else {
+            None
+        });
+    }
+    fn is_window_fullscreen(&self) -> bool {
+        self.window.fullscreen().is_some()
+    }
 
     #[cfg(all(
         feature = "clipboard",

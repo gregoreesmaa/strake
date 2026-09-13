@@ -28,6 +28,13 @@ pub(crate) fn handle_key_or_input_event<F: FnMut(DomEvent)>(
             return;
         }
 
+        // F11 toggles borderless fullscreen from anywhere (issue #54).
+        // Auto-repeats must not oscillate the state.
+        if event.key == Key::F11 && !event.is_auto_repeating {
+            let fullscreen = doc.shell_provider.is_window_fullscreen();
+            doc.shell_provider.set_fullscreen(!fullscreen);
+            return;
+        }
         // Range slider keys (issue #51). Consumed here so arrows adjust the
         // focused slider instead of scrolling or editing.
         if matches!(
