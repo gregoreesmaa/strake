@@ -213,6 +213,13 @@ pub(crate) fn handle_pointermove<F: FnMut(DomEvent)>(
     let y = event.page_y();
     let buttons = event.buttons;
 
+    // Range slider drag (issue #51): position updates own the gesture.
+    if let Some(range_id) = doc.range_drag_node_id {
+        set_range_value_from_x(doc, range_id, x, &mut dispatch_event);
+        doc.shell_provider.request_redraw();
+        return true;
+    }
+
     let mut changed = doc.set_hover_to(x, y);
 
     // Check if we've moved enough to be considered a selection drag (2px threshold)
@@ -380,6 +387,85 @@ pub(crate) fn handle_pointermove<F: FnMut(DomEvent)>(
     changed
 }
 
+/// Nearest non-anonymous element at or above `node_id` that is a range
+/// input with slider state, if any (issue #51). Stops at the first real
+/// element, so hits on unrelated content do not leak into a slider.
+fn range_input_at(doc: &BaseDocument, node_id: NodeId) -> Option<NodeId> {
+    let mut current = Some(node_id);
+    while let Some(id) = current {
+        let node = doc.nodes.get(id)?;
+        if !node.is_anonymous() {
+            if let Some(el) = node.data.downcast_element() {
+                let is_range = el.name.local == local_name!("input")
+                    && el.attr(local_name!("type")) == Some("range")
+                    && el.range_input_data().is_some();
+                return is_range.then_some(id);
+            }
+        }
+        current = node.parent;
+    }
+    None
+}
+
+/// Set a range slider's value from a horizontal position in the same units
+/// as layout boxes (issue #51). Snaps to `step`, marks paint-only damage,
+/// and dispatches an `input` event when the value actually changed.
+fn set_range_value_from_x(
+    doc: &mut BaseDocument,
+    range_id: NodeId,
+    x: f32,
+    dispatch_event: &mut dyn FnMut(DomEvent),
+) {
+    let raw = {
+        let Some(node) = doc.nodes.get(range_id) else {
+            return;
+        };
+        let Some(data) = node.element_data().and_then(|el| el.range_input_data()) else {
+            return;
+        };
+        let layout = node.final_layout();
+        if layout.size.width <= 0.0 {
+            return;
+        }
+        // Same travel as the painted thumb in `draw_range`: the thumb
+        // center moves between one thumb radius inset from each edge.
+        let thumb_radius = (layout.size.height / 2.0 - 1.0).clamp(2.0, 9.0);
+        let travel = (layout.size.width - 2.0 * thumb_radius).max(0.0);
+        if travel <= 0.0 {
+            return;
+        }
+        let fraction = ((x - layout.location.x - thumb_radius) / travel).clamp(0.0, 1.0) as f64;
+        data.min + fraction * (data.max - data.min)
+    };
+    let (changed, value) = {
+        let Some(node) = doc.nodes.get_mut(range_id) else {
+            return;
+        };
+        let Some(el) = node.element_data_mut() else {
+            return;
+        };
+        let Some(data) = el.range_input_data_mut() else {
+            return;
+        };
+        let before = data.value;
+        let value = data.set_snapped(raw);
+        (value != before, value)
+    };
+    if changed {
+        if let Some(node) = doc.nodes.get_mut(range_id) {
+            // Paint-only: the thumb moves without affecting layout.
+            node.insert_damage(style::selector_parser::RestyleDamage::REPAINT);
+            node.mark_ancestors_dirty();
+        }
+        dispatch_event(DomEvent::new(
+            range_id,
+            DomEventData::Input(StrakeInputEvent {
+                value: value.to_string(),
+            }),
+        ));
+    }
+}
+
 pub(crate) fn handle_pointerdown(
     doc: &mut BaseDocument,
     _target: NodeId,
@@ -439,6 +525,25 @@ pub(crate) fn handle_pointerdown(
     // This may differ from `target` for anonymous blocks (which are layout children
     // but not DOM children), so we use the hit result for text selection.
     let actual_target = hit.node_id;
+
+    // Range slider drag (issue #51): a main-button press focuses the slider,
+    // sets its value from the press position, and captures the drag until
+    // release. Takes precedence over text selection like scrollbar drags.
+    if button == MouseEventButton::Main {
+        if let Some(range_id) = range_input_at(doc, actual_target) {
+            generate_focus_events(
+                doc,
+                &mut |doc| {
+                    doc.set_focus_to(range_id);
+                },
+                dispatch_event,
+            );
+            doc.range_drag_node_id = Some(range_id);
+            set_range_value_from_x(doc, range_id, x, dispatch_event);
+            doc.shell_provider.request_redraw();
+            return;
+        }
+    }
 
     // Check what kind of element we're dealing with and extract needed info
     enum ClickTarget {
@@ -558,6 +663,11 @@ pub(crate) fn handle_pointerup<F: FnMut(DomEvent)>(
     event: &StrakePointerEvent,
     mut dispatch_event: F,
 ) {
+    // End a range slider drag (issue #51). The click synthesized below keeps
+    // focus via the range arm in `handle_click`.
+    if doc.range_drag_node_id.is_some() {
+        doc.range_drag_node_id = None;
+    }
     if doc.devtools().highlight_hover {
         let mut node = doc.get_node(target).unwrap();
         if event.button == MouseEventButton::Secondary {
@@ -691,6 +801,12 @@ pub(crate) fn handle_click(
                         dispatch_event,
                     );
 
+                    break 'matched true;
+                }
+                // A range slider's value and focus were set on pointerdown
+                // and drag; a click carries nothing further, but matching
+                // here keeps focus instead of clearing it (issue #51).
+                local_name!("input") if el.attr(local_name!("type")) == Some("range") => {
                     break 'matched true;
                 }
                 // Activating the first <summary> of a <details> element toggles

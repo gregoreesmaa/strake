@@ -5,7 +5,7 @@ use strake_traits::node_id::NodeId;
 
 use crate::layout::damage::ALL_DAMAGE;
 use crate::net::{ImageHandler, ResourceHandler, StylesheetHandler};
-use crate::node::{CanvasData, NodeFlags, SpecialElementData};
+use crate::node::{CanvasData, NodeFlags, RangeInputData, SpecialElementData};
 use crate::stylo_device::DeviceChanges;
 use crate::util::ImageType;
 use crate::{
@@ -404,6 +404,19 @@ impl DocumentMutator<'_> {
 
         if (tag, attr) == tag_and_attr!("input", "checked") {
             set_input_checked_state(element, value.to_string());
+        } else if (tag, attr) == tag_and_attr!("input", "min")
+            || (tag, attr) == tag_and_attr!("input", "max")
+            || (tag, attr) == tag_and_attr!("input", "step")
+            || (tag, attr) == tag_and_attr!("input", "value")
+        {
+            // Re-parse range slider params (issue #51). Interaction-driven
+            // value changes go through the slider state, not the attribute.
+            if element.range_input_data().is_some() {
+                let fresh = RangeInputData::from_attrs(element);
+                if let Some(data) = element.range_input_data_mut() {
+                    *data = fresh;
+                }
+            }
         } else if (tag, attr) == tag_and_attr!("img", "src") {
             self.load_image(node_id);
         } else if (tag, attr) == tag_and_attr!("canvas", "src") {
@@ -1220,6 +1233,7 @@ impl<'doc> DocumentMutator<'doc> {
                 SpecialElementData::TableRoot(_) => {}
                 SpecialElementData::TextInput(_) => {}
                 SpecialElementData::CheckboxInput(_) => {}
+                SpecialElementData::RangeInput(_) => {}
                 #[cfg(feature = "file-input")]
                 SpecialElementData::FileInput(_) => {}
                 SpecialElementData::None => {}

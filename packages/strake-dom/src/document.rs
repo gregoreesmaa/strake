@@ -272,6 +272,8 @@ pub struct BaseDocument {
     pub(crate) active_node_id: Option<NodeId>,
     /// The node which recieved a mousedown event (if any)
     pub(crate) mousedown_node_id: Option<NodeId>,
+    /// The range slider currently being dragged (if any, issue #51)
+    pub(crate) range_drag_node_id: Option<NodeId>,
     /// The last time a mousedown was made (for double-click detection)
     pub(crate) last_mousedown_time: Option<Instant>,
     /// The position where mousedown occurred (for selection drags and double-click detection)
@@ -471,6 +473,7 @@ impl BaseDocument {
             focus_node_id: None,
             active_node_id: None,
             mousedown_node_id: None,
+            range_drag_node_id: None,
             has_active_animations: false,
             subdoc_is_animating: false,
             has_canvas: false,
