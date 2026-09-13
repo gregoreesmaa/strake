@@ -26,8 +26,8 @@ use crate::{
     BaseDocument, ElementData, Node, NodeData,
     layout::damage::{CONSTRUCT_BOX, CONSTRUCT_DESCENDENT, CONSTRUCT_FC},
     node::{
-        ListItemLayout, ListItemLayoutPosition, Marker, NodeFlags, NodeKind, SpecialElementData,
-        TextBrush, TextInputData, TextLayout,
+        ListItemLayout, ListItemLayoutPosition, Marker, NodeFlags, NodeKind, RangeInputData,
+        SpecialElementData, TextBrush, TextInputData, TextLayout,
     },
     qual_name, stylo_to_parley,
     traversal::{iter_children, iter_children_and_pseudos},
@@ -465,6 +465,9 @@ fn collect_layout_children_with_wrap(
                 return;
             } else if matches!(type_attr, Some("checkbox" | "radio")) {
                 create_checkbox_input(doc, container_node_id);
+                return;
+            } else if matches!(type_attr, Some("range")) {
+                create_range_input(doc, container_node_id);
                 return;
             }
         }
@@ -1194,6 +1197,16 @@ fn create_text_editor(doc: &mut BaseDocument, input_element_id: NodeId, is_multi
     styles.insert(StyleProperty::Brush(parley_style.brush));
 
     editor.refresh_layout(&mut doc.font_ctx.lock().unwrap(), &mut doc.layout_ctx);
+}
+
+fn create_range_input(doc: &mut BaseDocument, input_element_id: NodeId) {
+    let node = &mut doc.nodes[input_element_id];
+
+    let element = &mut node.data.downcast_element_mut().unwrap();
+    if !matches!(element.special_data, SpecialElementData::RangeInput(_)) {
+        let data = RangeInputData::from_attrs(element);
+        element.special_data = SpecialElementData::RangeInput(data);
+    }
 }
 
 fn create_checkbox_input(doc: &mut BaseDocument, input_element_id: NodeId) {

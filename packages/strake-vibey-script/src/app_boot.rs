@@ -147,6 +147,31 @@ fn resolve_entry_file(app_dir: &Path, target: &str) -> Option<PathBuf> {
     None
 }
 
+/// Proof that one IPC round-trip crossed the booted app's own processes
+/// (issue #84): the demo app ships no IPC flow of its own, so the harness
+/// registers a probe `ipcMain.handle` on the main side and invokes it from
+/// the first window's renderer through [`ScriptDocument::pump_ipc`].
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct IpcProof {
+    /// Calls the pump delivered.
+    pub pumped: usize,
+    /// The renderer's observed reply, if the promise settled.
+    pub reply: Option<String>,
+    /// JS errors from the probe handler registration.
+    pub main_errors: Vec<String>,
+    /// JS errors from the probe invocation.
+    pub renderer_errors: Vec<String>,
+}
+
+impl IpcProof {
+    /// The round-trip genuinely succeeded: `strake:pong` came back clean.
+    pub fn succeeded(&self) -> bool {
+        self.reply.as_deref() == Some("strake:pong")
+            && self.main_errors.is_empty()
+            && self.renderer_errors.is_empty()
+    }
+}
+
 /// Boot an Electron app directory headlessly (issue #110).
 ///
 /// Reads `<app-dir>/package.json` (`main`, default `"index.js"`), evaluates
@@ -154,6 +179,16 @@ fn resolve_entry_file(app_dir: &Path, target: &str) -> Option<PathBuf> {
 /// loads each created window's entry HTML: first paint plus preload execution
 /// in renderer scope. Remote (`http(s)`) targets are recorded, not fetched.
 pub fn boot_app_dir(app_dir: &Path) -> Result<AppBootReport, BootError> {
+    boot_inner(app_dir, false).map(|(report, _)| report)
+}
+
+/// [`boot_app_dir`], plus an [`IpcProof`] round-trip through the first
+/// window's renderer (issue #84).
+pub fn boot_app_dir_with_ipc_proof(app_dir: &Path) -> Result<(AppBootReport, IpcProof), BootError> {
+    boot_inner(app_dir, true)
+}
+
+fn boot_inner(app_dir: &Path, prove_ipc: bool) -> Result<(AppBootReport, IpcProof), BootError> {
     let manifest_path = app_dir.join("package.json");
     if !manifest_path.is_file() {
         return Err(BootError::MissingPackageJson {
@@ -210,6 +245,8 @@ pub fn boot_app_dir(app_dir: &Path) -> Result<AppBootReport, BootError> {
     js_errors.extend(doc.take_js_errors());
 
     let mut windows = Vec::new();
+    let mut ipc_proof = IpcProof::default();
+    let mut ipc_proven = false;
     for id in host.live_window_ids() {
         let (width, height) = host
             .window_bounds(id)
@@ -262,6 +299,12 @@ pub fn boot_app_dir(app_dir: &Path) -> Result<AppBootReport, BootError> {
                             renderer.eval(&source);
                             renderer.execute_scripts();
                             window.preload_errors = renderer.take_js_errors();
+                            // Issue #84: one IPC round-trip through the
+                            // booted app's own main/renderer pair.
+                            if prove_ipc && !ipc_proven {
+                                ipc_proven = true;
+                                ipc_proof = prove_ipc_roundtrip(&mut doc, &mut renderer);
+                            }
                         }
                         Err(source) => {
                             window
@@ -275,10 +318,42 @@ pub fn boot_app_dir(app_dir: &Path) -> Result<AppBootReport, BootError> {
         windows.push(window);
     }
 
-    Ok(AppBootReport {
-        app_name,
-        main_entry: main_entry.to_string(),
-        windows,
-        js_errors,
-    })
+    Ok((
+        AppBootReport {
+            app_name,
+            main_entry: main_entry.to_string(),
+            windows,
+            js_errors,
+        },
+        ipc_proof,
+    ))
+}
+
+/// Register a probe `ipcMain.handle` on the booted main side, invoke it from
+/// the window's renderer, and pump: the issue #84 round-trip. The demo app
+/// itself ships no IPC flow, so both endpoints are harness-driven — but the
+/// handler, the transport, and the promise settlement are the app's own
+/// booted processes.
+fn prove_ipc_roundtrip(main: &mut ScriptDocument, renderer: &mut ScriptDocument) -> IpcProof {
+    main.eval("require('electron').ipcMain.handle('strake:ping', () => 'strake:pong');");
+    let main_errors = main.take_js_errors();
+    renderer.eval(
+        "require('electron').ipcRenderer.invoke('strake:ping').then((reply) => { \
+             __strake_send_message('strake:ipc-reply:' + reply); \
+         });",
+    );
+    let renderer_errors = renderer.take_js_errors();
+    let pumped = main.pump_ipc(renderer);
+    let mut reply = None;
+    for message in renderer.take_messages() {
+        if let Some(value) = message.strip_prefix("strake:ipc-reply:") {
+            reply = Some(value.to_string());
+        }
+    }
+    IpcProof {
+        pumped,
+        reply,
+        main_errors,
+        renderer_errors,
+    }
 }

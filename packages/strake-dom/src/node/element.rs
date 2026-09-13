@@ -343,6 +343,75 @@ pub enum SpecialElementType {
     None,
 }
 
+/// Slider state for `<input type="range">` (issue #51).
+#[derive(Copy, Clone, Debug)]
+pub struct RangeInputData {
+    pub value: f64,
+    pub min: f64,
+    pub max: f64,
+    pub step: f64,
+}
+
+impl RangeInputData {
+    fn parse_attr(element: &ElementData, name: LocalName, default: f64) -> f64 {
+        element
+            .attr(name)
+            .and_then(|text| text.trim().parse::<f64>().ok())
+            .filter(|v| v.is_finite())
+            .unwrap_or(default)
+    }
+
+    /// Build from the element's content attributes, applying the spec's
+    /// value sanitization (clamp into range; unparseable value falls back
+    /// to the midpoint default).
+    pub fn from_attrs(element: &ElementData) -> Self {
+        let min = Self::parse_attr(element, local_name!("min"), 0.0);
+        let mut max = Self::parse_attr(element, local_name!("max"), 100.0);
+        if max < min {
+            max = min;
+        }
+        let step = Self::parse_attr(element, local_name!("step"), 1.0);
+        let step = if step <= 0.0 { 1.0 } else { step };
+        let mut data = Self {
+            value: min + (max - min) / 2.0,
+            min,
+            max,
+            step,
+        };
+        // A present-but-unparseable `value` falls back to the default above;
+        // a parseable one is clamped into range (no step snapping here —
+        // step mismatch only affects validity, not the stored value).
+        if let Some(text) = element.attr(local_name!("value")) {
+            if let Ok(v) = text.trim().parse::<f64>() {
+                if v.is_finite() {
+                    data.value = v.clamp(min, max);
+                }
+            }
+        }
+        data
+    }
+
+    pub fn fraction(&self) -> f64 {
+        if self.max <= self.min {
+            return 0.0;
+        }
+        ((self.value - self.min) / (self.max - self.min)).clamp(0.0, 1.0)
+    }
+
+    /// Set a new value, clamped and snapped to `step`. Returns the value
+    /// that was stored.
+    pub fn set_snapped(&mut self, mut value: f64) -> f64 {
+        if !value.is_finite() {
+            value = self.min + (self.max - self.min) / 2.0;
+        }
+        value = value.clamp(self.min, self.max);
+        let steps = ((value - self.min) / self.step).round();
+        value = self.min + steps * self.step;
+        self.value = value.clamp(self.min, self.max);
+        self.value
+    }
+}
+
 /// Heterogeneous data that depends on the element's type.
 #[derive(Default)]
 pub enum SpecialElementData {
@@ -363,6 +432,8 @@ pub enum SpecialElementData {
     TextInput(TextInputData),
     /// Checkbox checked state
     CheckboxInput(bool),
+    /// `<input type="range">` slider state (issue #51)
+    RangeInput(RangeInputData),
     /// Selected files
     #[cfg(feature = "file-input")]
     FileInput(FileData),
@@ -383,6 +454,7 @@ impl Clone for SpecialElementData {
             Self::TableRoot(data) => Self::TableRoot(data.clone()),
             Self::TextInput(data) => Self::TextInput(data.clone()),
             Self::CheckboxInput(data) => Self::CheckboxInput(*data),
+            Self::RangeInput(data) => Self::RangeInput(*data),
             #[cfg(feature = "file-input")]
             Self::FileInput(data) => Self::FileInput(data.clone()),
             Self::None => Self::None,
@@ -602,6 +674,25 @@ impl ElementData {
             SpecialElementData::CheckboxInput(ref mut checked) => Some(checked),
             _ => None,
         }
+    }
+
+    pub fn range_input_data(&self) -> Option<RangeInputData> {
+        match self.special_data {
+            SpecialElementData::RangeInput(data) => Some(data),
+            _ => None,
+        }
+    }
+
+    pub fn range_input_data_mut(&mut self) -> Option<&mut RangeInputData> {
+        match self.special_data {
+            SpecialElementData::RangeInput(ref mut data) => Some(data),
+            _ => None,
+        }
+    }
+
+    /// Current slider value for `<input type="range">`, if this is one.
+    pub fn range_input_value(&self) -> Option<f64> {
+        self.range_input_data().map(|data| data.value)
     }
 
     /// Set the checked state of a checkbox/radio input, keeping the
@@ -899,6 +990,7 @@ impl std::fmt::Debug for SpecialElementData {
             SpecialElementData::TableRoot(_) => f.write_str("NodeSpecificData::TableRoot"),
             SpecialElementData::TextInput(_) => f.write_str("NodeSpecificData::TextInput"),
             SpecialElementData::CheckboxInput(_) => f.write_str("NodeSpecificData::CheckboxInput"),
+            SpecialElementData::RangeInput(_) => f.write_str("NodeSpecificData::RangeInput"),
             #[cfg(feature = "file-input")]
             SpecialElementData::FileInput(_) => f.write_str("NodeSpecificData::FileInput"),
             SpecialElementData::None => f.write_str("NodeSpecificData::None"),

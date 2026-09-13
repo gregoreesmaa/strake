@@ -35,6 +35,15 @@ pub(crate) fn handle_key_or_input_event<F: FnMut(DomEvent)>(
             doc.shell_provider.set_fullscreen(!fullscreen);
             return;
         }
+        // Range slider keys (issue #51). Consumed here so arrows adjust the
+        // focused slider instead of scrolling or editing.
+        if matches!(
+            event.key,
+            Key::ArrowLeft | Key::ArrowRight | Key::ArrowUp | Key::ArrowDown | Key::Home | Key::End
+        ) && handle_range_key(doc, target, &event.key, &mut dispatch_event)
+        {
+            return;
+        }
 
         // Enter activates the focused control on key down (issue #70). Like
         // Tab above, this runs after `:focus-visible` arming in the caller.
@@ -100,6 +109,65 @@ pub(crate) fn handle_key_or_input_event<F: FnMut(DomEvent)>(
             }
         }
     }
+}
+
+/// Adjust a focused range slider with keyboard input (issue #51). Returns
+/// true when the key was consumed by a slider: arrows step by `step`,
+/// Home/End jump to the ends. Dispatches an `input` event on change.
+fn handle_range_key(
+    doc: &mut BaseDocument,
+    target: NodeId,
+    key: &Key,
+    dispatch_event: &mut dyn FnMut(DomEvent),
+) -> bool {
+    let raw = {
+        let Some(node) = doc.nodes.get(target) else {
+            return false;
+        };
+        let Some(el) = node.element_data() else {
+            return false;
+        };
+        if el.attr(local_name!("type")) != Some("range") {
+            return false;
+        }
+        let Some(data) = el.range_input_data() else {
+            return false;
+        };
+        match key {
+            Key::ArrowLeft | Key::ArrowDown => data.value - data.step,
+            Key::ArrowRight | Key::ArrowUp => data.value + data.step,
+            Key::Home => data.min,
+            Key::End => data.max,
+            _ => return false,
+        }
+    };
+    let (changed, value) = {
+        let Some(node) = doc.nodes.get_mut(target) else {
+            return true;
+        };
+        let Some(el) = node.element_data_mut() else {
+            return true;
+        };
+        let Some(data) = el.range_input_data_mut() else {
+            return true;
+        };
+        let before = data.value;
+        let value = data.set_snapped(raw);
+        (value != before, value)
+    };
+    if changed {
+        if let Some(node) = doc.nodes.get_mut(target) {
+            node.insert_damage(style::selector_parser::RestyleDamage::REPAINT);
+            node.mark_ancestors_dirty();
+        }
+        dispatch_event(DomEvent::new(
+            target,
+            DomEventData::Input(StrakeInputEvent {
+                value: value.to_string(),
+            }),
+        ));
+    }
+    true
 }
 
 /// Space activates the focused control on key *up*, so holding Space does not

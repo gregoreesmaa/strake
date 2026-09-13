@@ -11,9 +11,6 @@ impl ElementCx<'_, '_> {
         if self.node.local_name() != "input" {
             return;
         }
-        let Some(checked) = self.element.checkbox_input_checked() else {
-            return;
-        };
 
         let type_attr = self.node.attr(local_name!("type"));
         let disabled = self.node.attr(local_name!("disabled")).is_some();
@@ -25,20 +22,43 @@ impl ElementCx<'_, '_> {
             self.style.clone_color().as_srgb_color()
         };
 
-        let width = self.frame.border_box.width();
-        let height = self.frame.border_box.height();
-        let min_dimension = width.min(height);
-        let scale = (min_dimension - 4.0).max(0.0) / 16.0;
-
-        let frame = self.frame.border_box.to_rounded_rect(scale * 2.0);
-
         match type_attr {
             Some("checkbox") => {
+                let Some(checked) = self.element.checkbox_input_checked() else {
+                    return;
+                };
+                let width = self.frame.border_box.width();
+                let height = self.frame.border_box.height();
+                let min_dimension = width.min(height);
+                let scale = (min_dimension - 4.0).max(0.0) / 16.0;
+
+                let frame = self.frame.border_box.to_rounded_rect(scale * 2.0);
                 draw_checkbox(scene, checked, frame, self.transform, accent_color, scale);
             }
             Some("radio") => {
+                let Some(checked) = self.element.checkbox_input_checked() else {
+                    return;
+                };
+                let width = self.frame.border_box.width();
+                let height = self.frame.border_box.height();
+                let min_dimension = width.min(height);
+                let scale = (min_dimension - 4.0).max(0.0) / 16.0;
+
+                let frame = self.frame.border_box.to_rounded_rect(scale * 2.0);
                 let center = frame.center();
                 draw_radio_button(scene, checked, center, self.transform, accent_color, scale);
+            }
+            Some("range") => {
+                let Some(data) = self.element.range_input_data() else {
+                    return;
+                };
+                draw_range(
+                    scene,
+                    data,
+                    self.frame.border_box,
+                    self.transform,
+                    accent_color,
+                );
             }
             _ => {}
         }
@@ -78,6 +98,60 @@ fn draw_checkbox(
         scene.fill(Fill::NonZero, transform, Color::WHITE, None, &frame);
         scene.stroke(&Stroke::default(), transform, accent_color, None, &frame);
     }
+}
+
+/// Slider track, fill, and thumb for `<input type="range">` (issue #51).
+/// Horizontal only; the thumb center travels the content width linearly
+/// with `value`, matching the pointer mapping in `set_range_value_from_x`.
+fn draw_range(
+    scene: &mut impl PaintScene,
+    data: strake_dom::RangeInputData,
+    frame: kurbo::Rect,
+    transform: Affine,
+    accent_color: Color,
+) {
+    const TRACK: Color = Color::from_rgba8(200, 200, 200, 255);
+
+    let width = frame.width().max(1.0);
+    let height = frame.height().max(1.0);
+    let thumb_radius = (height / 2.0 - 1.0).clamp(2.0, 9.0);
+    let travel = (width - 2.0 * thumb_radius).max(0.0);
+    let center = Point::new(
+        frame.x0 + thumb_radius + data.fraction() * travel,
+        frame.y0 + height / 2.0,
+    );
+
+    let bar_height = 4.0f64.min(height / 2.0);
+    let bar = kurbo::Rect::from_center_size(
+        Point::new(frame.x0 + width / 2.0, frame.y0 + height / 2.0),
+        (width, bar_height),
+    )
+    .to_rounded_rect(bar_height / 2.0);
+    scene.fill(Fill::NonZero, transform, TRACK, None, &bar);
+
+    // Filled portion from the left edge to the thumb center.
+    let fill_width = (center.x - frame.x0).max(0.0);
+    if fill_width > 0.0 {
+        let fill = kurbo::Rect::from_origin_size(
+            Point::new(frame.x0, frame.y0 + height / 2.0 - bar_height / 2.0),
+            kurbo::Size::new(fill_width, bar_height),
+        )
+        .to_rounded_rect(bar_height / 2.0);
+        scene.fill(Fill::NonZero, transform, accent_color, None, &fill);
+    }
+
+    let thumb = Circle::new(center, thumb_radius);
+    scene.fill(Fill::NonZero, transform, Color::WHITE, None, &thumb);
+    scene.stroke(
+        &Stroke {
+            width: (thumb_radius / 4.0).max(1.0),
+            ..Stroke::default()
+        },
+        transform,
+        accent_color,
+        None,
+        &thumb,
+    );
 }
 
 fn draw_radio_button(

@@ -1,10 +1,14 @@
 use anyrender::PaintScene;
-use kurbo::{BezPath, Cap, Circle, Insets, Join, PathEl, Point, Rect, Shape as _, Stroke, Vec2};
+use kurbo::{
+    Affine, BezPath, Cap, Circle, Insets, Join, PathEl, Point, Rect, Shape as _, Stroke, Vec2,
+};
 use peniko::{Color, Fill};
 use smallvec::SmallVec;
 use strake_dom::node::SpecialElementData;
+use strake_dom::{CollapsedBorder, CollapsedGrid};
 use style::{
     computed_values::border_collapse::T as BorderCollapse,
+    properties::style_structs::Border,
     values::computed::{BorderStyle, OutlineStyle},
 };
 
@@ -142,6 +146,24 @@ fn sample_points_along_path(path: &BezPath, spacing: f64, count: usize) -> Vec<P
         points.push(poly[seg].lerp(poly[seg + 1], t));
     }
     points
+}
+
+/// Paint one collapsed-border segment (issue #57): skip suppressed and
+/// transparent winners, otherwise fill `rect` with the winner's color.
+fn fill_collapsed_seg(
+    scene: &mut impl PaintScene,
+    transform: Affine,
+    seg: &CollapsedBorder,
+    rect: Rect,
+) {
+    if !seg.visible() {
+        return;
+    }
+    let color = seg.color.as_srgb_color();
+    if color.components[3] <= 0.0 {
+        return;
+    }
+    scene.fill(Fill::NonZero, transform, color, None, &rect);
 }
 
 impl ElementCx<'_, '_> {
@@ -521,19 +543,238 @@ impl ElementCx<'_, '_> {
         let Some(grid_info) = &mut *table.computed_grid_info.borrow_mut() else {
             return;
         };
-        let Some(border_style) = table.border_style.as_deref() else {
-            return;
-        };
-
-        let outer_border_style = self.style.get_border();
 
         let cols = PhysicalTracks::from_tracks(&grid_info.columns);
         let rows = PhysicalTracks::from_tracks(&grid_info.rows);
+        let col_tracks: Vec<taffy::Line<f32>> = cols.iter().collect();
+        let row_tracks: Vec<taffy::Line<f32>> = rows.iter().collect();
+        let (col_origin, row_origin) = (cols.origin(), rows.origin());
+        let (inner_width, inner_height) = (cols.span() as f64, rows.span() as f64);
 
-        let inner_width = cols.span() as f64;
-        let inner_height = rows.span() as f64;
+        // Per-segment winners when they line up with the laid-out tracks;
+        // otherwise the legacy first-cell path (overlong rowspans can create
+        // implicit tracks beyond the recorded grid).
+        if let Some(grid) = table.collapsed.as_ref()
+            && grid.ncols == col_tracks.len()
+            && grid.nrows == row_tracks.len()
+        {
+            self.draw_collapsed_segments(
+                scene,
+                grid,
+                &col_tracks,
+                &row_tracks,
+                col_origin,
+                row_origin,
+                inner_width,
+                inner_height,
+            );
+        } else if let Some(border_style) = table.border_style.as_deref() {
+            self.draw_legacy_table_borders(
+                scene,
+                border_style,
+                &row_tracks,
+                &col_tracks,
+                col_origin,
+                row_origin,
+                inner_width,
+                inner_height,
+            );
+        }
+    }
 
-        // TODO: support different colors for different borders
+    /// Collapsed borders from the per-segment conflict winners (issue #57).
+    /// Each band is partitioned so every pixel belongs to exactly one
+    /// segment, except junctions, which take the vertical winner (vertical
+    /// bands paint last). Uniform cell borders reproduce the legacy output
+    /// pixel-for-pixel.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_collapsed_segments(
+        &self,
+        scene: &mut impl PaintScene,
+        grid: &CollapsedGrid,
+        cols: &[taffy::Line<f32>],
+        rows: &[taffy::Line<f32>],
+        col_origin: f32,
+        row_origin: f32,
+        inner_width: f64,
+        inner_height: f64,
+    ) {
+        let (nrows, ncols) = (grid.nrows, grid.ncols);
+        let outer = self.style.get_border();
+        // Partition boundaries tiling the inner area: segment `c` spans
+        // [col_start(c), col_start(c + 1)], segment `r` spans
+        // [row_start(r), row_start(r + 1)].
+        let col_start = |c: usize| {
+            if c < ncols {
+                (cols[c].start - col_origin) as f64
+            } else {
+                inner_width
+            }
+        };
+        let row_start = |r: usize| {
+            if r < nrows {
+                (rows[r].start - row_origin) as f64
+            } else {
+                inner_height
+            }
+        };
+        // Bottom outer corners: the vertical outers run through the bottom
+        // band (issue #46), extended by the widest bottom winner.
+        let bottom_max = grid
+            .h
+            .iter()
+            .skip(nrows * ncols)
+            .flatten()
+            .fold(0.0f64, |m, s| m.max(s.width as f64));
+        let outer_height = inner_height + bottom_max;
+        let row_end = |r: usize, outer_end: f64| {
+            if r + 1 < nrows {
+                row_start(r + 1)
+            } else {
+                outer_end
+            }
+        };
+
+        // Inner horizontal gutters, one segment per column.
+        for g in 1..nrows {
+            let (y0, y1) = (
+                (rows[g - 1].end - row_origin) as f64,
+                (rows[g].start - row_origin) as f64,
+            );
+            let yc = (y0 + y1) / 2.0;
+            for c in 0..ncols {
+                let Some(seg) = &grid.h[g * ncols + c] else {
+                    continue;
+                };
+                let t = (seg.width as f64).min(y1 - y0);
+                fill_collapsed_seg(
+                    scene,
+                    self.transform,
+                    seg,
+                    Rect::new(col_start(c), yc - t / 2.0, col_start(c + 1), yc + t / 2.0)
+                        .scale_from_origin(self.scale),
+                );
+            }
+        }
+
+        // Top and bottom outers, one segment per column.
+        if outer.border_top_style != BorderStyle::Hidden {
+            for c in 0..ncols {
+                let Some(seg) = &grid.h[c] else { continue };
+                fill_collapsed_seg(
+                    scene,
+                    self.transform,
+                    seg,
+                    Rect::new(col_start(c), 0.0, col_start(c + 1), seg.width as f64)
+                        .scale_from_origin(self.scale),
+                );
+            }
+        }
+        if outer.border_bottom_style != BorderStyle::Hidden {
+            for c in 0..ncols {
+                let Some(seg) = &grid.h[nrows * ncols + c] else {
+                    continue;
+                };
+                fill_collapsed_seg(
+                    scene,
+                    self.transform,
+                    seg,
+                    Rect::new(
+                        col_start(c),
+                        inner_height,
+                        col_start(c + 1),
+                        inner_height + seg.width as f64,
+                    )
+                    .scale_from_origin(self.scale),
+                );
+            }
+        }
+
+        // Inner vertical gutters, one segment per row.
+        for c in 1..ncols {
+            let (x0, x1) = (
+                (cols[c - 1].end - col_origin) as f64,
+                (cols[c].start - col_origin) as f64,
+            );
+            let xc = (x0 + x1) / 2.0;
+            for r in 0..nrows {
+                let Some(seg) = &grid.v[r * (ncols + 1) + c] else {
+                    continue;
+                };
+                let t = (seg.width as f64).min(x1 - x0);
+                fill_collapsed_seg(
+                    scene,
+                    self.transform,
+                    seg,
+                    Rect::new(
+                        xc - t / 2.0,
+                        row_start(r),
+                        xc + t / 2.0,
+                        row_end(r, inner_height),
+                    )
+                    .scale_from_origin(self.scale),
+                );
+            }
+        }
+
+        // Left and right outers, one segment per row.
+        if outer.border_left_style != BorderStyle::Hidden {
+            for r in 0..nrows {
+                let Some(seg) = &grid.v[r * (ncols + 1)] else {
+                    continue;
+                };
+                fill_collapsed_seg(
+                    scene,
+                    self.transform,
+                    seg,
+                    Rect::new(
+                        0.0,
+                        row_start(r),
+                        seg.width as f64,
+                        row_end(r, outer_height),
+                    )
+                    .scale_from_origin(self.scale),
+                );
+            }
+        }
+        if outer.border_right_style != BorderStyle::Hidden {
+            for r in 0..nrows {
+                let Some(seg) = &grid.v[r * (ncols + 1) + ncols] else {
+                    continue;
+                };
+                fill_collapsed_seg(
+                    scene,
+                    self.transform,
+                    seg,
+                    Rect::new(
+                        inner_width,
+                        row_start(r),
+                        inner_width + seg.width as f64,
+                        row_end(r, outer_height),
+                    )
+                    .scale_from_origin(self.scale),
+                );
+            }
+        }
+    }
+
+    /// Pre-#57 fallback: every collapsed border derives from the first
+    /// cell's top side. Kept for track layouts the winner grid cannot
+    /// describe (e.g. implicit tracks from overlong rowspans).
+    #[allow(clippy::too_many_arguments)]
+    fn draw_legacy_table_borders(
+        &self,
+        scene: &mut impl PaintScene,
+        border_style: &Border,
+        row_tracks: &[taffy::Line<f32>],
+        col_tracks: &[taffy::Line<f32>],
+        col_origin: f32,
+        row_origin: f32,
+        inner_width: f64,
+        inner_height: f64,
+    ) {
+        let outer_border_style = self.style.get_border();
+
         let current_color = self.style.clone_color();
         let border_color = border_style
             .border_top_color
@@ -554,8 +795,8 @@ impl ElementCx<'_, '_> {
         let border_width = border_style.border_top_width.0.to_f64_px();
 
         // Draw horizontal inner borders (the gutters between adjacent row tracks)
-        let row_origin = rows.origin();
-        for (prev, next) in rows.iter().zip(rows.iter().skip(1)) {
+        for pair in row_tracks.windows(2) {
+            let (prev, next) = (pair[0], pair[1]);
             let shape = Rect::new(
                 0.0,
                 (prev.end - row_origin) as f64,
@@ -581,8 +822,8 @@ impl ElementCx<'_, '_> {
         }
 
         // Draw vertical inner borders (the gutters between adjacent column tracks)
-        let col_origin = cols.origin();
-        for (prev, next) in cols.iter().zip(cols.iter().skip(1)) {
+        for pair in col_tracks.windows(2) {
+            let (prev, next) = (pair[0], pair[1]);
             let shape = Rect::new(
                 (prev.end - col_origin) as f64,
                 0.0,
@@ -593,16 +834,20 @@ impl ElementCx<'_, '_> {
             scene.fill(Fill::NonZero, self.transform, border_color, None, &shape);
         }
 
-        // Draw vertical outer borders
+        // Draw vertical outer borders. They run through the bottom border
+        // band (issue #46): otherwise the bottom outer corners keep a
+        // transparent notch where the bottom band ends and the verticals
+        // stop at `inner_height`.
+        let outer_height = inner_height + border_width;
         // Left border
         if outer_border_style.border_left_style != BorderStyle::Hidden {
             let shape =
-                Rect::new(0.0, 0.0, border_width, inner_height).scale_from_origin(self.scale);
+                Rect::new(0.0, 0.0, border_width, outer_height).scale_from_origin(self.scale);
             scene.fill(Fill::NonZero, self.transform, border_color, None, &shape);
         }
         // Right border
         if outer_border_style.border_right_style != BorderStyle::Hidden {
-            let shape = Rect::new(inner_width, 0.0, inner_width + border_width, inner_height)
+            let shape = Rect::new(inner_width, 0.0, inner_width + border_width, outer_height)
                 .scale_from_origin(self.scale);
             scene.fill(Fill::NonZero, self.transform, border_color, None, &shape);
         }

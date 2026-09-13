@@ -86,6 +86,7 @@ pub mod util;
 mod accessibility;
 
 pub use crate::layout::replaced::IntrinsicSizes;
+pub use crate::layout::table::{CollapsedBorder, CollapsedGrid};
 #[cfg(feature = "custom-widget")]
 pub use crate::node::Widget;
 
@@ -101,7 +102,9 @@ pub use markup5ever::{
 };
 pub use mutation_hooks::{MutationHooks, MutationRecord, NoopMutationHooks};
 pub use mutator::DocumentMutator;
-pub use node::{Attribute, DocumentData, ElementData, Node, NodeData, TextNodeData};
+pub use node::{
+    Attribute, DocumentData, ElementData, Node, NodeData, RangeInputData, TextNodeData,
+};
 pub use parley::FontContext;
 pub use scrolling::{ScrollBehavior, ScrollLogicalPosition};
 pub use tree::NodeTree;

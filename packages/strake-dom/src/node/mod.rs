@@ -18,8 +18,8 @@ pub use custom_widget::{
 };
 pub use element::{
     CanvasData, DocumentData, ElementData, ImageData, ImageResourceData, LayoutData,
-    ListItemLayout, ListItemLayoutPosition, Marker, RasterImageData, SpecialElementData,
-    SpecialElementType, Status,
+    ListItemLayout, ListItemLayoutPosition, Marker, RangeInputData, RasterImageData,
+    SpecialElementData, SpecialElementType, Status,
 };
 pub use node::*;
 pub use scrollbar::{ScrollbarColor, ScrollbarRef, ScrollbarWidth};
