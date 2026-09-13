@@ -29,6 +29,13 @@ system-fonts = ["parley/system"]
 # complex-scripts: enable dictionary-based line-breaking
 complex-scripts = ["parley/complex-scripts"]
 autofocus = []
+# Floats (issue #149): Taffy's `float_layout` is still an experimental
+# opt-in upstream, so this stays opt-in here rather than joining `default`.
+# Every path that paints app windows opts in explicitly (browser, readme,
+# strake-run headed, strake-vibey-script, strake-electron-compat, plus the
+# strake-tests and WPT harnesses), so author float/clear is never silently
+# dropped where users look at it. Other embedders (e.g. dioxus-native,
+# examples) keep today's behavior until they pin float layout themselves.
 floats = ["taffy/float_layout", "stylo_taffy/floats"]
 file-input = []
 # Overlay-scrollbar thumb interaction (drag + hover tracking). Normally
