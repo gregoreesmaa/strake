@@ -67,6 +67,10 @@ skia-softbuffer *ARGS:
 seven_guis *ARGS:
   cargo run --release --package seven_guis --bin seven_guis_native {{ARGS}}
 
+## Electron app runner (issue #110): `npm start` equivalent, headless
+run-app DIR:
+  cargo run --release --package strake-run -- {{DIR}}
+
 ## TodoMVC commands
 
 todomvc *ARGS:

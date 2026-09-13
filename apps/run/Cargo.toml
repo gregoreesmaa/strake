@@ -1,0 +1,13 @@
+[package]
+name = "strake-run"
+version = "0.0.0"
+edition = "2024"
+license.workspace = true
+publish = false
+
+[[bin]]
+name = "strake-run"
+path = "src/main.rs"
+
+[dependencies]
+strake-vibey-script = { workspace = true }

@@ -83,6 +83,33 @@ impl ShellWindow {
         options: BrowserWindowOptions,
     ) -> Self {
         let compat_id = manager.borrow_mut().create(options.clone());
+        Self::bind(manager, app, compat_id, &options)
+    }
+
+    /// Bind an empty page document to an already-created compat window
+    /// (issue #110): the app runner attaches pages to the windows the main
+    /// script created through the shim instead of opening new ones.
+    /// `Err(ShellError::Destroyed)` for unknown ids. The viewport seeds from
+    /// the window's stored options, like [`Self::open`].
+    pub fn attach(
+        manager: Rc<RefCell<WindowManager>>,
+        app: Rc<RefCell<App>>,
+        compat_id: u32,
+    ) -> Result<Self, ShellError> {
+        let options = manager
+            .borrow()
+            .get(compat_id)
+            .map(|win| win.options().clone())
+            .ok_or(ShellError::Destroyed)?;
+        Ok(Self::bind(manager, app, compat_id, &options))
+    }
+
+    fn bind(
+        manager: Rc<RefCell<WindowManager>>,
+        app: Rc<RefCell<App>>,
+        compat_id: u32,
+        options: &BrowserWindowOptions,
+    ) -> Self {
         let viewport = Viewport::new(options.width, options.height, 1.0, ColorScheme::Light);
         let config = DocumentConfig {
             viewport: Some(viewport),
@@ -627,6 +654,42 @@ mod tests {
                 .x,
             560,
             "fallback position unchanged"
+        );
+    }
+
+    #[test]
+    fn attach_binds_existing_compat_window_without_creating() {
+        // Issue #110: the app runner binds page documents to the windows the
+        // main script already created instead of opening new ones.
+        let (manager, app) = handles();
+        let id = manager.borrow_mut().create(BrowserWindowOptions {
+            width: 800,
+            height: 600,
+            title: String::from("Attached"),
+            ..Default::default()
+        });
+        let mut win = ShellWindow::attach(Rc::clone(&manager), Rc::clone(&app), id)
+            .expect("live id attaches");
+        assert_eq!(win.compat_id(), id);
+        assert_eq!(
+            manager.borrow().window_count(),
+            1,
+            "attach creates no new compat window"
+        );
+        win.load_html(FIXTURE_HTML).expect("load fixture");
+        assert!(win.has_painted());
+        assert_eq!(win.page_title().as_deref(), Some("Fixture"));
+    }
+
+    #[test]
+    fn attach_unknown_id_fails() {
+        let (manager, app) = handles();
+        assert!(
+            matches!(
+                ShellWindow::attach(manager, app, 404),
+                Err(ShellError::Destroyed)
+            ),
+            "unknown id cannot attach"
         );
     }
 }

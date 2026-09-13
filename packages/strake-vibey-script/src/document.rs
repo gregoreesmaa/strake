@@ -257,6 +257,14 @@ impl ScriptDocument {
         self.runtime.install_electron_host(&host.shared());
     }
 
+    /// Point `__dirname` / `process.cwd()` at an app dir (issue #110): the
+    /// `#110` runner calls this after [`Self::install_electron`] so the main
+    /// script's `path.join(__dirname, ...)` resolves under the app instead of
+    /// the process working directory.
+    pub fn set_node_app_root(&mut self, root: &str) {
+        self.runtime.set_node_app_root(root);
+    }
+
     /// Runtime initialisation finished: resolve `app.whenReady()`, fire `app`
     /// `ready` listeners, then drain microtasks. See
     /// [`ElectronHost`](crate::ElectronHost) for the Slice 1 contract.

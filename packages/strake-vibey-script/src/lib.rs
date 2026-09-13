@@ -29,6 +29,7 @@
 
 #![allow(clippy::collapsible_if)]
 
+mod app_boot;
 mod clock;
 mod document;
 mod dom;
@@ -40,6 +41,7 @@ mod runtime;
 mod state;
 mod timers;
 
+pub use app_boot::{AppBootReport, BootError, BootedWindow, boot_app_dir};
 pub use document::ScriptDocument;
 pub use electron::ElectronHost;
 pub use engine::ScriptEngine;
