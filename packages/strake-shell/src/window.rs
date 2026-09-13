@@ -696,6 +696,9 @@ impl<Rend: WindowRenderer> View<Rend> {
                 };
 
                 self.doc.handle_ui_event(event);
+                // Keys can move focus or otherwise restyle the document, just
+                // like pointer input (issue #70).
+                self.request_redraw();
             }
             WindowEvent::PointerEntered { /*device_id*/.. } => {}
             WindowEvent::PointerLeft { position, primary, kind, .. } => {

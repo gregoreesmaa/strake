@@ -203,6 +203,10 @@ pub struct DocumentData {
     pub element_state: ElementState,
     pub has_snapshot: bool,
     pub snapshot_handled: AtomicBool,
+    /// Last-interaction modality for `:focus-visible` (issue #70): armed by
+    /// key presses, disarmed by pointer presses. A focus change inherits
+    /// whatever is armed, matching browser behavior.
+    pub keyboard_modality: AtomicBool,
     pub display_constructed_as: StyloDisplay,
     /// Layout output state (`None` until layout first writes to this node).
     pub layout_data: Option<Box<LayoutData>>,
@@ -221,6 +225,7 @@ impl std::fmt::Debug for DocumentData {
             .field("element_state", &self.element_state)
             .field("has_snapshot", &self.has_snapshot)
             .field("snapshot_handled", &self.snapshot_handled)
+            .field("keyboard_modality", &self.keyboard_modality)
             .field("display_constructed_as", &self.display_constructed_as)
             .field("layout_data", &self.layout_data)
             .field("transform", &self.transform)
@@ -239,6 +244,7 @@ impl DocumentData {
             element_state: ElementState::empty(),
             has_snapshot: false,
             snapshot_handled: AtomicBool::new(false),
+            keyboard_modality: AtomicBool::new(false),
             display_constructed_as: StyloDisplay::Block,
             layout_data: None,
             transform: None,

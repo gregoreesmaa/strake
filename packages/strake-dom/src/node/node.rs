@@ -168,6 +168,25 @@ universal_accessors! {
 }
 
 impl Node {
+    /// Last-interaction modality for `:focus-visible`, living on the document
+    /// node (issue #70). Style matching reads this; event handling writes it.
+    pub fn keyboard_modality(&self) -> bool {
+        match &self.data {
+            NodeData::Document(data) => data.keyboard_modality.load(Ordering::Relaxed),
+            _ => panic!("`keyboard_modality` is only available on the document node"),
+        }
+    }
+
+    /// Set the `:focus-visible` modality flag on the document node.
+    pub fn set_keyboard_modality(&self, armed: bool) {
+        let NodeData::Document(data) = &self.data else {
+            panic!("`keyboard_modality` is only available on the document node");
+        };
+        data.keyboard_modality.store(armed, Ordering::Relaxed);
+    }
+}
+
+impl Node {
     /// This node's layout output state, or a shared default if layout has
     /// never written to this node.
     ///

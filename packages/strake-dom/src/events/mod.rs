@@ -8,7 +8,7 @@ use crate::util::Point;
 pub use driver::{EventDriver, EventHandler, NoopEventHandler};
 use focus::generate_focus_events;
 pub(crate) use ime::handle_ime_event;
-use keyboard::{KeyboardOrTextInputEvent, handle_key_or_input_event};
+use keyboard::{KeyboardOrTextInputEvent, handle_key_or_input_event, handle_keyup};
 pub(crate) use pointer::DragMode;
 use pointer::{handle_click, handle_pointerdown, handle_pointermove, handle_pointerup};
 use strake_traits::events::{DomEvent, DomEventData, PointerCoords, UiEvent};
@@ -98,6 +98,16 @@ pub(crate) fn handle_dom_event<F: FnMut(DomEvent)>(
     event: &mut DomEvent,
     mut dispatch_event: F,
 ) {
+    // `:focus-visible` follows the last interaction modality (issue #70): a
+    // key press arms the ring, a pointer press disarms it. Pointer movement
+    // is not an interaction. Arming here runs before Tab traversal in the
+    // KeyDown default action below, so keyboard-driven focus shows the ring.
+    match &event.data {
+        DomEventData::KeyDown(_) => doc.set_keyboard_modality(true),
+        DomEventData::PointerDown(_) => doc.set_keyboard_modality(false),
+        _ => {}
+    }
+
     let target_node_id = event.target;
     let node = &mut doc.nodes[target_node_id];
     let pos = node.absolute_position(0.0, 0.0);
@@ -219,8 +229,9 @@ pub(crate) fn handle_dom_event<F: FnMut(DomEvent)>(
         DomEventData::KeyPress(_) => {
             // Do nothing (no default action)
         }
-        DomEventData::KeyUp(_) => {
-            // Do nothing (no default action)
+        DomEventData::KeyUp(event) => {
+            // Space activates the focused control on release (issue #70).
+            handle_keyup(doc, target_node_id, event, &mut dispatch_event);
         }
         DomEventData::AppleStandardKeybinding(event) => {
             handle_key_or_input_event(
