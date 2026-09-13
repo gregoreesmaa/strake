@@ -9,7 +9,8 @@ use crate::node::{CanvasData, NodeFlags, SpecialElementData};
 use crate::stylo_device::DeviceChanges;
 use crate::util::ImageType;
 use crate::{
-    Attribute, BaseDocument, Document, ElementData, Node, NodeData, QualName, local_name, qual_name,
+    Attribute, BaseDocument, Document, ElementData, MutationRecord, Node, NodeData, QualName,
+    local_name, ns, qual_name,
 };
 use strake_traits::shell::Viewport;
 use style::Atom;
@@ -27,6 +28,18 @@ macro_rules! tag_and_attr {
 pub enum AppendTextErr {
     /// The node is not a text node
     NotTextNode,
+}
+
+/// Namespace URI for an attribute mutation record (the DOM record's
+/// `attributeNamespace`): `None` for the empty (null) namespace, `Some(uri)`
+/// otherwise. Takes the full [`QualName`] while it is still in scope so
+/// namespaced attributes (`xlink:href`, `xml:lang`) stay distinguishable.
+fn attribute_namespace(name: &QualName) -> Option<String> {
+    if name.ns == ns!() {
+        None
+    } else {
+        Some(name.ns.to_string())
+    }
 }
 
 /// Operations that happen almost immediately, but are deferred within a
@@ -196,6 +209,7 @@ impl DocumentMutator<'_> {
     // Node mutation methods
 
     pub fn set_node_text(&mut self, node_id: NodeId, value: &str) {
+        let hooks = self.doc.mutation_hooks.clone();
         let node_is_in_document = self.doc.nodes[node_id].flags.is_in_document();
         let node = &mut self.doc.nodes[node_id];
 
@@ -224,6 +238,7 @@ impl DocumentMutator<'_> {
             }
 
             self.maybe_record_node(parent_id);
+            hooks.queue_mutation_record(MutationRecord::CharacterData { target: node_id });
         }
     }
 
@@ -232,6 +247,7 @@ impl DocumentMutator<'_> {
         node_id: NodeId,
         text: &str,
     ) -> Result<(), AppendTextErr> {
+        let hooks = self.doc.mutation_hooks.clone();
         let node_is_in_document = self.doc.nodes[node_id].flags.is_in_document();
         let node = &mut self.doc.nodes[node_id];
         node.insert_damage(ALL_DAMAGE);
@@ -240,6 +256,7 @@ impl DocumentMutator<'_> {
             Some(data) => {
                 data.content += text;
                 self.mutations_occurred |= node_is_in_document;
+                hooks.queue_mutation_record(MutationRecord::CharacterData { target: node_id });
                 Ok(())
             }
             None => Err(AppendTextErr::NotTextNode),
@@ -266,6 +283,7 @@ impl DocumentMutator<'_> {
     }
 
     pub fn set_attribute(&mut self, node_id: NodeId, name: QualName, value: &str) {
+        let hooks = self.doc.mutation_hooks.clone();
         let node_is_in_document = self.doc.nodes[node_id].flags.is_in_document();
         if node_is_in_document {
             self.doc.snapshot_node(node_id);
@@ -324,6 +342,14 @@ impl DocumentMutator<'_> {
         }
 
         element.attrs.set(name.clone(), value);
+        // Every set path below funnels through here (including the widget,
+        // style, and state special-cases), so one record covers them all.
+        let attr_name: &str = name.local.as_ref();
+        hooks.queue_mutation_record(MutationRecord::Attributes {
+            target: node_id,
+            name: attr_name.to_string(),
+            namespace: attribute_namespace(&name),
+        });
 
         // Focusability is cached on the element and comes from these
         // attributes, so it has to follow a change to one of them: a widget
@@ -394,6 +420,7 @@ impl DocumentMutator<'_> {
     }
 
     pub fn clear_attribute(&mut self, node_id: NodeId, name: QualName) {
+        let hooks = self.doc.mutation_hooks.clone();
         let node_is_in_document = self.doc.nodes[node_id].flags.is_in_document();
         if node_is_in_document {
             self.doc.snapshot_node(node_id);
@@ -432,6 +459,14 @@ impl DocumentMutator<'_> {
             return;
         }
         self.mutations_occurred |= node_is_in_document;
+        // Only removals that actually drop an attribute queue a record (the
+        // spec's "remove an attribute" step); later special-cases funnel here.
+        let attr_name: &str = name.local.as_ref();
+        hooks.queue_mutation_record(MutationRecord::Attributes {
+            target: node_id,
+            name: attr_name.to_string(),
+            namespace: attribute_namespace(&name),
+        });
 
         // If element is a CustomWidget, then call attribute_changed on it
         #[cfg(feature = "custom-widget")]
@@ -492,15 +527,38 @@ impl DocumentMutator<'_> {
     }
 
     pub fn set_style_property(&mut self, node_id: NodeId, name: &str, value: &str) {
+        let hooks = self.doc.mutation_hooks.clone();
         let node_is_in_document = self.doc.nodes[node_id].flags.is_in_document();
-        self.doc.set_style_property(node_id, name, value);
+        let did_change = self.doc.set_style_property(node_id, name, value);
         self.mutations_occurred |= node_is_in_document;
+        // `CSSStyleDeclaration` edits surface as `style` attribute mutations
+        // per the DOM standard; without this record embedder
+        // `MutationObserver`s miss them entirely. No double-fire: this path
+        // mutates the parsed declaration block directly and never funnels
+        // through `set_attribute`.
+        if did_change {
+            hooks.queue_mutation_record(MutationRecord::Attributes {
+                target: node_id,
+                name: String::from("style"),
+                namespace: None,
+            });
+        }
     }
 
     pub fn remove_style_property(&mut self, node_id: NodeId, name: &str) {
+        let hooks = self.doc.mutation_hooks.clone();
         let node_is_in_document = self.doc.nodes[node_id].flags.is_in_document();
-        self.doc.remove_style_property(node_id, name);
+        let did_change = self.doc.remove_style_property(node_id, name);
         self.mutations_occurred |= node_is_in_document;
+        // Same `style`-attribute surfacing as `set_style_property`; only
+        // removals that actually drop a declaration queue a record.
+        if did_change {
+            hooks.queue_mutation_record(MutationRecord::Attributes {
+                target: node_id,
+                name: String::from("style"),
+                namespace: None,
+            });
+        }
     }
 
     pub fn set_sub_document(&mut self, node_id: NodeId, sub_document: Box<dyn Document>) {
@@ -531,6 +589,23 @@ impl DocumentMutator<'_> {
 
     /// Remove the node from it's parent but don't drop it
     pub fn remove_node(&mut self, node_id: NodeId) {
+        let hooks = self.doc.mutation_hooks.clone();
+        if let Some(parent_id) = self.detach_node_no_record(node_id) {
+            hooks.queue_mutation_record(MutationRecord::ChildList {
+                target: parent_id,
+                added: Vec::new(),
+                removed: vec![node_id],
+            });
+        }
+    }
+
+    /// Detach `node_id` from its parent (if any), running the full
+    /// remove-side bookkeeping plus the `node_removed` extension hook but
+    /// queueing no mutation record. Bulk-removal callers collect the detached
+    /// ids and emit one batched `ChildList` record themselves (the spec's
+    /// "replace all" queues a single record). Returns the former parent.
+    fn detach_node_no_record(&mut self, node_id: NodeId) -> Option<NodeId> {
+        let hooks = self.doc.mutation_hooks.clone();
         let node_is_in_document = self.doc.nodes[node_id].flags.is_in_document();
         // Process the subtree *before* severing the parent link so that
         // interaction state referencing removed nodes can retarget to the
@@ -540,15 +615,16 @@ impl DocumentMutator<'_> {
         let node = &mut self.doc.nodes[node_id];
 
         // Update child_idx values
-        if let Some(parent_id) = node.parent.take() {
-            self.mutations_occurred |= node_is_in_document;
-            let parent = &mut self.doc.nodes[parent_id];
-            parent.insert_damage(ALL_DAMAGE);
-            // Mark ancestors dirty so the style traversal visits this subtree.
-            parent.mark_ancestors_dirty();
-            parent.children.retain(|id| *id != node_id);
-            self.maybe_record_node(parent_id);
-        }
+        let parent_id = node.parent.take()?;
+        self.mutations_occurred |= node_is_in_document;
+        let parent = &mut self.doc.nodes[parent_id];
+        parent.insert_damage(ALL_DAMAGE);
+        // Mark ancestors dirty so the style traversal visits this subtree.
+        parent.mark_ancestors_dirty();
+        parent.children.retain(|id| *id != node_id);
+        self.maybe_record_node(parent_id);
+        hooks.node_removed(parent_id, node_id);
+        Some(parent_id)
     }
 
     pub fn remove_and_drop_node(&mut self, node_id: NodeId) -> Option<Node> {
@@ -562,6 +638,7 @@ impl DocumentMutator<'_> {
         node_id: NodeId,
         on_drop: &mut dyn FnMut(NodeId),
     ) -> Option<Node> {
+        let hooks = self.doc.mutation_hooks.clone();
         let node_is_in_document = self.doc.nodes[node_id].flags.is_in_document();
         self.process_removed_subtree(node_id);
 
@@ -588,12 +665,19 @@ impl DocumentMutator<'_> {
 
             parent.children.retain(|id| *id != node_id);
             self.maybe_record_node(parent_id);
+            hooks.node_removed(parent_id, node_id);
+            hooks.queue_mutation_record(MutationRecord::ChildList {
+                target: parent_id,
+                added: Vec::new(),
+                removed: vec![node_id],
+            });
         }
 
         node
     }
 
     pub fn remove_and_drop_all_children(&mut self, node_id: NodeId) {
+        let hooks = self.doc.mutation_hooks.clone();
         let parent = &mut self.doc.nodes[node_id];
         let parent_is_in_doc = parent.flags.is_in_document();
 
@@ -611,11 +695,22 @@ impl DocumentMutator<'_> {
 
         let children = mem::take(&mut parent.children);
         self.mutations_occurred |= parent_is_in_doc && !children.is_empty();
+        let removed: Vec<NodeId> = children.iter().copied().collect();
         for child_id in children {
             self.process_removed_subtree(child_id);
             let _ = self.doc.drop_node_ignoring_parent(child_id);
         }
         self.maybe_record_node(node_id);
+        if !removed.is_empty() {
+            for child_id in removed.iter().copied() {
+                hooks.node_removed(node_id, child_id);
+            }
+            hooks.queue_mutation_record(MutationRecord::ChildList {
+                target: node_id,
+                added: Vec::new(),
+                removed,
+            });
+        }
     }
 
     // Tree mutation methods
@@ -660,6 +755,7 @@ impl DocumentMutator<'_> {
         child_ids: &[NodeId],
         insert_children_fn: &dyn Fn(&mut Node, &[NodeId]),
     ) {
+        let hooks = self.doc.mutation_hooks.clone();
         let new_parent_is_in_document = self.doc.nodes[parent_id].flags.is_in_document();
         self.mutations_occurred |= new_parent_is_in_document && !child_ids.is_empty();
         // Detach the children from their old parents *before* inserting them into
@@ -693,6 +789,14 @@ impl DocumentMutator<'_> {
 
             old_parent.children.retain(|id| *id != child_id);
             self.maybe_record_node(old_parent_id);
+            // A move surfaces compositionally: detach here fires the remove
+            // side, the insert loop below fires the insert side.
+            hooks.node_removed(old_parent_id, child_id);
+            hooks.queue_mutation_record(MutationRecord::ChildList {
+                target: old_parent_id,
+                added: Vec::new(),
+                removed: vec![child_id],
+            });
         }
 
         let new_parent = &mut self.doc.nodes[parent_id];
@@ -725,6 +829,16 @@ impl DocumentMutator<'_> {
         }
 
         self.maybe_record_node(parent_id);
+        if !child_ids.is_empty() {
+            for child_id in child_ids.iter().copied() {
+                hooks.node_inserted(parent_id, child_id);
+            }
+            hooks.queue_mutation_record(MutationRecord::ChildList {
+                target: parent_id,
+                added: child_ids.to_vec(),
+                removed: Vec::new(),
+            });
+        }
     }
 
     // Tree mutation methods (that defer to other methods)
@@ -804,8 +918,24 @@ impl DocumentMutator<'_> {
     /// dropped, so that references to them remain valid.
     pub fn replace_children(&mut self, parent_id: NodeId, node_ids: &[NodeId]) {
         self.detach_all(node_ids);
+        // Batched bulk removal (the spec's "replace all" queues a single
+        // record): one `ChildList` record for every detached child, matching
+        // `remove_and_drop_all_children`. The per-child `node_removed`
+        // extension hooks still fire inside `detach_node_no_record`.
+        let mut removed = Vec::new();
         for child_id in self.child_ids(parent_id) {
-            self.remove_node(child_id);
+            self.detach_node_no_record(child_id);
+            removed.push(child_id);
+        }
+        if !removed.is_empty() {
+            self.doc
+                .mutation_hooks
+                .clone()
+                .queue_mutation_record(MutationRecord::ChildList {
+                    target: parent_id,
+                    added: Vec::new(),
+                    removed,
+                });
         }
         self.append_children(parent_id, node_ids);
     }
