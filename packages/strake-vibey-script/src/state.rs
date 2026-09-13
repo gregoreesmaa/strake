@@ -74,6 +74,11 @@ pub(crate) struct RuntimeState {
     pub window_listeners: ListenerMap,
     /// Pending timers (`setTimeout`/`setInterval`/`requestAnimationFrame`)
     pub timers: TimerQueue,
+    /// Nesting level of the timer task whose callback is currently firing
+    /// (`None` outside timer callbacks). `setTimeout`/`setInterval` scheduled
+    /// from a firing callback nest one level deeper, which drives the HTML5
+    /// minimum-delay clamp (issue #6).
+    pub timer_nesting: Option<u32>,
     /// The clock driving timer deadlines and `Date`
     pub clock: ScriptClock,
     /// Messages sent from JavaScript to the embedder via the
