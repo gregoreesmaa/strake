@@ -275,14 +275,19 @@ fn boot_inner(app_dir: &Path, prove_ipc: bool) -> Result<(AppBootReport, IpcProo
                 // The main script joins `__dirname`, which the boot sets to
                 // the app dir; still, resolve relative preload paths against
                 // the app dir defensively.
-                if let Some(preload_path) = preload.as_deref().map(Path::new).and_then(|raw| {
+                let preload_path = preload.as_deref().map(Path::new).and_then(|raw| {
                     if raw.is_file() {
                         return Some(raw.to_path_buf());
                     }
                     raw.file_name()
                         .map(|name| app_dir.join(name))
                         .filter(|path| path.is_file())
-                }) {
+                });
+                // The IPC proof needs a renderer even when the app ships no
+                // preload (issue #84 canaries without `webPreferences`):
+                // without one the first window can never prove its
+                // main/renderer pair.
+                if preload_path.is_some() || (prove_ipc && !ipc_proven) {
                     let renderer_config = DocumentConfig {
                         base_url: base_url.clone(),
                         ..Default::default()
@@ -292,25 +297,28 @@ fn boot_inner(app_dir: &Path, prove_ipc: bool) -> Result<(AppBootReport, IpcProo
                         .with_virtual_time();
                     renderer.install_electron_renderer(&host);
                     renderer.take_js_errors();
-                    match std::fs::read_to_string(&preload_path) {
-                        Ok(source) => {
-                            // Preload runs after document creation, before
-                            // page scripts (`execute_scripts` below).
-                            renderer.eval(&source);
-                            renderer.execute_scripts();
-                            window.preload_errors = renderer.take_js_errors();
-                            // Issue #84: one IPC round-trip through the
-                            // booted app's own main/renderer pair.
-                            if prove_ipc && !ipc_proven {
-                                ipc_proven = true;
-                                ipc_proof = prove_ipc_roundtrip(&mut doc, &mut renderer);
+                    if let Some(preload_path) = preload_path {
+                        match std::fs::read_to_string(&preload_path) {
+                            Ok(source) => {
+                                // Preload runs after document creation, before
+                                // page scripts (`execute_scripts` below).
+                                renderer.eval(&source);
+                                renderer.execute_scripts();
+                                window.preload_errors = renderer.take_js_errors();
+                            }
+                            Err(source) => {
+                                window.preload_errors.push(format!(
+                                    "cannot read {}: {source}",
+                                    preload_path.display()
+                                ));
                             }
                         }
-                        Err(source) => {
-                            window
-                                .preload_errors
-                                .push(format!("cannot read {}: {source}", preload_path.display()));
-                        }
+                    }
+                    // Issue #84: one IPC round-trip through the booted app's
+                    // own main/renderer pair.
+                    if prove_ipc && !ipc_proven {
+                        ipc_proven = true;
+                        ipc_proof = prove_ipc_roundtrip(&mut doc, &mut renderer);
                     }
                 }
             }

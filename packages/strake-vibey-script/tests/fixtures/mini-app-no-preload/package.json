@@ -1,0 +1,10 @@
+{
+  "name": "mini-app-no-preload",
+  "version": "1.0.0",
+  "description": "Fixture Electron app without webPreferences.preload (issue #84 proof must not depend on one)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "license": "CC0-1.0"
+}
