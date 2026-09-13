@@ -783,6 +783,7 @@ fn process_env_passes_through_host_environ() {
     doc.eval(
         "__strake_send_message('typeof:' + typeof process.env); \
          __strake_send_message('path:' + process.env.PATH); \
+         __strake_send_message('has:' + ('PATH' in process.env)); \
          __strake_send_message('missing:' + process.env.STRAKE_TEST_ENV_DEFINITELY_ABSENT); \
          process.env.STRAKE_TEST_ENV_WRITE = 'written'; \
          __strake_send_message('write:' + process.env.STRAKE_TEST_ENV_WRITE);",
@@ -797,6 +798,10 @@ fn process_env_passes_through_host_environ() {
         vec![
             "typeof:object".to_string(),
             format!("path:{path}"),
+            // Portable across OS case rules: on Windows the variable is
+            // `Path` and the snapshot Proxy answers `PATH`; elsewhere the
+            // exact-case key exists.
+            "has:true".to_string(),
             "missing:undefined".to_string(),
             "write:written".to_string(),
         ]

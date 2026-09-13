@@ -293,6 +293,58 @@ const NODE_STANDIN_BOOTSTRAP_JS: &str = r#"
             return out;
         },
     };
+    // Host environment snapshot (plain string map): `process.env.FOO`
+    // reads and feature flags (`JOPLIN_SOURCE_MAP_DISABLED`) work as in
+    // Node; writes stay on the snapshot and never touch the host. On
+    // Windows the OS (and Node) resolve names case-insensitively (`Path`
+    // answers `PATH`), so the snapshot gets a case-insensitive Proxy there
+    // while enumeration keeps the exact-case keys.
+    let processEnv = info.env || {};
+    if ((info.platform || "linux") === "win32") {
+        // Null-prototype map: a hostile `__proto__` lookup must miss
+        // instead of hitting `Object.prototype`.
+        const canonicalKey = Object.create(null);
+        for (const key of Object.keys(processEnv)) canonicalKey[key.toLowerCase()] = key;
+        processEnv = new Proxy(processEnv, {
+            get(target, prop, receiver) {
+                if (typeof prop === "string" && !(prop in target)) {
+                    const hit = canonicalKey[prop.toLowerCase()];
+                    return hit === undefined ? undefined : target[hit];
+                }
+                return target[prop];
+            },
+            set(target, prop, value) {
+                if (typeof prop === "string" && !(prop in target)) {
+                    const hit = canonicalKey[prop.toLowerCase()];
+                    if (hit !== undefined) {
+                        target[hit] = value;
+                        return true;
+                    }
+                    canonicalKey[prop.toLowerCase()] = String(prop);
+                }
+                target[prop] = value;
+                return true;
+            },
+            has(target, prop) {
+                if (typeof prop === "string" && !(prop in target)) {
+                    return canonicalKey[prop.toLowerCase()] !== undefined;
+                }
+                return prop in target;
+            },
+            deleteProperty(target, prop) {
+                if (typeof prop === "string") {
+                    const hit = canonicalKey[prop.toLowerCase()];
+                    if (hit !== undefined) {
+                        delete target[hit];
+                        delete canonicalKey[prop.toLowerCase()];
+                        return true;
+                    }
+                }
+                delete target[prop];
+                return true;
+            },
+        });
+    }
     const processModule = {
         platform: info.platform || "linux",
         versions: {
@@ -301,10 +353,7 @@ const NODE_STANDIN_BOOTSTRAP_JS: &str = r#"
             electron: versions.electron || "0.0.0-strake",
         },
         argv: [],
-        // Host environment snapshot (plain string map): `process.env.FOO`
-        // reads and feature flags (`JOPLIN_SOURCE_MAP_DISABLED`) work as in
-        // Node; writes stay on the snapshot and never touch the host.
-        env: info.env || {},
+        env: processEnv,
         cwd() {
             return info.appRoot || "/";
         },
