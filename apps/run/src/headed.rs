@@ -25,7 +25,7 @@ use strake_electron_compat::{App, AppEventKind, BrowserWindowOptions, ShellWindo
 use strake_shell::{
     StrakeApplication, StrakeShellEvent, StrakeShellProxy, WindowConfig, create_default_event_loop,
 };
-use strake_vibey_script::{boot_app_dir, paint_app_window};
+use strake_vibey_script::{boot_app_dir_with_host, paint_app_window};
 use winit::application::ApplicationHandler;
 use winit::event::{StartCause, WindowEvent};
 use winit::event_loop::ActiveEventLoop;
@@ -171,7 +171,10 @@ impl ApplicationHandler for HeadedApp {
 /// surface for `open_secs` seconds, then close it through the compat close
 /// flow. Prints the headed report; `Err` (exit 1) unless every stage holds.
 pub fn prove_headed(app_dir: &Path, open_secs: u64) -> Result<(), String> {
-    let report = boot_app_dir(app_dir).map_err(|error| format!("boot: {error}"))?;
+    // The boot host travels into headed paint (issue #147): preloads
+    // observe the booted window registry instead of a fresh empty host.
+    let (report, boot_host) =
+        boot_app_dir_with_host(app_dir).map_err(|error| format!("boot: {error}"))?;
     if !report.js_errors.is_empty() {
         return Err(format!("boot: main JS errors: {:?}", report.js_errors));
     }
@@ -260,7 +263,7 @@ pub fn prove_headed(app_dir: &Path, open_secs: u64) -> Result<(), String> {
     let painted = paint_app_window(
         &html,
         &entry_path,
-        &report.app_name,
+        &boot_host,
         window.width,
         window.height,
         preload_source.as_deref(),

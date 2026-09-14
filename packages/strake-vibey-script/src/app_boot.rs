@@ -188,7 +188,23 @@ pub fn boot_app_dir_with_ipc_proof(app_dir: &Path) -> Result<(AppBootReport, Ipc
     boot_inner(app_dir, true)
 }
 
+/// [`boot_app_dir`], plus the boot main-process host for headed paint
+/// (issue #147): a JS-clean snapshot (no context-bound registrations —
+/// see [`ElectronHost::snapshot_for_paint`]), safe to hand to
+/// [`crate::paint_app_window`].
+pub fn boot_app_dir_with_host(app_dir: &Path) -> Result<(AppBootReport, ElectronHost), BootError> {
+    let (report, _, host) = boot_inner_with_host(app_dir, false)?;
+    Ok((report, host))
+}
+
 fn boot_inner(app_dir: &Path, prove_ipc: bool) -> Result<(AppBootReport, IpcProof), BootError> {
+    boot_inner_with_host(app_dir, prove_ipc).map(|(report, proof, _)| (report, proof))
+}
+
+fn boot_inner_with_host(
+    app_dir: &Path,
+    prove_ipc: bool,
+) -> Result<(AppBootReport, IpcProof, ElectronHost), BootError> {
     let manifest_path = app_dir.join("package.json");
     if !manifest_path.is_file() {
         return Err(BootError::MissingPackageJson {
@@ -326,6 +342,10 @@ fn boot_inner(app_dir: &Path, prove_ipc: bool) -> Result<(AppBootReport, IpcProo
         windows.push(window);
     }
 
+    // The live host's JS-bound registrations die with `doc` below; hand out
+    // a JS-clean snapshot (issue #147) so headed paint can observe the
+    // booted window registry without touching dead contexts.
+    let paint_host = host.snapshot_for_paint();
     Ok((
         AppBootReport {
             app_name,
@@ -334,6 +354,7 @@ fn boot_inner(app_dir: &Path, prove_ipc: bool) -> Result<(AppBootReport, IpcProo
             js_errors,
         },
         ipc_proof,
+        paint_host,
     ))
 }
 

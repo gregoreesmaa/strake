@@ -7,7 +7,7 @@
 //! same-origin stylesheet fetched, ingested, and in the cascade (#146).
 
 use std::path::{Path, PathBuf};
-use strake_vibey_script::paint_app_window;
+use strake_vibey_script::{ElectronHost, paint_app_window};
 
 fn fixture_dir() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/headed-paint-app")
@@ -21,7 +21,7 @@ fn paint_runs_preload_then_page_scripts_and_applies_linked_css() {
     let painted = paint_app_window(
         &html,
         &dir.join("index.html"),
-        "paint-fixture",
+        &ElectronHost::new("paint-fixture", "0.0.0"),
         800,
         600,
         Some(&preload),
@@ -76,7 +76,7 @@ fn paint_without_preload_or_css_reports_empty_sets() {
         "<!DOCTYPE html><html><head><title>Bare</title></head>\
          <body><p>bare</p></body></html>",
         &entry,
-        "bare",
+        &ElectronHost::new("bare", "0.0.0"),
         800,
         600,
         None,
@@ -114,8 +114,15 @@ fn paint_applies_css_floats_side_by_side() {
         <div id="right" style="float:right; width:150px; height:50px;"></div>
         </div>
         </body></html>"#;
-    let painted = paint_app_window(html, &entry, "float-fixture", 800, 600, None)
-        .expect("float fixture paints");
+    let painted = paint_app_window(
+        html,
+        &entry,
+        &ElectronHost::new("float-fixture", "0.0.0"),
+        800,
+        600,
+        None,
+    )
+    .expect("float fixture paints");
     assert!(
         painted.js_errors.is_empty(),
         "no scripts, no errors, got {:?}",
@@ -258,8 +265,15 @@ fn paint_fetches_remote_webfonts_hermetically() {
          <link rel=\"stylesheet\" href=\"{css_url}\"></head>\
          <body><p>remote-font-body</p></body></html>"
     );
-    let painted = paint_app_window(&html, &entry, "remote-font-fixture", 800, 600, None)
-        .expect("remote-font page paints");
+    let painted = paint_app_window(
+        &html,
+        &entry,
+        &ElectronHost::new("remote-font-fixture", "0.0.0"),
+        800,
+        600,
+        None,
+    )
+    .expect("remote-font page paints");
     assert!(
         painted.js_errors.is_empty(),
         "no scripts, no errors, got {:?}",
@@ -300,8 +314,15 @@ fn paint_degrades_gracefully_when_remote_fonts_unreachable() {
          <link rel=\"stylesheet\" href=\"{css_url}\"></head>\
          <body><p>offline-body</p></body></html>"
     );
-    let painted = paint_app_window(&html, &entry, "offline-font-fixture", 800, 600, None)
-        .expect("unreachable fonts must not fail the paint");
+    let painted = paint_app_window(
+        &html,
+        &entry,
+        &ElectronHost::new("offline-font-fixture", "0.0.0"),
+        800,
+        600,
+        None,
+    )
+    .expect("unreachable fonts must not fail the paint");
     assert!(
         painted.js_errors.is_empty(),
         "no scripts, no errors, got {:?}",
@@ -328,7 +349,7 @@ fn paint_reports_preload_errors_as_data() {
     let painted = paint_app_window(
         &html,
         &dir.join("index.html"),
-        "paint-fixture",
+        &ElectronHost::new("paint-fixture", "0.0.0"),
         800,
         600,
         Some("throw new Error('broken-preload');"),
@@ -343,4 +364,69 @@ fn paint_reports_preload_errors_as_data() {
         painted.js_errors
     );
     assert!(painted.had_preload);
+}
+
+/// Issue #147: headed paint snapshots the boot host's main-process state.
+/// A preload observing `getAllWindows()` paints the booted count — not the
+/// zero a fresh host sees — while the runtime version stamps stay the
+/// `0.0.0-strake` fallbacks (app identity never leaks into
+/// `process.versions`). The boot host itself is untouched by the paint.
+#[test]
+fn paint_observes_boot_window_registry() {
+    use strake_dom::DocumentConfig;
+    use strake_vibey_script::{ElectronHost, ScriptDocument};
+    // Boot host as `main.js` leaves it: one live window with an entry.
+    let boot = ElectronHost::new("PaintParity", "2.3.4");
+    let mut main =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    main.install_electron(&boot);
+    assert!(
+        main.take_js_errors().is_empty(),
+        "boot bootstrap must install cleanly"
+    );
+    main.eval(
+        "const { BrowserWindow } = require('electron'); \
+         const win = new BrowserWindow({ width: 800, height: 600 }); \
+         win.loadFile('index.html');",
+    );
+    assert!(
+        main.take_js_errors().is_empty(),
+        "boot main script must not throw"
+    );
+    main.mark_electron_ready();
+    assert_eq!(boot.window_count(), 1, "boot leaves one live window");
+    // The entry file need not exist (no links to resolve).
+    let entry = std::env::temp_dir().join("strake-paint-parity-index.html");
+    let painted = paint_app_window(
+        "<!DOCTYPE html><html><head><title>Parity</title></head>\
+         <body><div id=\"w\"></div></body></html>",
+        &entry,
+        &boot,
+        800,
+        600,
+        Some(
+            "document.getElementById('w').textContent = \
+             require('electron').BrowserWindow.getAllWindows().length + \
+             '/' + process.versions.electron;",
+        ),
+    )
+    .expect("parity app paints");
+    assert!(
+        painted.js_errors.is_empty(),
+        "parity preload must not throw, got {:?}",
+        painted.js_errors
+    );
+    assert_eq!(
+        painted.body_text, "1/0.0.0-strake",
+        "preload paints the booted window count",
+    );
+    // The paint snapshotted; it did not consume boot state.
+    assert_eq!(boot.window_count(), 1, "boot windows survive the paint");
+    assert_eq!(
+        boot.pending_ipc_count(),
+        0,
+        "paint queues no IPC on the boot host"
+    );
 }
