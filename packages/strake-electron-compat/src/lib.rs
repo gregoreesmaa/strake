@@ -42,8 +42,10 @@ mod notification;
 mod os_shell;
 mod permissions;
 mod power;
+mod protocol;
 mod safe_storage;
 mod screen;
+mod session;
 mod shell;
 mod updater;
 mod web_storage;
@@ -77,8 +79,10 @@ pub use permissions::{Decision, Enforcer, NetScope, PathScope, PermissionManifes
 pub use power::{
     PowerEvent, PowerHub, PowerListenerId, PowerMonitor, PowerSaveBlocker, PowerSaveBlockerKind,
 };
+pub use protocol::{PrivilegedScheme, ProtocolRegistry};
 pub use safe_storage::{KeychainBackend, RecordingKeychain, SafeStorage, SafeStorageError};
 pub use screen::{Display, Screen};
+pub use session::{Session, SessionError, SessionId, SessionRegistry};
 pub use shell::{FileOnlyNetProvider, ShellError, ShellWindow};
 pub use updater::{Artifact, ManifestError, UpdateManifest, Version};
 pub use web_storage::{

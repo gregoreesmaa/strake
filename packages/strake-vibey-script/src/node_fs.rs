@@ -39,6 +39,365 @@ pub(crate) enum FsAccess {
     Write,
 }
 
+/// One open file descriptor: virtual fds (allocated from 100 up, so they
+/// never collide with stdio) map to host files here. Rights are fixed at
+/// `open` — later reads/writes trust the table, POSIX-style — so the
+/// capability check happens once, on the canonical path, at open time.
+pub(crate) struct OpenFd {
+    file: std::fs::File,
+    append: bool,
+}
+
+/// First virtual fd: clearly outside stdio (0/1/2), small enough to read
+/// naturally in logs and snapshots.
+pub(crate) const FIRST_FD: u32 = 100;
+
+impl OpenFd {
+    pub(crate) fn new(file: std::fs::File, append: bool) -> Self {
+        Self { file, append }
+    }
+
+    pub(crate) fn file_mut(&mut self) -> &mut std::fs::File {
+        &mut self.file
+    }
+
+    pub(crate) fn appends(&self) -> bool {
+        self.append
+    }
+}
+
+/// Parsed `open`/`openSync` flags: string (`'r'`, `'w+'`, …) or numeric
+/// `O_*` bitmask. Only the access/creation subset is modeled; exotic bits
+/// (`O_SYNC`, `O_DIRECT`, …) are accepted and ignored — all host IO is
+/// synchronous and unbuffered passthrough anyway.
+struct OpenFlags {
+    read: bool,
+    write: bool,
+    create: bool,
+    exclusive: bool,
+    truncate: bool,
+    append: bool,
+}
+
+#[cfg(target_os = "linux")]
+mod open_bits {
+    pub(crate) const CREAT: u32 = 64;
+    pub(crate) const EXCL: u32 = 128;
+    pub(crate) const TRUNC: u32 = 512;
+    pub(crate) const APPEND: u32 = 1024;
+}
+
+#[cfg(target_os = "macos")]
+mod open_bits {
+    pub(crate) const CREAT: u32 = 512;
+    pub(crate) const EXCL: u32 = 2048;
+    pub(crate) const TRUNC: u32 = 1024;
+    pub(crate) const APPEND: u32 = 8;
+}
+
+#[cfg(target_os = "windows")]
+mod open_bits {
+    pub(crate) const CREAT: u32 = 256;
+    pub(crate) const EXCL: u32 = 1024;
+    pub(crate) const TRUNC: u32 = 512;
+    pub(crate) const APPEND: u32 = 8;
+}
+
+// Other platforms: access-mode bits (0/1/2) are universal; creation bits
+// degrade to create-without-exclusive. These must match the JS `constants`
+// table in `NODE_STANDIN_BOOTSTRAP_JS`.
+#[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
+mod open_bits {
+    pub(crate) const CREAT: u32 = 0;
+    pub(crate) const EXCL: u32 = 0;
+    pub(crate) const TRUNC: u32 = 0;
+    pub(crate) const APPEND: u32 = 0;
+}
+
+fn parse_open_flags(value: &JsValue) -> JsResult<OpenFlags> {
+    if let Some(number) = value.as_number() {
+        // `as u32` saturates negatives to 0 (`O_RDONLY`): Node rejects
+        // those with `EINVAL`, so check the float first.
+        if number < 0.0 {
+            return Err(JsError::from(
+                JsNativeError::typ().with_message("invalid open flags"),
+            ));
+        }
+        let bits = number as u32;
+        return Ok(OpenFlags {
+            read: bits & 0b11 != 1,
+            write: bits & 0b11 != 0,
+            create: bits & open_bits::CREAT != 0,
+            exclusive: bits & open_bits::EXCL != 0,
+            truncate: bits & open_bits::TRUNC != 0,
+            append: bits & open_bits::APPEND != 0,
+        });
+    }
+    if let Some(flag) = value.as_string() {
+        let spelled = flag.to_std_string_escaped();
+        let parsed = match spelled.as_str() {
+            "r" => (true, false, false, false, false, false),
+            "r+" | "rs" | "rs+" => (true, true, false, false, false, false),
+            "w" => (false, true, true, false, true, false),
+            "wx" => (false, true, true, true, false, false),
+            "w+" => (true, true, true, false, true, false),
+            "wx+" => (true, true, true, true, false, false),
+            "a" => (false, true, true, false, false, true),
+            "ax" => (false, true, true, true, false, true),
+            "a+" => (true, true, true, false, false, true),
+            "ax+" => (true, true, true, true, false, true),
+            _ => {
+                return Err(JsError::from(
+                    JsNativeError::typ()
+                        .with_message(format!("unknown file open flag '{spelled}'")),
+                ));
+            }
+        };
+        return Ok(OpenFlags {
+            read: parsed.0,
+            write: parsed.1,
+            create: parsed.2,
+            exclusive: parsed.3,
+            truncate: parsed.4,
+            append: parsed.5,
+        });
+    }
+    Err(JsError::from(
+        JsNativeError::typ().with_message("flags must be a string or number"),
+    ))
+}
+
+fn ebadf_error(context: &mut Context, syscall: &'static str) -> JsError {
+    node_error(
+        context,
+        "EBADF",
+        -9,
+        syscall,
+        "",
+        format!("EBADF: bad file descriptor, {syscall}"),
+    )
+}
+
+fn fd_arg(args: &[JsValue], what: &str) -> JsResult<u32> {
+    args.first()
+        .and_then(JsValue::as_number)
+        .map(|fd| fd as u32)
+        .ok_or_else(|| {
+            JsError::from(JsNativeError::typ().with_message(format!("{what} requires an fd")))
+        })
+}
+
+/// `__strake_fs_open(path, flags, mode)`: capability-checked once, on the
+/// canonical path, per direction (read grant for readers, write grant for
+/// writers, both for `O_RDWR`); later fd ops trust the table, POSIX-style.
+pub(crate) fn fs_open(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let raw = fs_path_arg(args, "__strake_fs_open", context)?;
+    let flags = args
+        .get(1)
+        .map(parse_open_flags)
+        .transpose()?
+        .unwrap_or(OpenFlags {
+            read: true,
+            write: false,
+            create: false,
+            exclusive: false,
+            truncate: false,
+            append: false,
+        });
+    let mode = args
+        .get(2)
+        .and_then(JsValue::as_number)
+        .unwrap_or(0o666 as f64) as u32;
+    let joined = if Path::new(&raw).is_absolute() {
+        PathBuf::from(&raw)
+    } else {
+        app_root_dir(context).join(&raw)
+    };
+    let (anchor, rest) = nearest_existing(&joined);
+    let canonical = std::fs::canonicalize(&anchor)
+        .map_err(|_| deny_to_error(context, ScopedDeny::Missing, "open", &raw))?;
+    let candidate = rest.map_or(canonical.clone(), |tail| canonical.join(tail));
+    let shared = electron_state(context).map_err(|_| denied_error(context, "open", &raw))?;
+    let spelling = normalize(&candidate);
+    if flags.read
+        && !shared.with_permissions(|permissions| permissions.check_fs_read(&spelling).is_allow())
+    {
+        return Err(denied_error(context, "open", &raw));
+    }
+    if (flags.write || flags.append)
+        && !shared.with_permissions(|permissions| permissions.check_fs_write(&spelling).is_allow())
+    {
+        return Err(denied_error(context, "open", &raw));
+    }
+    let mut options = std::fs::OpenOptions::new();
+    options
+        .read(flags.read)
+        .write(flags.write || flags.append)
+        .append(flags.append)
+        .create(flags.create || flags.exclusive)
+        .create_new(flags.exclusive)
+        .truncate(flags.truncate && !flags.append);
+    #[cfg(unix)]
+    if flags.create || flags.exclusive {
+        use std::os::unix::fs::OpenOptionsExt as _;
+        options.mode(mode);
+    }
+    #[cfg(not(unix))]
+    let _ = mode;
+    let file = options
+        .open(&candidate)
+        .map_err(|error| io_error(context, &error, "open", &raw))?;
+    Ok(JsValue::from(
+        shared.fs_fd_open(OpenFd::new(file, flags.append)),
+    ))
+}
+
+/// `__strake_fs_close(fd)`: unknown fds read `EBADF`, as in Node.
+pub(crate) fn fs_close(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let fd = fd_arg(args, "__strake_fs_close")?;
+    let shared = electron_state(context).map_err(|_| ebadf_error(context, "close"))?;
+    if !shared.fs_fd_close(fd) {
+        return Err(ebadf_error(context, "close"));
+    }
+    Ok(JsValue::undefined())
+}
+
+/// Shared range validation for fd reads/writes: `offset`/`length` default
+/// to the whole tail and must stay inside the byte source.
+fn fd_range(total: usize, offset: Option<f64>, length: Option<f64>) -> JsResult<(usize, usize)> {
+    let total_f = total as f64;
+    let offset_f = offset.unwrap_or(0.0).max(0.0);
+    let length_f = length.unwrap_or(total_f - offset_f).max(0.0);
+    if !(0.0..=total_f).contains(&offset_f) || !(0.0..=total_f - offset_f).contains(&length_f) {
+        return Err(JsError::from(
+            JsNativeError::range().with_message("offset/length out of range"),
+        ));
+    }
+    Ok((offset_f as usize, length_f as usize))
+}
+
+fn position_arg(args: &[JsValue], index: usize) -> Option<u64> {
+    args.get(index)
+        .and_then(JsValue::as_number)
+        .filter(|position| *position >= 0.0)
+        .map(|position| position as u64)
+}
+
+/// `__strake_fs_read_fd(fd, buffer, offset, length, position)`: bytes read
+/// into the caller's `Uint8Array`/`Buffer`. A numeric `position` reads
+/// there without moving the cursor (pread semantics); null reads at the
+/// cursor and advances it.
+pub(crate) fn fs_read_fd(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let fd = fd_arg(args, "__strake_fs_read_fd")?;
+    let view = args
+        .get(1)
+        .and_then(JsValue::as_object)
+        .and_then(|obj| JsUint8Array::from_object(obj).ok())
+        .ok_or_else(|| {
+            JsError::from(
+                JsNativeError::typ().with_message("buffer must be a Uint8Array or Buffer"),
+            )
+        })?;
+    let view_len = view.length(context)?;
+    let (offset, length) = fd_range(
+        view_len,
+        args.get(2).and_then(JsValue::as_number),
+        args.get(3).and_then(JsValue::as_number),
+    )?;
+    let position = position_arg(args, 4);
+    let shared = electron_state(context).map_err(|_| ebadf_error(context, "read"))?;
+    let outcome = shared.fs_fd_with(fd, |handle| {
+        use std::io::{Read as _, Seek as _, SeekFrom};
+        let file = handle.file_mut();
+        // Save/restore around positioned reads so the cursor never moves.
+        let saved = position.map(|_| file.stream_position());
+        if let Some(at) = position {
+            file.seek(SeekFrom::Start(at))?;
+        }
+        let mut chunk = vec![0u8; length];
+        let mut read = 0usize;
+        while read < length {
+            match file.read(&mut chunk[read..]) {
+                Ok(0) => break,
+                Ok(n) => read += n,
+                Err(error) => {
+                    if let Ok(Some(cursor)) = saved.transpose() {
+                        let _ = file.seek(SeekFrom::Start(cursor));
+                    }
+                    return Err(error);
+                }
+            }
+        }
+        if let Ok(Some(cursor)) = saved.transpose() {
+            file.seek(SeekFrom::Start(cursor))?;
+        }
+        Ok((read, chunk))
+    });
+    let (read, chunk) = match outcome {
+        None => return Err(ebadf_error(context, "read")),
+        Some(Err(error)) => return Err(io_error(context, &error, "read", "")),
+        Some(Ok(done)) => done,
+    };
+    if read > 0 {
+        let staged = JsUint8Array::from_iter(chunk.into_iter().take(read), context)?;
+        view.set_values(JsValue::from(staged), Some(offset as u64), context)?;
+    }
+    Ok(JsValue::from(read as f64))
+}
+
+/// `__strake_fs_write_fd(fd, bytes, offset, length, position)`: bytes
+/// written, pretty much the write end of [`fs_read_fd`]. Append-mode fds
+/// always land at the end, ignoring `position`.
+pub(crate) fn fs_write_fd(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let fd = fd_arg(args, "__strake_fs_write_fd")?;
+    let data = args
+        .get(1)
+        .map(|value| write_bytes_arg(value, context))
+        .unwrap_or_else(|| {
+            Err(JsError::from(
+                JsNativeError::typ().with_message("__strake_fs_write_fd requires data"),
+            ))
+        })?;
+    let (offset, length) = fd_range(
+        data.len(),
+        args.get(2).and_then(JsValue::as_number),
+        args.get(3).and_then(JsValue::as_number),
+    )?;
+    let position = position_arg(args, 4);
+    let shared = electron_state(context).map_err(|_| ebadf_error(context, "write"))?;
+    let outcome = shared.fs_fd_with(fd, |handle| {
+        use std::io::{Seek as _, SeekFrom, Write as _};
+        let appends = handle.appends();
+        let file = handle.file_mut();
+        if appends {
+            file.seek(SeekFrom::End(0))?;
+        } else if let Some(at) = position {
+            let saved = file.stream_position().ok();
+            file.seek(SeekFrom::Start(at))?;
+            let result = file.write_all(&data[offset..offset + length]);
+            if let Some(cursor) = saved {
+                let _ = file.seek(SeekFrom::Start(cursor));
+            }
+            return result.map(|()| length);
+        }
+        file.write_all(&data[offset..offset + length])
+            .map(|()| length)
+    });
+    match outcome {
+        None => Err(ebadf_error(context, "write")),
+        Some(Err(error)) => Err(io_error(context, &error, "write", "")),
+        Some(Ok(done)) => Ok(JsValue::from(done as f64)),
+    }
+}
+
 /// Outcome of [`scoped_path`] that is not a usable path.
 enum ScopedDeny {
     /// Outside the grant (or the grant is absent): callers report `EACCES`.
@@ -48,8 +407,12 @@ enum ScopedDeny {
 }
 
 /// Resolve `raw` to a host path the caller may touch: join relative paths
-/// onto the app root, lexically check the grant, then canonicalize and
-/// re-check so symlink redirects cannot escape the grant.
+/// onto the app root, resolve symlinks through the nearest existing
+/// ancestor, then check the grant against the canonical location — so a
+/// `/var/...` spelling reaches a `/private/...` grant, while `..` escapes
+/// and scoped-symlink redirects still read `EACCES`. A granted-but-absent
+/// leaf stays `Ok`: the operation itself reports `ENOENT`, so reads keep
+/// Node's error codes while denials keep `EACCES`.
 fn scoped_path(context: &mut Context, raw: &str, access: FsAccess) -> Result<PathBuf, ScopedDeny> {
     let joined = if Path::new(raw).is_absolute() {
         PathBuf::from(raw)
@@ -57,25 +420,31 @@ fn scoped_path(context: &mut Context, raw: &str, access: FsAccess) -> Result<Pat
         app_root_dir(context).join(raw)
     };
     let shared = electron_state(context).map_err(|_| ScopedDeny::Denied)?;
-    let allowed = |path: &str| match access {
-        FsAccess::Read => {
-            shared.with_permissions(|permissions| permissions.check_fs_read(path).is_allow())
-        }
-        FsAccess::Write => {
-            shared.with_permissions(|permissions| permissions.check_fs_write(path).is_allow())
+    let allowed = |path: &Path| {
+        let spelling = normalize(path);
+        match access {
+            FsAccess::Read => shared
+                .with_permissions(|permissions| permissions.check_fs_read(&spelling).is_allow()),
+            FsAccess::Write => shared
+                .with_permissions(|permissions| permissions.check_fs_write(&spelling).is_allow()),
         }
     };
-    if !allowed(&normalize(&joined)) {
-        return Err(ScopedDeny::Denied);
-    }
     // Canonicalize the nearest existing ancestor (the leaf itself may be a
-    // creation target), then re-check the real location. A granted-but-absent
-    // leaf stays `Ok`: the operation itself reports `ENOENT`, so reads keep
-    // Node's error codes while denials keep `EACCES`.
+    // creation target). When nothing canonicalizes — no existing anchor,
+    // or a race removed it — fall back to the lexical spelling so
+    // out-of-grant paths still read `EACCES` instead of `ENOENT`.
     let (anchor, rest) = nearest_existing(&joined);
-    let canonical = std::fs::canonicalize(&anchor).map_err(|_| ScopedDeny::Missing)?;
-    let candidate = rest.map_or(canonical.clone(), |tail| canonical.join(tail));
-    if !allowed(&normalize(&candidate)) {
+    let candidate = match std::fs::canonicalize(&anchor) {
+        Ok(canonical) => rest.map_or(canonical.clone(), |tail| canonical.join(tail)),
+        Err(_) => {
+            return Err(if allowed(&joined) {
+                ScopedDeny::Missing
+            } else {
+                ScopedDeny::Denied
+            });
+        }
+    };
+    if !allowed(&candidate) {
         return Err(ScopedDeny::Denied);
     }
     Ok(candidate)
@@ -122,7 +491,7 @@ fn normalize(path: &Path) -> String {
 /// `__strake_node_error` factory the fs bootstrap installs; falls back to a
 /// plain error when the factory is absent (renderer contexts never install
 /// the fs shell, and these primitives are main-only by registration).
-fn node_error(
+pub(crate) fn node_error(
     context: &mut Context,
     code: &str,
     errno: i32,
@@ -485,6 +854,75 @@ pub(crate) fn fs_copy(_: &JsValue, args: &[JsValue], context: &mut Context) -> J
     let to = scoped_path(context, &to_raw, FsAccess::Write)
         .map_err(|_| denied_error(context, "copyfile", &to_raw))?;
     std::fs::copy(&from, &to).map_err(|error| io_error(context, &error, "copyfile", &from_raw))?;
+    Ok(JsValue::undefined())
+}
+
+/// `__strake_fs_readlink(path)`: link target (issue #155 — `graceful-fs`
+/// touches `fs.promises.readlink` at import time).
+pub(crate) fn fs_readlink(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let raw = fs_path_arg(args, "__strake_fs_readlink", context)?;
+    // `readlink` names the link itself: scope the parent (which
+    // canonicalizes safely — an escaping parent still reads denied) and keep
+    // the leaf lexical, since `scoped_path` would resolve the very link
+    // being read. Naming an outside target never opens it.
+    let path = match Path::new(&raw).file_name() {
+        Some(leaf) => {
+            let parent_raw = Path::new(&raw)
+                .parent()
+                .map(|parent| parent.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            let parent = scoped_path(context, &parent_raw, FsAccess::Read)
+                .map_err(|deny| deny_to_error(context, deny, "readlink", &raw))?;
+            parent.join(leaf)
+        }
+        None => scoped_path(context, &raw, FsAccess::Read)
+            .map_err(|deny| deny_to_error(context, deny, "readlink", &raw))?,
+    };
+    let target =
+        std::fs::read_link(&path).map_err(|error| io_error(context, &error, "readlink", &raw))?;
+    Ok(JsValue::from(JsString::from(
+        target.to_string_lossy().into_owned(),
+    )))
+}
+
+/// `__strake_fs_utimes(path, atimeSecs, mtimeSecs)` (issue #155): Joplin's
+/// lock heartbeat leans on mtime. `filetime` sets both stamps — what `std`
+/// cannot do (atime included, no silent half-write).
+pub(crate) fn fs_utimes(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    fn secs_arg(args: &[JsValue], index: usize, name: &str) -> JsResult<(i64, u32)> {
+        let value = args
+            .get(index)
+            .and_then(|arg| arg.as_number())
+            .ok_or_else(|| {
+                JsError::from(
+                    JsNativeError::typ()
+                        .with_message(format!("The \"{name}\" argument must be of type number")),
+                )
+            })?;
+        let whole = value.floor();
+        let mut nanos = ((value - whole) * 1_000_000_000.0).round() as u32;
+        let mut secs = whole as i64;
+        if nanos >= 1_000_000_000 {
+            secs += 1;
+            nanos -= 1_000_000_000;
+        }
+        Ok((secs, nanos))
+    }
+    let raw = fs_path_arg(args, "__strake_fs_utimes", context)?;
+    let (atime_secs, atime_nanos) = secs_arg(args, 1, "atime")?;
+    let (mtime_secs, mtime_nanos) = secs_arg(args, 2, "mtime")?;
+    let path = scoped_path(context, &raw, FsAccess::Write)
+        .map_err(|_| denied_error(context, "utimes", &raw))?;
+    filetime::set_file_times(
+        &path,
+        filetime::FileTime::from_unix_time(atime_secs, atime_nanos),
+        filetime::FileTime::from_unix_time(mtime_secs, mtime_nanos),
+    )
+    .map_err(|error| io_error(context, &error, "utimes", &raw))?;
     Ok(JsValue::undefined())
 }
 

@@ -358,19 +358,17 @@ mod tests {
     #[test]
     fn validation_rejects_bad_templates() {
         assert!(
-            matches!(
-                MenuTemplate::build(vec![
-                    MenuItemTemplate {
-                        id: None,
-                        ..MenuItemTemplate::labeled("A")
-                    },
-                    MenuItemTemplate {
-                        id: None,
-                        ..MenuItemTemplate::labeled("B")
-                    },
-                ]),
-                Ok(_)
-            ),
+            MenuTemplate::build(vec![
+                MenuItemTemplate {
+                    id: None,
+                    ..MenuItemTemplate::labeled("A")
+                },
+                MenuItemTemplate {
+                    id: None,
+                    ..MenuItemTemplate::labeled("B")
+                },
+            ])
+            .is_ok(),
             "id-less items are fine"
         );
         let dup = || MenuItemTemplate {
