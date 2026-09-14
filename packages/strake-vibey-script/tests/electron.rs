@@ -84,11 +84,13 @@ fn quickstart_main_js_reaches_ready() {
 #[test]
 fn unknown_module_throws_node_style() {
     let (mut doc, _host) = main_doc();
-    doc.eval("require('node:fs');");
+    // Issue #154 serves `node:fs` for real now, so the unknown-module probe
+    // uses a core that stays unimplemented (`node:worker_threads`).
+    doc.eval("require('node:worker_threads');");
     let errors = doc.take_js_errors();
     assert_eq!(errors.len(), 1, "expected one throw, got {errors:?}");
     assert!(
-        errors[0].contains("Cannot find module 'node:fs'"),
+        errors[0].contains("Cannot find module 'node:worker_threads'"),
         "unexpected error: {}",
         errors[0]
     );
@@ -1000,7 +1002,8 @@ fn require_bare_resolves_node_modules_and_names_missing() {
 }
 
 /// Core modules and native addons never mis-resolve via the file loader
-/// (issue #151): `fs` stays a named miss and `.node` files are refused.
+/// (issue #151): `fs` resolves to the real core (issue #154), never to a
+/// `node_modules` shadow, and `.node` files are refused.
 #[test]
 fn require_never_misresolves_core_or_native() {
     let root = loader_temp_dir("core");
@@ -1012,14 +1015,16 @@ fn require_never_misresolves_core_or_native() {
     std::fs::write(root.join("evil.node"), "not a real addon").expect("node stub writes");
 
     let mut doc = loader_doc_at(&root);
-    doc.eval("require('fs');");
-    let errors = doc.take_js_errors();
-    assert_eq!(errors.len(), 1, "core fs throws, got {errors:?}");
-    assert!(
-        errors[0].contains("Cannot find module 'fs'"),
-        "core error names the specifier, got {}",
-        errors[0]
+    doc.eval(
+        "const coreFs = require('fs'); \
+         __strake_send_message('shadow:' + (coreFs === 'shadow') + '/' + (typeof coreFs.readFileSync));",
     );
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "core fs resolves past the shadow, got {errors:?}"
+    );
+    assert_eq!(doc.take_messages(), vec!["shadow:false/function"]);
     doc.eval("require('./evil.node');");
     let errors = doc.take_js_errors();
     assert_eq!(errors.len(), 1, ".node refuses, got {errors:?}");
@@ -1099,4 +1104,369 @@ fn keyword_arrow_params_evaluate_via_fallback() {
         "keyword arrow params must evaluate without throwing, got {errors:?}"
     );
     assert_eq!(doc.take_messages(), vec!["kw:42/42"]);
+}
+
+/// Issue #154 helpers: hermetic temp dir with a canonical path (macOS
+/// symlinks `/var` to `/private/var`; an uncanonicalized temp dir would
+/// escape a grant scope built from its own spelling).
+fn fs_temp_dir(name: &str) -> std::path::PathBuf {
+    let dir = loader_temp_dir(name);
+    std::fs::canonicalize(&dir).unwrap_or(dir)
+}
+
+/// Forward-slash spelling of a path for embedding in JS source (Windows
+/// accepts `/` separators; a raw `\` would parse as a JS escape).
+fn js_path(path: &std::path::Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+/// A main-process document whose host grants fs read+write under `root`
+/// (issue #154): the embedder-approved capability manifest in action.
+fn fs_doc_at(root: &std::path::Path) -> ScriptDocument {
+    use strake_electron_compat::{PathScope, PermissionManifest};
+    let scope = format!("{}/*", js_path(root));
+    fs_doc_with(
+        PermissionManifest {
+            fs_read: vec![PathScope::new(&scope)],
+            fs_write: vec![PathScope::new(&scope)],
+            ..Default::default()
+        },
+        root,
+    )
+}
+
+/// A main-process document with an explicit permission manifest.
+fn fs_doc_with(
+    manifest: strake_electron_compat::PermissionManifest,
+    root: &std::path::Path,
+) -> ScriptDocument {
+    let host = ElectronHost::new("FsApp", "1.0.0").with_permissions(manifest);
+    let mut doc =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    doc.install_electron(&host);
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "electron bootstrap must install cleanly"
+    );
+    doc.set_node_app_root(&js_path(root));
+    doc
+}
+
+/// Issue #154: with the default deny-by-default host, `require('fs')`
+/// resolves but every operation is refused: reads/writes throw `EACCES`,
+/// and `existsSync` reports `false` even for files that exist (no oracle).
+#[test]
+fn node_fs_denied_without_grant() {
+    let root = fs_temp_dir("denied");
+    std::fs::write(root.join("secret.txt"), "TOP SECRET").expect("secret writes");
+    let probe = std::env::temp_dir().join("strake-denied-probe.txt");
+    let _ = std::fs::remove_file(&probe);
+    let mut doc = loader_doc_at(&root);
+    let script = "const fs = require('fs'); \
+         __strake_send_message('typeof:' + typeof fs.readFileSync); \
+         let readCode = 'none'; \
+         try { fs.readFileSync('SECRET_PLACEHOLDER'); } catch (e) { readCode = e.code; } \
+         __strake_send_message('read:' + readCode); \
+         let writeCode = 'none'; \
+         try { fs.writeFileSync('PROBE_PLACEHOLDER', 'x'); } catch (e) { writeCode = e.code; } \
+         __strake_send_message('write:' + writeCode); \
+         __strake_send_message('exists:' + fs.existsSync('SECRET_PLACEHOLDER'));"
+        .replace("SECRET_PLACEHOLDER", &js_path(&root.join("secret.txt")))
+        .replace("PROBE_PLACEHOLDER", &js_path(&probe));
+    doc.eval(&script);
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "denied fs calls must throw catchable errors, got {errors:?}"
+    );
+    assert_eq!(
+        doc.take_messages(),
+        vec![
+            "typeof:function",
+            "read:EACCES",
+            "write:EACCES",
+            "exists:false",
+        ]
+    );
+    assert!(
+        !probe.exists(),
+        "a denied write must not touch the host filesystem"
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Issue #154: with a grant covering the app dir, the sync subset is real
+/// (exists/access, recursive mkdir, read/write, stat, readdir,
+/// unlink/rename) with Node error codes (`ENOENT`, …).
+#[test]
+fn node_fs_sync_subset_with_grant() {
+    let root = fs_temp_dir("subset");
+    let mut doc = fs_doc_at(&root);
+    let script = "const fs = require('fs'); \
+         const dir = DIR_PLACEHOLDER; \
+         fs.mkdirSync(dir + '/a/b/c', { recursive: true }); \
+         fs.writeFileSync(dir + '/hello.txt', 'hello strake'); \
+         __strake_send_message('read:' + fs.readFileSync(dir + '/hello.txt', 'utf8')); \
+         const raw = fs.readFileSync(dir + '/hello.txt'); \
+         __strake_send_message('buffer:' + Buffer.isBuffer(raw) + '/' + raw.length); \
+         fs.appendFileSync(dir + '/hello.txt', '!'); \
+         __strake_send_message('appended:' + fs.readFileSync(dir + '/hello.txt', 'utf8')); \
+         const st = fs.statSync(dir + '/hello.txt'); \
+         __strake_send_message('stat:' + st.isFile() + '/' + st.isDirectory() + '/' + st.size + '/' + (st.mtimeMs > 0) + '/' + (st.mtime instanceof Date)); \
+         __strake_send_message('dir:' + fs.statSync(dir + '/a').isDirectory()); \
+         __strake_send_message('ls:' + fs.readdirSync(dir).sort().join(',')); \
+         __strake_send_message('exists:' + fs.existsSync(dir + '/hello.txt') + '/' + fs.existsSync(dir + '/missing.txt')); \
+         fs.accessSync(dir + '/hello.txt'); \
+         __strake_send_message('access:ok'); \
+         let accessCode = 'none'; \
+         try { fs.accessSync(dir + '/missing.txt'); } catch (e) { accessCode = e.code; } \
+         __strake_send_message('access-missing:' + accessCode); \
+         let readCode = 'none'; \
+         try { fs.readFileSync(dir + '/missing.txt'); } catch (e) { readCode = e.code; } \
+         __strake_send_message('read-missing:' + readCode); \
+         fs.copyFileSync(dir + '/hello.txt', dir + '/copy.txt'); \
+         fs.renameSync(dir + '/copy.txt', dir + '/moved.txt'); \
+         __strake_send_message('moved:' + fs.readFileSync(dir + '/moved.txt', 'utf8')); \
+         fs.unlinkSync(dir + '/moved.txt'); \
+         __strake_send_message('unlinked:' + fs.existsSync(dir + '/moved.txt')); \
+         __strake_send_message('realpath:' + String(fs.realpathSync(dir + '/hello.txt')).endsWith('hello.txt'));"
+        .replace("DIR_PLACEHOLDER", &format!("'{}'", js_path(&root)));
+    doc.eval(&script);
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "granted fs calls must not throw, got {errors:?}"
+    );
+    assert_eq!(
+        doc.take_messages(),
+        vec![
+            "read:hello strake",
+            "buffer:true/12",
+            "appended:hello strake!",
+            "stat:true/false/13/true/true",
+            "dir:true",
+            "ls:a,hello.txt",
+            "exists:true/false",
+            "access:ok",
+            "access-missing:ENOENT",
+            "read-missing:ENOENT",
+            "moved:hello strake!",
+            "unlinked:false",
+            "realpath:true",
+        ]
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Issue #154: lexical `..` escapes cannot walk out of the grant, even when
+/// the target exists — the denial names `EACCES`, never the file content.
+#[test]
+fn node_fs_escape_outside_grant_is_denied() {
+    let root = fs_temp_dir("escape");
+    let inner = root.join("inner");
+    std::fs::create_dir_all(&inner).expect("inner dir creates");
+    std::fs::write(root.join("outside.txt"), "TOP SECRET").expect("outside writes");
+    use strake_electron_compat::{PathScope, PermissionManifest};
+    let scope = format!("{}/*", js_path(&inner));
+    let mut doc = fs_doc_with(
+        PermissionManifest {
+            fs_read: vec![PathScope::new(&scope)],
+            fs_write: vec![PathScope::new(&scope)],
+            ..Default::default()
+        },
+        &inner,
+    );
+    let script = "const fs = require('fs'); \
+         let code = 'none'; \
+         let body = ''; \
+         try { body = String(fs.readFileSync(EVIL_PLACEHOLDER)); } catch (e) { code = e.code; } \
+         __strake_send_message('escape:' + code + '/' + body);"
+        .replace(
+            "EVIL_PLACEHOLDER",
+            &format!("'{}'", js_path(&inner.join("..").join("outside.txt"))),
+        );
+    doc.eval(&script);
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "escaped reads must throw catchable errors, got {errors:?}"
+    );
+    assert_eq!(doc.take_messages(), vec!["escape:EACCES/"]);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Issue #154: `Buffer` minimum (alloc, from string/bytes, toString,
+/// length, slice), shared between `require('buffer')` and the global.
+#[test]
+fn node_buffer_minimum() {
+    let root = fs_temp_dir("buffer");
+    let mut doc = fs_doc_at(&root);
+    doc.eval(
+        "const { Buffer: Required } = require('buffer'); \
+         __strake_send_message('same:' + (Required === globalThis.Buffer)); \
+         __strake_send_message('zero:' + Buffer.alloc(4).toString('hex')); \
+         __strake_send_message('fill:' + Buffer.alloc(3, 65).toString()); \
+         const text = Buffer.from('h\u{00e9}llo'); \
+         __strake_send_message('utf8:' + text.length + '/' + text.toString()); \
+         __strake_send_message('hex:' + Buffer.from('deadbeef', 'hex').toString('base64')); \
+         __strake_send_message('bytes:' + Buffer.from([104, 105]).toString()); \
+         __strake_send_message('slice:' + text.slice(1, 3).length + '/' + Buffer.isBuffer(text.slice(0, 1))); \
+         __strake_send_message('u8:' + (text instanceof Uint8Array));",
+    );
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "buffer ops must not throw, got {errors:?}"
+    );
+    assert_eq!(
+        doc.take_messages(),
+        vec![
+            "same:true",
+            "zero:00000000",
+            "fill:AAA",
+            "utf8:6/h\u{00e9}llo",
+            "hex:3q2+7w==",
+            "bytes:hi",
+            "slice:2/true",
+            "u8:true",
+        ]
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Issue #154: `stream` `.Stream` base (an `EventEmitter` subclass),
+/// `util` (`format` subset, `inherits`, `debuglog`), and `constants`.
+#[test]
+fn node_stream_util_constants() {
+    let root = fs_temp_dir("streamutil");
+    let mut doc = fs_doc_at(&root);
+    doc.eval(
+        "const { Stream } = require('stream'); \
+         const { EventEmitter } = require('events'); \
+         class S extends Stream {} \
+         const s = new S(); \
+         __strake_send_message('emitter:' + (s instanceof EventEmitter)); \
+         s.on('x', (v) => __strake_send_message('emit:' + v)); \
+         s.emit('x', 7); \
+         const util = require('util'); \
+         __strake_send_message('format:' + util.format('%s=%d %j %%', 'a', 1, { b: 2 })); \
+         function Base() {} \
+         function Child() { Base.call(this); } \
+         util.inherits(Child, Base); \
+         __strake_send_message('inherits:' + (new Child() instanceof Base)); \
+         __strake_send_message('debuglog:' + (typeof util.debuglog('test'))); \
+         const c = require('constants'); \
+         const fc = require('fs').constants; \
+         __strake_send_message('stable:' + [c.O_RDONLY, c.O_WRONLY, c.O_RDWR, c.F_OK, c.R_OK, c.W_OK, c.X_OK, c.COPYFILE_EXCL].join(',')); \
+         __strake_send_message('par:' + (fc.O_RDONLY === c.O_RDONLY && fc.F_OK === c.F_OK && typeof c.O_CREAT === 'number'));",
+    );
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "stream/util/constants must not throw, got {errors:?}"
+    );
+    assert_eq!(
+        doc.take_messages(),
+        vec![
+            "emitter:true",
+            "emit:7",
+            "format:a=1 {\"b\":2} %",
+            "inherits:true",
+            "debuglog:function",
+            "stable:0,1,2,0,4,2,1,1",
+            "par:true",
+        ]
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Issue #154: file streams work end to end — `createReadStream` emits
+/// `data`/`end`, `createWriteStream` collects `write` chunks and commits on
+/// `end` with `finish`, and `pipe` connects them. The read pump runs on the
+/// microtask queue, which `eval` drains before returning, so message order
+/// is deterministic.
+#[test]
+fn node_fs_streams_roundtrip() {
+    let root = fs_temp_dir("streams");
+    let mut doc = fs_doc_at(&root);
+    let script = "const fs = require('fs'); \
+         const dir = DIR_PLACEHOLDER; \
+         fs.writeFileSync(dir + '/in.txt', 'stream-me'); \
+         __strake_send_message('classes:' + (typeof fs.ReadStream) + '/' + (typeof fs.createReadStream) + '/' + (typeof fs.createWriteStream)); \
+         const rs = fs.createReadStream(dir + '/in.txt'); \
+         const seen = []; \
+         rs.on('data', (c) => seen.push(String(c))); \
+         rs.on('end', () => __strake_send_message('stream:' + seen.join(''))); \
+         const ws = fs.createWriteStream(dir + '/out.txt'); \
+         ws.on('finish', () => __strake_send_message('written:' + fs.readFileSync(dir + '/out.txt', 'utf8'))); \
+         ws.write('a'); \
+         ws.write(Buffer.from('b')); \
+         ws.end('c'); \
+         const piped = fs.createWriteStream(dir + '/piped.txt'); \
+         piped.on('finish', () => __strake_send_message('piped:' + fs.readFileSync(dir + '/piped.txt', 'utf8'))); \
+         fs.createReadStream(dir + '/in.txt').pipe(piped);"
+        .replace("DIR_PLACEHOLDER", &format!("'{}'", js_path(&root)));
+    doc.eval(&script);
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "stream ops must not throw, got {errors:?}"
+    );
+    assert_eq!(
+        doc.take_messages(),
+        vec![
+            "classes:function/function/function",
+            "written:abc",
+            "stream:stream-me",
+            "piped:stream-me",
+        ]
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Version-sniffing loaders (`graceful-fs` et al.) read `process.version`:
+/// it must exist and carry a `v`-prefixed Node-shaped version.
+#[test]
+fn node_process_version_present() {
+    let mut doc = loader_doc_at(&fs_temp_dir("version"));
+    doc.eval(
+        "__strake_send_message('version:' + (typeof process.version) + ':' + String(process.version).startsWith('v'));",
+    );
+    assert!(doc.take_js_errors().is_empty());
+    assert_eq!(doc.take_messages(), vec!["version:string:true"]);
+}
+
+/// Issue #154: renderer parity follows real Electron defaults — no `fs`
+/// without node integration, but the pure modules (`buffer`, `util`,
+/// `stream`, `constants`) resolve everywhere.
+#[test]
+fn node_fs_unavailable_in_renderer() {
+    let host = ElectronHost::new("RendererFs", "1.0.0");
+    let mut doc =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    doc.install_electron_renderer(&host);
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "renderer bootstrap must install cleanly"
+    );
+    doc.eval(
+        "let fsCode = 'none'; \
+         try { require('fs'); } catch (e) { fsCode = String(e.message).includes('Cannot find module') ? 'missing' : 'other:' + e.message; } \
+         __strake_send_message('fs:' + fsCode); \
+         __strake_send_message('buffer:' + (require('buffer').Buffer === globalThis.Buffer)); \
+         __strake_send_message('util:' + require('util').format('%s!', 'hi'));",
+    );
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "renderer requires must not throw uncaught, got {errors:?}"
+    );
+    assert_eq!(
+        doc.take_messages(),
+        vec!["fs:missing", "buffer:true", "util:hi!"]
+    );
 }

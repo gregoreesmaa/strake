@@ -38,6 +38,7 @@ mod engine;
 mod event_handler;
 mod fetch;
 mod keyword_arrow;
+mod node_fs;
 mod paint;
 mod runtime;
 mod state;
