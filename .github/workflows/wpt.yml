@@ -48,8 +48,9 @@ jobs:
         # Probed locally (timing/boundedness check on a current checkout;
         # per-pin pass rates will differ): 1502 tests, 0 crashes, ~16s wall
         # (rayon-parallel, 10s per-test backstop), so the 15-minute job
-        # budget is unaffected. Per-dir baselines land in the published
-        # wptreport.json; enforcing ratchets is the #73 follow-up.
+        # budget is unaffected. Per-dir baselines live in
+        # .github/wpt-baselines.json and the Enforce WPT ratchets step below
+        # fails on drops (issue #140).
         run: cargo run -rp wpt css svg dom/nodes dom/events html/webappapis fetch
       - name: Compress report (zstd)
         run: zstd -22 --ultra -o ./wpt/output/wptreport.json.zst ./wpt/output/wptreport.json
@@ -82,6 +83,24 @@ jobs:
         run: |
           wpt diff ./wpt/output/main-wptreport.json ./wpt/output/wptreport.json | tee ./wpt/output/wptdiff.txt
           wpt diff --format json ./wpt/output/main-wptreport.json ./wpt/output/wptreport.json > ./wpt/output/wptdiff.json
+      - name: Enforce WPT ratchets
+        # Issue #140: per-dir never-regress gate over the checked-in
+        # baselines (.github/wpt-baselines.json, recorded from a green main
+        # report; /wpt/*.json is gitignored, so baselines live with the CI
+        # config). Fails when any covered dir's passing tests or subtests
+        # drop past tolerance; improvements print a raise-the-baselines
+        # hint and never fail. Tolerance absorbs runner flakes (TIMEOUTs
+        # exist at baseline); lower it as hermeticity improves. The
+        # per-dir table below doubles as the scorecard (feeds #23).
+        # Regenerate baselines on green main with:
+        #   python3 .github/scripts/wpt_ratchet.py update <wptreport.json> .github/wpt-baselines.json
+        # (a WPT pin bump always needs a baselines refresh in the same PR).
+        run: |
+          set +e
+          python3 ./.github/scripts/wpt_ratchet.py check ./wpt/output/wptreport.json ./.github/wpt-baselines.json --tolerance 10 | tee ./wpt/output/wpt-ratchet.md
+          rc=${PIPESTATUS[0]}
+          cat ./wpt/output/wpt-ratchet.md >> "$GITHUB_STEP_SUMMARY"
+          exit $rc
       - name: Render results in step summary
         if: github.event_name == 'pull_request' && env.WPT_BASELINE == 'found'
         env:

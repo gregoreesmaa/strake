@@ -1,0 +1,45 @@
+{
+  "dirs": {
+    "css": {
+      "subtests_pass": 83510,
+      "subtests_total": 159823,
+      "tests_pass": 14836,
+      "tests_total": 33933
+    },
+    "dom/events": {
+      "subtests_pass": 11,
+      "subtests_total": 652,
+      "tests_pass": 3,
+      "tests_total": 170
+    },
+    "dom/nodes": {
+      "subtests_pass": 1095,
+      "subtests_total": 5368,
+      "tests_pass": 93,
+      "tests_total": 357
+    },
+    "fetch": {
+      "subtests_pass": 13,
+      "subtests_total": 5023,
+      "tests_pass": 12,
+      "tests_total": 490
+    },
+    "html/webappapis": {
+      "subtests_pass": 311,
+      "subtests_total": 950,
+      "tests_pass": 23,
+      "tests_total": 333
+    },
+    "svg": {
+      "subtests_pass": 1182,
+      "subtests_total": 4105,
+      "tests_pass": 371,
+      "tests_total": 1325
+    }
+  },
+  "generated_from": {
+    "generated_at": "2026-09-13T19:47:57.654227+00:00",
+    "note": "green main report; regenerate with wpt_ratchet.py update",
+    "wpt_revision": "5a5b2b591b39c59d5bca77819db305474dcfd18a"
+  }
+}
