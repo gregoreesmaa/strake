@@ -346,7 +346,15 @@ const NODE_STANDIN_BOOTSTRAP_JS: &str = r#"
 (function () {
     const info = globalThis.__strake_node_info || {};
     const versions = info.versions || {};
-    const split = (p) => String(p).split("/").filter((seg) => seg.length > 0);
+    // Issue #155: `path` was POSIX-only, so on Windows a backslash path
+    // like `C:\app` misread as relative (`..` popped the drive) and
+    // `path.join(__dirname, "..", ...)` silently stayed under the app
+    // root. Win32 parsing (both separators, drive roots, root clamp)
+    // applies when the host platform is win32; output stays `/`-joined,
+    // matching the pinned `sep: "/"`. Drive-relative `C:foo` (a Windows
+    // fossil) treats the drive as an un-poppable root.
+    const WIN = info.platform === "win32";
+    const split = (p) => String(p).split(WIN ? /[/\\]/ : "/").filter((seg) => seg.length > 0);
     const normalizeSegs = (segs, absolute) => {
         const out = [];
         for (const seg of segs) {
@@ -362,28 +370,65 @@ const NODE_STANDIN_BOOTSTRAP_JS: &str = r#"
     };
     const join = (...parts) => {
         const flat = parts.map((p) => String(p)).join("/");
-        const absolute = flat.startsWith("/");
-        const joined = (absolute ? "/" : "") + normalizeSegs(split(flat), absolute).join("/");
-        return joined === "" ? "." : joined;
+        let drive = "";
+        let rest = flat;
+        let absolute = rest.startsWith("/");
+        let unc = false;
+        if (WIN) {
+            const m = rest.match(/^([A-Za-z]:)([/\\]|$)/);
+            if (m) {
+                drive = m[1];
+                rest = rest.slice(m[0].length);
+                if (m[2] !== "") absolute = true;
+            } else if (/^[/\\]/.test(rest)) {
+                absolute = true;
+                unc = /^[/\\][/\\]/.test(rest);
+            }
+        }
+        const segs = normalizeSegs(split(rest), absolute || drive !== "");
+        const body = segs.join("/");
+        if (drive !== "") {
+            if (absolute) return body === "" ? drive + "/" : drive + "/" + body;
+            return body === "" ? drive : drive + body;
+        }
+        if (absolute) return "/" + (unc ? "/" + body : body);
+        return body === "" ? "." : body;
     };
     const dirname = (p) => {
         const s = String(p);
-        const idx = s.replace(/\/+$/, "").lastIndexOf("/");
+        const stripped = WIN ? s.replace(/[/\\]+$/, "") : s.replace(/\/+$/, "");
+        if (WIN && /^[A-Za-z]:$/.test(stripped)) return stripped + "/";
+        const idx = WIN
+            ? Math.max(stripped.lastIndexOf("/"), stripped.lastIndexOf("\\"))
+            : stripped.lastIndexOf("/");
         if (idx < 0) return ".";
         if (idx === 0) return "/";
-        return s.slice(0, idx);
+        let out = stripped.slice(0, idx);
+        if (WIN) {
+            out = out.replace(/\\/g, "/");
+            if (/^[A-Za-z]:$/.test(out)) out += "/";
+        }
+        return out;
     };
     const basename = (p, ext) => {
-        const s = String(p).replace(/\/+$/, "").split("/").pop() || "";
-        if (ext && s.endsWith(ext)) return s.slice(0, s.length - ext.length);
-        return s;
+        let s = String(p);
+        s = WIN ? s.replace(/[/\\]+$/, "") : s.replace(/\/+$/, "");
+        let base = (WIN ? s.split(/[/\\]/) : s.split("/")).pop() || "";
+        if (WIN && /^[A-Za-z]:$/.test(base)) base = "";
+        if (ext && base.endsWith(ext)) base = base.slice(0, base.length - ext.length);
+        return base;
     };
     const pathModule = {
         join,
         normalize: (p) => join(String(p)),
         dirname,
         basename,
-        isAbsolute: (p) => String(p).startsWith("/"),
+        isAbsolute: (p) => {
+            const s = String(p);
+            if (s.startsWith("/")) return true;
+            if (!WIN) return false;
+            return s.startsWith("\\") || /^[A-Za-z]:[/\\]/.test(s);
+        },
         sep: "/",
         delimiter: ":",
     };

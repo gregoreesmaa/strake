@@ -3096,3 +3096,52 @@ fn window_hide_flips_visibility() {
         "hide must clear visibility in core"
     );
 }
+
+/// `path` drive/backslash semantics (issue #155): on Windows,
+/// `path.join(__dirname, "..", ...)` must escape the dir instead of
+/// collapsing to a relative path (which silently kept outside-grant
+/// writes inside the grant, hiding the EACCES the grants test asserts).
+/// Win32 branches run on Windows CI; POSIX branches everywhere else.
+#[test]
+fn path_dotdot_resolves_across_platforms() {
+    let (mut doc, _host) = main_doc();
+    doc.take_messages();
+    if cfg!(windows) {
+        doc.eval(
+            "const pw = require('node:path'); \
+             __strake_send_message('join:' + pw.join('C:\\\\app', '..', 'profile')); \
+             __strake_send_message('abs:' + pw.isAbsolute('C:\\\\app')); \
+             __strake_send_message('rel:' + pw.isAbsolute('app\\\\x')); \
+             __strake_send_message('dir:' + pw.dirname('C:\\\\app\\\\main.js')); \
+             __strake_send_message('base:' + pw.basename('C:\\\\app\\\\main.js'));",
+        );
+        let messages = doc.take_messages();
+        assert_eq!(
+            messages,
+            vec![
+                "join:C:/profile",
+                "abs:true",
+                "rel:false",
+                "dir:C:/app",
+                "base:main.js",
+            ],
+            "win32 join/dirname must resolve drives, got {messages:?}"
+        );
+    } else {
+        doc.eval(
+            "const px = require('node:path'); \
+             __strake_send_message('join:' + px.join('/app', '..', 'profile')); \
+             __strake_send_message('abs:' + px.isAbsolute('/app'));",
+        );
+        let messages = doc.take_messages();
+        assert_eq!(
+            messages,
+            vec!["join:/profile", "abs:true"],
+            "posix join must keep resolving .., got {messages:?}"
+        );
+    }
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "path probes must not throw"
+    );
+}
