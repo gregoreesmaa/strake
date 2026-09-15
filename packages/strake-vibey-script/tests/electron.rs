@@ -394,6 +394,42 @@ fn methods_on_destroyed_window_throw() {
     assert_eq!(doc.take_messages(), vec!["soft-visible:false"]);
 }
 
+/// Webtorrent real boot: `path.extname` must exist — state setup calls
+/// `path.extname(posterFileName)` per default torrent, and a missing
+/// `extname` rejects the whole async state load ("not a callable
+/// function") with zero boot diagnostics.
+#[test]
+fn node_path_extname_matches_node() {
+    let host = ElectronHost::new("QuickStart", "1.0.0");
+    let mut doc =
+        ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
+            .without_timer_thread()
+            .with_virtual_time();
+    doc.install_electron(&host);
+    doc.eval(
+        "const path = require('node:path'); \
+         __strake_send_message('ext:' + path.extname('bigBuckBunny.jpg')); \
+         __strake_send_message('ext-none:' + path.extname('README')); \
+         __strake_send_message('ext-dot:' + path.extname('.gitignore')); \
+         __strake_send_message('ext-dir:' + path.extname('/app/posters/')); \
+         __strake_send_message('ext-multi:' + path.extname('archive.tar.gz'));",
+    );
+    assert!(
+        doc.take_js_errors().is_empty(),
+        "path.extname must not throw"
+    );
+    assert_eq!(
+        doc.take_messages(),
+        [
+            "ext:.jpg",
+            "ext-none:",
+            "ext-dot:",
+            "ext-dir:",
+            "ext-multi:.gz",
+        ]
+    );
+}
+
 /// Issue #108: Node core stand-ins resolve headlessly with documented
 /// Strake values. `node:fs` (owned by issue #16) still throws.
 #[test]
@@ -1231,7 +1267,13 @@ fn node_fs_sync_subset_with_grant() {
          __strake_send_message('moved:' + fs.readFileSync(dir + '/moved.txt', 'utf8')); \
          fs.unlinkSync(dir + '/moved.txt'); \
          __strake_send_message('unlinked:' + fs.existsSync(dir + '/moved.txt')); \
-         __strake_send_message('realpath:' + String(fs.realpathSync(dir + '/hello.txt')).endsWith('hello.txt'));"
+         __strake_send_message('realpath:' + String(fs.realpathSync(dir + '/hello.txt')).endsWith('hello.txt')); \
+         fs.mkdirSync(dir + '/gone'); \
+         fs.rmdirSync(dir + '/gone'); \
+         __strake_send_message('rmdirSync:' + fs.existsSync(dir + '/gone')); \
+         let rmdirCode = 'none'; \
+         try { fs.rmdirSync(dir + '/missing'); } catch (e) { rmdirCode = e.code; } \
+         __strake_send_message('rmdir-missing:' + rmdirCode);"
         .replace("DIR_PLACEHOLDER", &format!("'{}'", js_path(&root)));
     doc.eval(&script);
     let errors = doc.take_js_errors();
@@ -1255,6 +1297,52 @@ fn node_fs_sync_subset_with_grant() {
             "moved:hello strake!",
             "unlinked:false",
             "realpath:true",
+            "rmdirSync:false",
+            "rmdir-missing:ENOENT",
+        ]
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Webtorrent-desktop real boot: `application-config` promisifies
+/// `fs.rmdir`/`fs.unlink` at import time, so the callback-style `rmdir`
+/// must exist (not just `rmdirSync`) — `promisify(undefined)` throws
+/// before the app's first line runs.
+#[test]
+fn node_fs_rmdir_callback_and_promises() {
+    let root = fs_temp_dir("rmdir");
+    let mut doc = fs_doc_at(&root);
+    let script = "const fs = require('fs'); \
+         const util = require('util'); \
+         __strake_send_message('typeof:' + typeof fs.rmdir + '/' + typeof fs.rmdirSync); \
+         const dir = DIR_PLACEHOLDER; \
+         fs.mkdirSync(dir + '/cb'); \
+         fs.rmdir(dir + '/cb', (e) => __strake_send_message('cb:' + (e === null) + '/' + fs.existsSync(dir + '/cb'))); \
+         fs.mkdirSync(dir + '/cb-opt'); \
+         fs.rmdir(dir + '/cb-opt', {}, (e) => __strake_send_message('cb-opt:' + (e === null))); \
+         fs.rmdir(dir + '/nope', (e) => __strake_send_message('cb-missing:' + (e && e.code))); \
+         const rmdirAsync = util.promisify(fs.rmdir); \
+         fs.mkdirSync(dir + '/prom'); \
+         rmdirAsync(dir + '/prom').then(() => __strake_send_message('prom:' + fs.existsSync(dir + '/prom'))); \
+         const fsp = require('fs/promises'); \
+         fs.mkdirSync(dir + '/fsp'); \
+         fsp.rmdir(dir + '/fsp').then(() => __strake_send_message('fsp:' + fs.existsSync(dir + '/fsp')));"
+        .replace("DIR_PLACEHOLDER", &format!("'{}'", js_path(&root)));
+    doc.eval(&script);
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "rmdir variants must not throw, got {errors:?}"
+    );
+    assert_eq!(
+        doc.take_messages(),
+        vec![
+            "typeof:function/function",
+            "cb:true/false",
+            "cb-opt:true",
+            "cb-missing:ENOENT",
+            "prom:false",
+            "fsp:false",
         ]
     );
     let _ = std::fs::remove_dir_all(&root);
@@ -2339,6 +2427,106 @@ fn node_tty_headless_reports_no_terminal() {
     );
 }
 
+/// Webtorrent-desktop real boot: `simple-get` (via `parse-torrent`)
+/// requires `querystring` at import time. Faithful `parse`/`stringify`
+/// plus the `escape`/`unescape` pair and the `decode`/`encode` aliases.
+#[test]
+fn node_querystring_parse_stringify_round_trip() {
+    let mut doc = loader_doc_at(&fs_temp_dir("querystring"));
+    doc.eval(
+        "const qs = require('querystring'); \
+         __strake_send_message('same:' + (require('node:querystring') === qs)); \
+         const basic = qs.parse('a=1&b=2'); \
+         __strake_send_message('basic:' + basic.a + '/' + basic.b); \
+         const dup = qs.parse('t=1&t=2'); \
+         __strake_send_message('dup:' + Array.isArray(dup.t) + '/' + dup.t.join(',')); \
+         const edge = qs.parse('flag&empty=&=orphan'); \
+         __strake_send_message('edge:' + edge.flag + '/' + edge.empty + '/' + edge['']); \
+         const plus = qs.parse('dn=Name+Here'); \
+         __strake_send_message('plus:' + JSON.stringify(plus.dn)); \
+         const enc = qs.parse('q=%C3%A9%C3%A8&space=%20'); \
+         __strake_send_message('enc:' + enc.q + '/' + enc.space); \
+         const capped = qs.parse('a=1&b=2&c=3', '&', '=', { maxKeys: 2 }); \
+         __strake_send_message('capped:' + Object.keys(capped).sort().join(',')); \
+         const custom = qs.parse('a:1;b:2', ';', ':'); \
+         __strake_send_message('custom:' + custom.a + '/' + custom.b); \
+         __strake_send_message('str:' + qs.stringify({ a: '1', b: '2' })); \
+         __strake_send_message('arr:' + qs.stringify({ t: ['1', '2'] })); \
+         __strake_send_message('nullish:' + qs.stringify({ a: null, b: undefined })); \
+         __strake_send_message('esc:' + qs.stringify({ q: 'a b&c=d' })); \
+         __strake_send_message('escape:' + qs.escape('a b!')); \
+         __strake_send_message('unescape:' + qs.unescape('%C3%A9') + '/' + qs.unescape('%ZZ')); \
+         __strake_send_message('alias:' + (qs.decode === qs.parse) + '/' + (qs.encode === qs.stringify)); \
+         const magnet = qs.parse('xt=urn:btih:abc123&dn=Some+Name&tr=http%3A%2F%2Ft'); \
+         __strake_send_message('magnet:' + magnet.xt + '/' + JSON.stringify(magnet.dn) + '/' + magnet.tr);",
+    );
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "querystring must not throw, got {errors:?}"
+    );
+    assert_eq!(
+        doc.take_messages(),
+        vec![
+            "same:true",
+            "basic:1/2",
+            "dup:true/1,2",
+            "edge://orphan",
+            "plus:\"Name Here\"",
+            "enc:éè/ ",
+            "capped:a,b",
+            "custom:1/2",
+            "str:a=1&b=2",
+            "arr:t=1&t=2",
+            "nullish:a=&b=",
+            "esc:q=a%20b%26c%3Dd",
+            "escape:a%20b!",
+            "unescape:é/%ZZ",
+            "alias:true/true",
+            "magnet:urn:btih:abc123/\"Some Name\"/http://t",
+        ]
+    );
+}
+
+/// `Buffer.concat`/`byteLength`/`copy` (webtorrent-desktop real boot):
+/// `bencode` (via `parse-torrent`) concatenates, measures, and copies at
+/// import/first-parse time. Semantics verified against Node.
+#[test]
+fn node_buffer_concat_bytelength_copy() {
+    let mut doc = loader_doc_at(&fs_temp_dir("buffer-missing"));
+    doc.eval(
+        "const Buf = require('buffer').Buffer; \
+         __strake_send_message('same:' + (Buf === Buffer)); \
+         __strake_send_message('concat:' + Buf.concat([Buf.from('a'), Buf.from('bc')]).toString()); \
+         __strake_send_message('trunc:' + Buf.concat([Buf.from('a'), Buf.from('bc')], 2).toString()); \
+         __strake_send_message('pad:' + Buf.concat([Buf.from('a')], 3).length); \
+         __strake_send_message('empty:' + Buf.concat([]).length); \
+         __strake_send_message('bytes:' + Buf.byteLength('é') + '/' + Buf.byteLength('ff', 'hex') + '/' + Buf.byteLength('ab', 'utf16le') + '/' + Buf.byteLength(Buf.from('abc'))); \
+         const src = Buf.from('hello'); \
+         const dst = Buf.alloc(10); \
+         __strake_send_message('copy:' + src.copy(dst, 2, 1, 3) + '/' + dst.toString('latin1', 2, 4)); \
+         __strake_send_message('slice:' + src.slice(1, 3).constructor.name + '/' + src.slice(1, 3).toString()); \
+         const typeOf = (fn) => { try { fn(); return 'no-throw'; } catch (e) { return e.constructor.name; } }; \
+         __strake_send_message('errs:' + typeOf(() => Buf.concat('nope')) + '/' + typeOf(() => Buf.concat([Buf.from('a'), 5])) + '/' + typeOf(() => Buf.byteLength(123)) + '/' + typeOf(() => src.copy('nope')));",
+    );
+    let errors = doc.take_js_errors();
+    assert!(errors.is_empty(), "buffer must not throw, got {errors:?}");
+    assert_eq!(
+        doc.take_messages(),
+        vec![
+            "same:true",
+            "concat:abc",
+            "trunc:ab",
+            "pad:3",
+            "empty:0",
+            "bytes:2/1/4/3",
+            "copy:2/el",
+            "slice:Buffer/el",
+            "errs:TypeError/TypeError/TypeError/TypeError",
+        ]
+    );
+}
+
 /// Issue #155: `util.deprecate` wraps with warn-once semantics — the
 /// `debug` package calls it at import time, so its absence blocks boot.
 #[test]
@@ -2695,6 +2883,253 @@ fn app_set_name_updates_get_name() {
     );
 }
 
+/// `crashReporter` (webtorrent-desktop real boot): `start` records its
+/// options instead of throwing (real minidump upload stays a follow-up),
+/// and the extra-parameter table round-trips for Sentry-style callers.
+#[test]
+fn crash_reporter_start_records_and_params_round_trip() {
+    let (mut doc, _host) = main_doc();
+    doc.take_messages();
+    doc.eval(
+        "const eCrash = require('electron'); \
+         eCrash.crashReporter.start({ productName: 'WebTorrent', submitURL: 'https://example.invalid/crash', globalExtra: { _companyName: 'WebTorrent' }, compress: true }); \
+         eCrash.crashReporter.addExtraParameter('sentry', 'on'); \
+         const params = eCrash.crashReporter.getParameters(); \
+         __strake_send_message('company:' + params._companyName); \
+         __strake_send_message('sentry:' + params.sentry); \
+         eCrash.crashReporter.removeExtraParameter('sentry'); \
+         __strake_send_message('removed:' + ('sentry' in eCrash.crashReporter.getParameters()));",
+    );
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "crashReporter probes must not throw, got {errors:?}"
+    );
+    assert_eq!(
+        doc.take_messages(),
+        vec!["company:WebTorrent", "sentry:on", "removed:false"]
+    );
+}
+
+/// `app.commandLine` + `getLoginItemSettings` (webtorrent-desktop real
+/// boot): main calls `appendSwitch` before creating windows and reads
+/// `wasOpenedAsHidden` on darwin; both must behave, not throw on
+/// undefined.
+#[test]
+fn app_command_line_switches_and_login_settings() {
+    let (mut doc, _host) = main_doc();
+    doc.take_messages();
+    doc.eval(
+        "const eCmd = require('electron'); \
+         eCmd.app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required'); \
+         eCmd.app.commandLine.appendSwitch('no-sandbox'); \
+         __strake_send_message('has:' + eCmd.app.commandLine.hasSwitch('autoplay-policy')); \
+         __strake_send_message('value:' + eCmd.app.commandLine.getSwitchValue('autoplay-policy')); \
+         __strake_send_message('missing:' + eCmd.app.commandLine.hasSwitch('nope') + '/' + eCmd.app.commandLine.getSwitchValue('nope')); \
+         eCmd.app.commandLine.removeSwitch('no-sandbox'); \
+         __strake_send_message('removed:' + eCmd.app.commandLine.hasSwitch('no-sandbox')); \
+         const login = eCmd.app.getLoginItemSettings(); \
+         __strake_send_message('login:' + login.openAtLogin + '/' + login.wasOpenedAsHidden); \
+         eCmd.app.setLoginItemSettings({ openAtLogin: true }); \
+         __strake_send_message('login-set:' + eCmd.app.getLoginItemSettings().openAtLogin);",
+    );
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "commandLine/login probes must not throw, got {errors:?}"
+    );
+    assert_eq!(
+        doc.take_messages(),
+        vec![
+            "has:true",
+            "value:no-user-gesture-required",
+            "missing:false/",
+            "removed:false",
+            "login:false/false",
+            "login-set:true",
+        ]
+    );
+}
+
+/// `app.requestSingleInstanceLock` (webtorrent-desktop real boot): the
+/// single-instance guard must answer (this boot holds the lock), and the
+/// `second-instance` listener must register without throwing.
+#[test]
+fn app_single_instance_lock_answers_true() {
+    let (mut doc, _host) = main_doc();
+    doc.take_messages();
+    doc.eval(
+        "const eSingle = require('electron'); \
+         __strake_send_message('lock:' + eSingle.app.requestSingleInstanceLock()); \
+         eSingle.app.on('second-instance', () => {}); \
+         __strake_send_message('listened:true');",
+    );
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "single-instance probes must not throw, got {errors:?}"
+    );
+    assert_eq!(doc.take_messages(), vec!["lock:true", "listened:true"]);
+}
+
+/// `app.setAppLogsPath`/`getPath('logs')` (webtorrent-desktop real boot):
+/// main sets the logs path at load; unset it defaults under `userData`,
+/// and an explicit path (or reset) round-trips.
+#[test]
+fn app_logs_path_defaults_and_round_trips() {
+    let (mut doc, _host) = main_doc();
+    doc.take_messages();
+    doc.eval(
+        "const eLogs = require('electron'); \
+         __strake_send_message('default:' + eLogs.app.getPath('logs').replace(/\\\\/g, '/')); \
+         eLogs.app.setAppLogsPath('/tmp/strake-test-logs'); \
+         __strake_send_message('set:' + eLogs.app.getPath('logs')); \
+         eLogs.app.setAppLogsPath(); \
+         __strake_send_message('reset:' + eLogs.app.getPath('logs').replace(/\\\\/g, '/'));",
+    );
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "logs path probes must not throw, got {errors:?}"
+    );
+    let messages = doc.take_messages();
+    assert_eq!(messages.len(), 3, "three logs probes, got {messages:?}");
+    for key in ["default:", "reset:"] {
+        assert!(
+            messages
+                .iter()
+                .any(|m| m.starts_with(key) && m.ends_with("QuickStart/logs")),
+            "{key} must default under userData, got {messages:?}"
+        );
+    }
+    assert!(
+        messages.contains(&"set:/tmp/strake-test-logs".to_string()),
+        "explicit logs path must round-trip, got {messages:?}"
+    );
+}
+
+/// `app.once` (webtorrent-desktop real boot): main registers a one-shot
+/// `ipcReady` listener; `once` must register and fire through the same
+/// path as `on` (proven here on `before-quit`, which `app.quit()` fires).
+#[test]
+fn app_once_registers_and_fires() {
+    let (mut doc, _host) = main_doc();
+    doc.take_messages();
+    doc.eval(
+        "const eOnce = require('electron'); \
+         eOnce.app.once('before-quit', () => __strake_send_message('once-bq')); \
+         eOnce.app.on('before-quit', () => __strake_send_message('on-bq')); \
+         eOnce.app.quit();",
+    );
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "once probes must not throw, got {errors:?}"
+    );
+    assert_eq!(doc.take_messages(), vec!["once-bq", "on-bq"]);
+}
+
+/// `ipcMain.once` + `ipcMain.emit` (webtorrent-desktop real boot):
+/// `ipc.init` waits one-shot on `ipcReady`, and the app monkey-patches
+/// `ipcMain.emit` as its relay — `once` fires a single time across two
+/// emits while `on` keeps firing, with `(event, ...args)` delivery.
+#[test]
+fn ipc_main_once_fires_once_and_emit_relays() {
+    let (mut doc, _host) = main_doc();
+    doc.take_messages();
+    doc.eval(
+        "const eIpc = require('electron'); \
+         eIpc.ipcMain.once('ch', (e, n) => __strake_send_message('once:' + n + '/' + (e !== undefined))); \
+         eIpc.ipcMain.on('ch', (e, n) => __strake_send_message('on:' + n)); \
+         __strake_send_message('had:' + eIpc.ipcMain.emit('ch', 1)); \
+         eIpc.ipcMain.emit('ch', 2); \
+         __strake_send_message('had-missing:' + eIpc.ipcMain.emit('nope'));",
+    );
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "ipcMain once/emit probes must not throw, got {errors:?}"
+    );
+    assert_eq!(
+        doc.take_messages(),
+        vec![
+            "once:1/true",
+            "on:1",
+            "had:true",
+            "on:2",
+            "had-missing:false"
+        ]
+    );
+}
+
+/// `app.emit` (webtorrent-desktop real boot): `ipc.init` relays
+/// readiness via `app.emit('ipcReady')` — listeners run synchronously
+/// with the emitted args, and the return reports whether any ran.
+#[test]
+fn app_emit_runs_listeners_with_args() {
+    let (mut doc, _host) = main_doc();
+    doc.take_messages();
+    doc.eval(
+        "const eEmit = require('electron'); \
+         eEmit.app.on('custom', (a, b) => __strake_send_message('on:' + a + '/' + b)); \
+         eEmit.app.once('custom', (a) => __strake_send_message('once:' + a)); \
+         __strake_send_message('had:' + eEmit.app.emit('custom', 1, 2)); \
+         __strake_send_message('had-again:' + eEmit.app.emit('custom', 3, 4));",
+    );
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "app.emit probes must not throw, got {errors:?}"
+    );
+    assert_eq!(
+        doc.take_messages(),
+        vec!["on:1/2", "once:1", "had:true", "on:3/4", "had-again:true"]
+    );
+}
+
+/// `Menu.buildFromTemplate` (webtorrent-desktop real boot): `menu.init`
+/// builds the app menu at load, and the app walks the BUILT menu's
+/// `.items`/`.submenu.items` by label to toggle `enabled` — so the built
+/// menu must preserve the template's item graph (labels, flags, clicks),
+/// not return an opaque handle.
+#[test]
+fn menu_build_from_template_preserves_item_graph() {
+    let (mut doc, _host) = main_doc();
+    doc.take_messages();
+    doc.eval(
+        "const eMenu = require('electron'); \
+         const menu = eMenu.Menu.buildFromTemplate([ \
+           { label: 'File', submenu: [ \
+             { label: 'Open', enabled: false }, \
+             { type: 'separator' }, \
+             { label: 'Quit', click: () => {} } ] }, \
+           { label: 'Edit', submenu: [] } ]); \
+         eMenu.Menu.setApplicationMenu(menu); \
+         const found = menu.items[0].submenu.items.find((i) => i.label === 'Open'); \
+         __strake_send_message('found:' + found.enabled); \
+         __strake_send_message('sep:' + menu.items[0].submenu.items[1].type); \
+         __strake_send_message('click:' + typeof menu.items[0].submenu.items[2].click); \
+         __strake_send_message('appmenu:' + (eMenu.Menu.getApplicationMenu() === menu)); \
+         eMenu.Menu.setApplicationMenu(null); \
+         __strake_send_message('cleared:' + (eMenu.Menu.getApplicationMenu() === null));",
+    );
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "menu probes must not throw, got {errors:?}"
+    );
+    assert_eq!(
+        doc.take_messages(),
+        vec![
+            "found:false",
+            "sep:separator",
+            "click:function",
+            "appmenu:true",
+            "cleared:true",
+        ]
+    );
+}
+
 /// `app.setAsDefaultProtocolClient` (issue #155): records the protocol
 /// and reports success like Electron (OS handler effect stays deferred).
 #[test]
@@ -3020,6 +3455,42 @@ fn webcontents_on_records_event_listeners() {
         host.web_contents_listener_events(0),
         vec!["did-finish-load", "unresponsive"],
         "both webContents subscriptions must be recorded"
+    );
+}
+
+/// `win.once` / `webContents.once` (webtorrent real boot): the main window
+/// subscribes one-shot to `ready-to-show` right after construction; one-shot
+/// subscriptions must record instead of throwing "not a callable function".
+#[test]
+fn window_and_webcontents_once_record_event_listeners() {
+    let (mut doc, host) = main_doc();
+    doc.take_messages();
+    doc.eval(
+        "const { BrowserWindow: BW } = require('electron'); \
+         const win = new BW({ width: 800, height: 600 }); \
+         const chained = win.once('ready-to-show', () => {}); \
+         __strake_send_message('chain:' + (chained === win)); \
+         const wcChained = win.webContents.once('dom-ready', () => {}); \
+         __strake_send_message('wc-chain:' + (wcChained === win.webContents)); \
+         try { win.once('close', 'nope'); __strake_send_message('nonfn:NO-THROW'); } \
+         catch (e) { __strake_send_message('nonfn:' + (e instanceof TypeError)); }",
+    );
+    let errors = doc.take_js_errors();
+    assert!(
+        errors.is_empty(),
+        "once probes must not throw uncaught, got {errors:?}"
+    );
+    let messages = doc.take_messages();
+    for expected in ["chain:true", "wc-chain:true", "nonfn:true"] {
+        assert!(
+            messages.contains(&expected.to_string()),
+            "expected probe message {expected:?}, got {messages:?}"
+        );
+    }
+    assert_eq!(
+        host.web_contents_listener_events(0),
+        vec!["dom-ready"],
+        "one-shot webContents subscription must be recorded"
     );
 }
 

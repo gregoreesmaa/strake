@@ -671,6 +671,27 @@ pub(crate) fn fs_mkdir(_: &JsValue, args: &[JsValue], context: &mut Context) -> 
     Ok(JsValue::undefined())
 }
 
+/// `__strake_fs_rmdir(path, recursive)` (webtorrent real boot:
+/// `application-config` promisifies `fs.rmdir` at import time).
+pub(crate) fn fs_rmdir(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let raw = fs_path_arg(args, "__strake_fs_rmdir", context)?;
+    let recursive = options_flag(args, 1, "recursive", context);
+    let path = scoped_path(context, &raw, FsAccess::Write)
+        .map_err(|_| denied_error(context, "rmdir", &raw))?;
+    // Like `unlink`, the target must exist: a granted-but-absent path
+    // reports `ENOENT`, never a denial-shaped error.
+    if !path.exists() {
+        return Err(deny_to_error(context, ScopedDeny::Missing, "rmdir", &raw));
+    }
+    let result = if recursive {
+        std::fs::remove_dir_all(&path)
+    } else {
+        std::fs::remove_dir(&path)
+    };
+    result.map_err(|error| io_error(context, &error, "rmdir", &raw))?;
+    Ok(JsValue::undefined())
+}
+
 /// `__strake_fs_read(path)`: file bytes as a `Uint8Array`.
 pub(crate) fn fs_read(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let raw = fs_path_arg(args, "__strake_fs_read", context)?;

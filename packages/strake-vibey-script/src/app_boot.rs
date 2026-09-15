@@ -179,6 +179,27 @@ impl IpcProof {
 /// the main script with the app dir as `__dirname`, marks the app ready, and
 /// loads each created window's entry HTML: first paint plus preload execution
 /// in renderer scope. Remote (`http(s)`) targets are recorded, not fetched.
+/// Seed Electron's `HOME`-derived known folders for the boot path
+/// (webtorrent real boot): real Electron resolves `~/Downloads`-style
+/// folders out of the box, while the compat core stays explicit
+/// (`App::get_path` returns `None` until the embedder calls `set_path`).
+/// `strake-run` is the embedder here, so it seeds `home`/`desktop`/
+/// `documents`/`downloads` from the OS env (`HOME` on unix/macOS,
+/// `USERPROFILE` on Windows — the same env Electron reads). An explicit
+/// `app.setPath` still wins; an absent home keeps the fail-closed throw
+/// instead of inventing a location.
+fn seed_known_folders(host: &ElectronHost) {
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE"));
+    let Some(home) = home.map(PathBuf::from) else {
+        return;
+    };
+    use strake_electron_compat::AppPath;
+    host.set_app_path(AppPath::Home, home.clone());
+    host.set_app_path(AppPath::Desktop, home.join("Desktop"));
+    host.set_app_path(AppPath::Documents, home.join("Documents"));
+    host.set_app_path(AppPath::Downloads, home.join("Downloads"));
+}
+
 pub fn boot_app_dir(app_dir: &Path) -> Result<AppBootReport, BootError> {
     boot_inner(app_dir, false, &[]).map(|(report, _)| report)
 }
@@ -310,6 +331,35 @@ fn boot_inner_with_host(
     // the canonical access spelling the fs gate checks.
     let mut fs_read = vec![strake_electron_compat::PathScope::new(&grant_scope)];
     let mut fs_write = vec![strake_electron_compat::PathScope::new(&grant_scope)];
+    // The app's own profile dir (webtorrent real boot): real apps keep
+    // state in `userData` (appData/<name>), outside the app dir, and
+    // deny-by-default EACCESes the very first config read. The boot grants
+    // it read+write — the same trust rationale as the app dir itself —
+    // while everything else stays denied.
+    {
+        let profiler = strake_electron_compat::App::new(&app_name, app_version);
+        if let Some(user_data) = profiler.get_path(strake_electron_compat::AppPath::UserData) {
+            let canonical = std::fs::canonicalize(&user_data).unwrap_or_else(|_| user_data.clone());
+            let scope = format!("{}/*", canonical.to_string_lossy().replace('\\', "/"));
+            fs_read.push(strake_electron_compat::PathScope::new(&scope));
+            fs_write.push(strake_electron_compat::PathScope::new(&scope));
+        }
+        // The on-disk vendor dir need not match `package.json` (webtorrent
+        // real boot: `application-config('WebTorrent')` vs name
+        // `webtorrent-desktop`), so a `userData`-only grant EACCESes the
+        // very first config read — surfacing as denial instead of ENOENT
+        // for a fresh profile and hanging the app's async load with zero
+        // diagnostics. The boot grants the `appData` root containing
+        // `userData` read+write (the dev-harness equivalent of the #16
+        // permission UX approving config storage); everything outside the
+        // app dir, `appData`, and explicit grants stays denied.
+        if let Some(app_data) = profiler.get_path(strake_electron_compat::AppPath::AppData) {
+            let canonical = std::fs::canonicalize(&app_data).unwrap_or_else(|_| app_data.clone());
+            let scope = format!("{}/*", canonical.to_string_lossy().replace('\\', "/"));
+            fs_read.push(strake_electron_compat::PathScope::new(&scope));
+            fs_write.push(strake_electron_compat::PathScope::new(&scope));
+        }
+    }
     for extra in extra_fs_grants {
         let root = std::fs::canonicalize(extra).unwrap_or_else(|_| extra.clone());
         let scope = format!("{}/*", root.to_string_lossy().replace('\\', "/"));
@@ -323,6 +373,7 @@ fn boot_inner_with_host(
             ..Default::default()
         },
     );
+    seed_known_folders(&host);
     let mut doc =
         ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
             .without_timer_thread()

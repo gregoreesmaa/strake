@@ -66,6 +66,59 @@ fn default_app_data() -> Option<PathBuf> {
     }
 }
 
+/// `app.commandLine` switch store (webtorrent real boot): Chromium reads
+/// these at startup; headless records them so `hasSwitch` observes what
+/// `appendSwitch` stored. Enforcement against a real Chromium stays a
+/// fallback-surface follow-up.
+#[derive(Debug, Clone, Default)]
+pub struct CommandLine {
+    switches: HashMap<String, Option<String>>,
+}
+
+impl CommandLine {
+    /// An empty switch store.
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Record a switch (`appendSwitch`), overwriting any previous value.
+    pub fn append_switch(&mut self, name: String, value: Option<String>) {
+        self.switches.insert(name, value);
+    }
+
+    /// Whether the switch was appended (`hasSwitch`).
+    pub fn has_switch(&self, name: &str) -> bool {
+        self.switches.contains_key(name)
+    }
+
+    /// The switch value (`getSwitchValue`): empty when valueless or absent,
+    /// matching Electron.
+    pub fn get_switch_value(&self, name: &str) -> &str {
+        self.switches
+            .get(name)
+            .and_then(|value| value.as_deref())
+            .unwrap_or("")
+    }
+
+    /// Drop a switch (`removeSwitch`).
+    pub fn remove_switch(&mut self, name: &str) {
+        self.switches.remove(name);
+    }
+}
+
+/// `app.getLoginItemSettings` snapshot (webtorrent real boot): the OS
+/// login-item state Electron reports. Headless keeps what the app recorded
+/// via `setLoginItemSettings`, defaulting to all-false like a fresh login.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct LoginItemSettings {
+    /// Launch at login.
+    pub open_at_login: bool,
+    /// Launch hidden.
+    pub open_as_hidden: bool,
+    /// This launch was a hidden login launch.
+    pub was_opened_as_hidden: bool,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AppPath {
     /// Per-app profile data (Electron `userData`; defaults to
@@ -80,6 +133,9 @@ pub enum AppPath {
     Documents,
     /// Downloads directory (requires [`App::set_path`]).
     Downloads,
+    /// Log directory (defaults to `userData/logs`;
+    /// [`App::set_app_logs_path`] overrides).
+    Logs,
     /// Home directory (requires [`App::set_path`]).
     Home,
     /// OS temporary directory (defaults to [`std::env::temp_dir`]).
@@ -105,6 +161,9 @@ pub struct App {
     quit_on_all_windows_closed: bool,
     listeners: HashMap<AppEventKind, Vec<Listener>>,
     paths: HashMap<AppPath, PathBuf>,
+    app_logs_path: Option<PathBuf>,
+    command_line: CommandLine,
+    login_item_settings: LoginItemSettings,
     last_window_count: Option<usize>,
     default_protocol_client: Option<String>,
     app_user_model_id: Option<String>,
@@ -121,6 +180,9 @@ impl App {
             quit_on_all_windows_closed: true,
             listeners: HashMap::new(),
             paths: HashMap::from([(AppPath::Temp, std::env::temp_dir())]),
+            app_logs_path: None,
+            command_line: CommandLine::new(),
+            login_item_settings: LoginItemSettings::default(),
             last_window_count: None,
             default_protocol_client: None,
             app_user_model_id: None,
@@ -225,13 +287,15 @@ impl App {
     /// Resolve a named path (`app.getPath`); explicit [`App::set_path`]
     /// values win, then OS defaults.
     ///
-    /// [`AppPath::Temp`], [`AppPath::AppData`], and [`AppPath::UserData`]
-    /// resolve out of the box: `UserData` is Electron's `appData/<name>`
-    /// default (dynamic, so a load-time `setName` is reflected),
-    /// `AppData` comes from the OS env. `Desktop`, `Documents`,
-    /// `Downloads`, and `Home` still require [`App::set_path`] first —
-    /// the Day-1 TS shim throws like Electron does for unknown names
-    /// rather than unwrapping.
+    /// [`AppPath::Temp`], [`AppPath::AppData`], [`AppPath::UserData`], and
+    /// [`AppPath::Logs`] resolve out of the box: `UserData` is Electron's
+    /// `appData/<name>` default (dynamic, so a load-time `setName` is
+    /// reflected), `AppData` comes from the OS env, and `Logs` falls back
+    /// to `userData/logs` (Electron's per-OS log dir is OS-specific; this
+    /// writable default is the documented approximation).
+    /// `Desktop`, `Documents`, `Downloads`, and `Home` still require
+    /// [`App::set_path`] first — the Day-1 TS shim throws like Electron
+    /// does for unknown names rather than unwrapping.
     pub fn get_path(&self, path: AppPath) -> Option<PathBuf> {
         if let Some(explicit) = self.paths.get(&path) {
             return Some(explicit.clone());
@@ -241,6 +305,13 @@ impl App {
             AppPath::UserData => self
                 .get_path(AppPath::AppData)
                 .map(|base| base.join(&self.name)),
+            AppPath::Logs => {
+                if let Some(explicit) = self.app_logs_path.clone() {
+                    return Some(explicit);
+                }
+                self.get_path(AppPath::UserData)
+                    .map(|base| base.join("logs"))
+            }
             _ => None,
         }
     }
@@ -248,6 +319,40 @@ impl App {
     /// Override a named path (`app.setPath`).
     pub fn set_path(&mut self, path: AppPath, value: PathBuf) {
         self.paths.insert(path, value);
+    }
+
+    /// Set the log directory (`app.setAppLogsPath(path)`); `None` resets
+    /// to the `userData/logs` default, matching Electron's no-arg call.
+    pub fn set_app_logs_path(&mut self, value: Option<PathBuf>) {
+        self.app_logs_path = value;
+    }
+
+    /// The `app.commandLine` switch store.
+    pub fn command_line(&self) -> &CommandLine {
+        &self.command_line
+    }
+
+    /// The `app.commandLine` switch store, mutably.
+    pub fn command_line_mut(&mut self) -> &mut CommandLine {
+        &mut self.command_line
+    }
+
+    /// The login-item snapshot (`app.getLoginItemSettings`).
+    pub fn login_item_settings(&self) -> LoginItemSettings {
+        self.login_item_settings
+    }
+
+    /// Record login-item settings (`app.setLoginItemSettings`).
+    pub fn set_login_item_settings(&mut self, settings: LoginItemSettings) {
+        self.login_item_settings = settings;
+    }
+
+    /// Single-instance guard (`app.requestSingleInstanceLock`, webtorrent
+    /// real boot): the first boot in this process holds the lock.
+    /// Cross-process arbitration (lock file plus `second-instance` handoff)
+    /// is a shell follow-up; until then every boot is its own primary.
+    pub fn request_single_instance_lock(&self) -> bool {
+        true
     }
 
     fn emit(&self, event: AppEventKind) {
@@ -436,9 +541,10 @@ fn window_all_closed_fires_once_per_transition_to_zero() {
     );
 }
 
-// PIN (review PR #79, updated for issue #155): contract lock — `Temp`,
-// `AppData`, and `UserData` have sound `std`-only OS defaults (env-based,
-// the same source Electron reads); every other `AppPath` is `None` until
+// PIN (review PR #79, updated for issue #155, extended for the
+// webtorrent real boot): contract lock — `Temp`, `AppData`, `UserData`,
+// and `Logs` have sound `std`-only OS defaults (env-based, the same
+// source Electron reads); every other `AppPath` is `None` until
 // `set_path`.
 #[test]
 fn only_defaulted_paths_resolve_without_set_path() {
@@ -449,6 +555,12 @@ fn only_defaulted_paths_resolve_without_set_path() {
         app.get_path(AppPath::AppData)
             .map(|base| base.join("QuickStart")),
         "userData defaults under appData"
+    );
+    assert_eq!(
+        app.get_path(AppPath::Logs),
+        app.get_path(AppPath::UserData)
+            .map(|base| base.join("logs")),
+        "logs defaults under userData"
     );
     for path in [
         AppPath::Desktop,
@@ -462,4 +574,61 @@ fn only_defaulted_paths_resolve_without_set_path() {
             "{path:?} requires set_path: no sound std-only OS default"
         );
     }
+}
+
+// Webtorrent-desktop real boot: `app.commandLine` records switches for
+// `hasSwitch`/`getSwitchValue`, and removal drops them.
+#[test]
+fn command_line_switches_round_trip() {
+    let mut app = App::new("WebTorrent", "0.24.0");
+    assert!(!app.command_line().has_switch("autoplay-policy"));
+    assert_eq!(app.command_line().get_switch_value("autoplay-policy"), "");
+    app.command_line_mut().append_switch(
+        "autoplay-policy".to_string(),
+        Some("no-user-gesture-required".to_string()),
+    );
+    app.command_line_mut()
+        .append_switch("no-sandbox".to_string(), None);
+    assert!(app.command_line().has_switch("autoplay-policy"));
+    assert_eq!(
+        app.command_line().get_switch_value("autoplay-policy"),
+        "no-user-gesture-required"
+    );
+    assert_eq!(app.command_line().get_switch_value("no-sandbox"), "");
+    app.command_line_mut().remove_switch("no-sandbox");
+    assert!(!app.command_line().has_switch("no-sandbox"));
+}
+
+// Webtorrent-desktop real boot: the logs path sets explicitly and resets
+// to the `userData/logs` default on a no-arg call.
+#[test]
+fn app_logs_path_set_and_reset() {
+    let mut app = App::new("WebTorrent", "0.24.0");
+    app.set_app_logs_path(Some(PathBuf::from("/tmp/wt-logs")));
+    assert_eq!(
+        app.get_path(AppPath::Logs),
+        Some(PathBuf::from("/tmp/wt-logs"))
+    );
+    app.set_app_logs_path(None);
+    assert_eq!(
+        app.get_path(AppPath::Logs),
+        app.get_path(AppPath::UserData)
+            .map(|base| base.join("logs")),
+        "reset restores the userData default"
+    );
+}
+
+// Webtorrent-desktop real boot: login-item settings default to all-false
+// and round-trip what the app records.
+#[test]
+fn login_item_settings_default_and_set() {
+    let mut app = App::new("WebTorrent", "0.24.0");
+    assert_eq!(app.login_item_settings(), LoginItemSettings::default());
+    assert!(!app.login_item_settings().was_opened_as_hidden);
+    app.set_login_item_settings(LoginItemSettings {
+        open_at_login: true,
+        open_as_hidden: false,
+        was_opened_as_hidden: false,
+    });
+    assert!(app.login_item_settings().open_at_login);
 }

@@ -275,3 +275,190 @@ fn boot_app_dir_with_options_grants_extra_fs_dirs() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+/// Module-scoped `require` (webtorrent-desktop real boot): a `require` call
+/// deferred inside another module's function must resolve against the
+/// *defining* module's directory, not the caller's — Node binds `require`
+/// per module. `lib/helper.js` is required from `main.js`, so its deferred
+/// `require('./config')` must find `lib/config.js`; the root decoy
+/// `config.js` exists to catch caller-scoped (dynamic-scope) resolution.
+#[test]
+fn boot_app_dir_resolves_deferred_require_from_defining_module() {
+    let root = std::env::temp_dir().join(format!("strake-boot-scope-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    let lib = root.join("lib");
+    std::fs::create_dir_all(&lib).expect("probe lib dir creates");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"scope-probe","main":"main.js"}"#,
+    )
+    .expect("package.json writes");
+    std::fs::write(
+        root.join("config.js"),
+        "module.exports = { VALUE: 'root-decoy' };",
+    )
+    .expect("root decoy writes");
+    std::fs::write(
+        lib.join("config.js"),
+        "module.exports = { VALUE: 'lib-config' };",
+    )
+    .expect("lib config writes");
+    std::fs::write(
+        lib.join("helper.js"),
+        "exports.init = function init() { return require('./config').VALUE; };",
+    )
+    .expect("helper writes");
+    std::fs::write(
+        root.join("main.js"),
+        "const helper = require('./lib/helper'); \
+         const name = helper.init(); \
+         if (name !== 'lib-config') { throw new Error('resolved ' + name); } \
+         const electron = require('electron'); \
+         electron.app.whenReady().then(() => { \
+           const win = new electron.BrowserWindow({ width: 100, height: 100 }); \
+           win.loadURL('about:blank'); \
+         });",
+    )
+    .expect("main.js writes");
+
+    let report = boot_app_dir(&root).expect("scope probe boots");
+    assert!(
+        report.js_errors.is_empty(),
+        "deferred require must resolve from the defining module, got {:?}",
+        report.js_errors
+    );
+    assert_eq!(report.windows.len(), 1, "window still boots");
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Known-folder defaults (webtorrent real boot): the boot path seeds
+/// Electron's `HOME`-derived folders (`downloads`, `documents`, `desktop`,
+/// `home`), so apps reading them at import time (`config.js` top level)
+/// boot; an explicit `app.setPath` still overrides the default.
+#[test]
+fn boot_app_dir_seeds_known_folder_defaults() {
+    let home = std::env::var_os("HOME")
+        .or_else(|| std::env::var_os("USERPROFILE"))
+        .map(std::path::PathBuf::from)
+        .expect("boot-paths test needs HOME or USERPROFILE");
+    // Single quotes need no escaping; backslashes (Windows) do.
+    fn js_escape(path: &std::path::Path) -> String {
+        path.to_string_lossy().replace('\\', "\\\\")
+    }
+    let root = std::env::temp_dir().join(format!("strake-boot-paths-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("probe app dir creates");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"paths-probe","main":"main.js"}"#,
+    )
+    .expect("package.json writes");
+    let main = format!(
+        "const electron = require('electron'); \
+         const check = (name, want) => {{ \
+           const got = electron.app.getPath(name); \
+           if (got !== want) {{ throw new Error(name + '=' + got); }} \
+         }}; \
+         check('downloads', '{}'); \
+         check('documents', '{}'); \
+         check('desktop', '{}'); \
+         check('home', '{}'); \
+         electron.app.setPath('downloads', '/tmp/custom-dl'); \
+         if (electron.app.getPath('downloads') !== '/tmp/custom-dl') {{ throw new Error('setPath lost'); }}",
+        js_escape(&home.join("Downloads")),
+        js_escape(&home.join("Documents")),
+        js_escape(&home.join("Desktop")),
+        js_escape(&home),
+    );
+    std::fs::write(root.join("main.js"), main).expect("main.js writes");
+
+    let report = boot_app_dir(&root).expect("paths probe boots");
+    assert!(
+        report.js_errors.is_empty(),
+        "known folders must resolve out of the box, got {:?}",
+        report.js_errors
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Profile grant (webtorrent real boot): the boot grants the app's own
+/// `userData` dir (appData/<name>), so profile reads/writes outside the
+/// app dir succeed — real apps keep state there, and deny-by-default
+/// would EACCES the very first config read.
+#[test]
+fn boot_app_dir_grants_user_data_dir() {
+    let root = std::env::temp_dir().join(format!("strake-boot-userdata-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("probe app dir creates");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"strake-grant-probe","main":"main.js"}"#,
+    )
+    .expect("package.json writes");
+    std::fs::write(
+        root.join("main.js"),
+        "const electron = require('electron'); \
+         const fs = require('fs'); \
+         const userData = electron.app.getPath('userData'); \
+         fs.mkdirSync(userData, { recursive: true }); \
+         const probe = userData + '/strake-grant-probe.txt'; \
+         try { \
+           fs.writeFileSync(probe, 'userdata-ok'); \
+           const back = fs.readFileSync(probe, 'utf8'); \
+           if (back !== 'userdata-ok') { throw new Error('roundtrip mismatch'); } \
+           fs.unlinkSync(probe); \
+           fs.rmdirSync(userData); \
+         } catch (e) { throw new Error('userData not granted: ' + (e.code || e.message)); }",
+    )
+    .expect("main.js writes");
+
+    let report = boot_app_dir(&root).expect("profile probe boots");
+    assert!(
+        report.js_errors.is_empty(),
+        "userData must be granted to the app, got {:?}",
+        report.js_errors
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+/// Sibling vendor grant (webtorrent real boot): the on-disk config dir name
+/// need not match `package.json` (`application-config('WebTorrent')` vs
+/// name `webtorrent-desktop`), so the boot must grant the `appData` root
+/// that contains `userData` — otherwise the first config read EACCESes
+/// (instead of ENOENT for a fresh profile) and the app's async load hangs
+/// with zero diagnostics.
+#[test]
+fn boot_app_dir_grants_app_data_sibling_vendor_dir() {
+    let root = std::env::temp_dir().join(format!("strake-boot-sibling-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&root);
+    std::fs::create_dir_all(&root).expect("probe app dir creates");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"strake-sibling-probe","main":"main.js"}"#,
+    )
+    .expect("package.json writes");
+    std::fs::write(
+        root.join("main.js"),
+        "const electron = require('electron'); \
+         const fs = require('fs'); \
+         const vendor = electron.app.getPath('appData') + '/strake-sibling-vendor'; \
+         fs.mkdirSync(vendor, { recursive: true }); \
+         const probe = vendor + '/strake-sibling-probe.txt'; \
+         try { \
+           fs.writeFileSync(probe, 'sibling-ok'); \
+           const back = fs.readFileSync(probe, 'utf8'); \
+           if (back !== 'sibling-ok') { throw new Error('roundtrip mismatch'); } \
+           fs.unlinkSync(probe); \
+           fs.rmdirSync(vendor); \
+         } catch (e) { throw new Error('appData sibling not granted: ' + (e.code || e.message)); }",
+    )
+    .expect("main.js writes");
+
+    let report = boot_app_dir(&root).expect("sibling probe boots");
+    assert!(
+        report.js_errors.is_empty(),
+        "appData sibling vendor dir must be granted to the app, got {:?}",
+        report.js_errors
+    );
+    let _ = std::fs::remove_dir_all(&root);
+}
