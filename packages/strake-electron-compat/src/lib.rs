@@ -32,6 +32,7 @@
 mod app;
 mod clipboard;
 mod coverage;
+mod crash_reporter;
 mod dialog;
 mod ipc;
 mod menu;
@@ -51,9 +52,10 @@ mod updater;
 mod web_storage;
 mod window;
 
-pub use app::{App, AppEventKind, AppPath};
+pub use app::{App, AppEventKind, AppPath, CommandLine, LoginItemSettings};
 pub use clipboard::{Clipboard, ClipboardBackend, ClipboardError, MemoryClipboard};
 pub use coverage::{ApiEntry, SupportStatus, TOP50};
+pub use crash_reporter::{CrashOptions, CrashReporter};
 pub use dialog::{
     Dialog, DialogBackend, FileFilter, MemoryDialog, MessageBoxOptions, MessageBoxResult,
     MessageBoxType, OpenDialogOptions, OpenDialogResult, OpenProperty, SaveDialogOptions,

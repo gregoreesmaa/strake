@@ -56,18 +56,18 @@ use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
 use std::rc::Rc;
 
-use boa_engine::object::ObjectInitializer;
 use boa_engine::object::builtins::{JsArray, JsFunction, JsPromise, JsUint8Array};
+use boa_engine::object::{FunctionObjectBuilder, ObjectInitializer};
 use boa_engine::property::Attribute;
 use boa_engine::{
     Context, JsError, JsNativeError, JsObject, JsResult, JsString, JsValue, NativeFunction, Source,
     js_string, script::Script,
 };
 use strake_electron_compat::{
-    App, AppPath, Bounds, BrowserWindowOptions, Clipboard, Enforcer, NativeTheme,
-    NotificationCenter, NotificationRequest, PermissionManifest, PowerHub, PowerSaveBlockerKind,
-    PrivilegedScheme, ProtocolRegistry, SafeStorage, Screen, SessionId, SessionRegistry,
-    ThemeSource, WindowManager,
+    App, AppPath, Bounds, BrowserWindowOptions, Clipboard, CrashOptions, CrashReporter, Enforcer,
+    LoginItemSettings, NativeTheme, NotificationCenter, NotificationRequest, PermissionManifest,
+    PowerHub, PowerSaveBlockerKind, PrivilegedScheme, ProtocolRegistry, SafeStorage, Screen,
+    SessionId, SessionRegistry, ThemeSource, WindowManager,
 };
 // Re-exported for embedders driving the issue #92/#93 probes.
 pub use strake_electron_compat::{DeliveredNotification, PowerEvent};
@@ -89,6 +89,19 @@ const ELECTRON_BOOTSTRAP_JS: &str = r#"
         },
         on(event, listener) {
             globalThis.__strake_electron_app_on(event, listener);
+        },
+        once(event, listener) {
+            // One-shot `on` (webtorrent registers `once('ipcReady')`):
+            // the fired flag guards recurring events (`window-all-closed`,
+            // `activate`) whose listeners survive dispatch; the native
+            // validates the listener exactly like `on`.
+            let fired = false;
+            const wrapper = function (...args) {
+                if (fired) return undefined;
+                fired = true;
+                return listener.apply(this, args);
+            };
+            globalThis.__strake_electron_app_on(event, wrapper);
         },
         quit() {
             globalThis.__strake_electron_app_quit();
@@ -120,6 +133,35 @@ const ELECTRON_BOOTSTRAP_JS: &str = r#"
         setPath(name, value) {
             globalThis.__strake_electron_app_set_path(name, value);
         },
+        getLoginItemSettings() {
+            return globalThis.__strake_electron_app_get_login_item_settings();
+        },
+        setLoginItemSettings(settings) {
+            globalThis.__strake_electron_app_set_login_item_settings(settings || {});
+        },
+        requestSingleInstanceLock() {
+            return globalThis.__strake_electron_app_request_single_instance_lock();
+        },
+        emit(event, ...args) {
+            return globalThis.__strake_electron_app_emit(event, ...args);
+        },
+        setAppLogsPath(path) {
+            globalThis.__strake_electron_app_set_app_logs_path(path);
+        },
+        commandLine: {
+            appendSwitch(name, value) {
+                globalThis.__strake_electron_app_command_line_append_switch(name, value);
+            },
+            hasSwitch(name) {
+                return globalThis.__strake_electron_app_command_line_has_switch(name);
+            },
+            getSwitchValue(name) {
+                return globalThis.__strake_electron_app_command_line_get_switch_value(name);
+            },
+            removeSwitch(name) {
+                globalThis.__strake_electron_app_command_line_remove_switch(name);
+            },
+        },
     };
     electron.BrowserWindow = class BrowserWindow {
         constructor(options) {
@@ -148,6 +190,22 @@ const ELECTRON_BOOTSTRAP_JS: &str = r#"
                     globalThis.__strake_electron_window_web_contents_on(id, event, listener);
                     return this;
                 },
+                once(event, listener) {
+                    // One-shot `on` (webtorrent waits one-shot on
+                    // `dom-ready`): the fired flag makes it one-shot; the
+                    // native records like `on`.
+                    if (typeof listener !== "function") {
+                        throw new TypeError("listener must be a function");
+                    }
+                    let fired = false;
+                    const wrapper = function (...args) {
+                        if (fired) return undefined;
+                        fired = true;
+                        return listener.apply(this, args);
+                    };
+                    globalThis.__strake_electron_window_web_contents_on(id, event, wrapper);
+                    return this;
+                },
                 setWindowOpenHandler(handler) {
                     globalThis.__strake_electron_window_web_contents_set_window_open_handler(
                         id,
@@ -173,6 +231,23 @@ const ELECTRON_BOOTSTRAP_JS: &str = r#"
         }
         on(event, listener) {
             globalThis.__strake_electron_window_on(this.__strakeWindowId, event, listener);
+            return this;
+        }
+        once(event, listener) {
+            // One-shot `on` (webtorrent waits one-shot on
+            // `ready-to-show`): same fired-flag wrapper as
+            // `ipcMain.once`; the native keeps only `closed`, other
+            // events record-and-drop exactly like `on`.
+            if (typeof listener !== "function") {
+                throw new TypeError("listener must be a function");
+            }
+            let fired = false;
+            const wrapper = function (...args) {
+                if (fired) return undefined;
+                fired = true;
+                return listener.apply(this, args);
+            };
+            globalThis.__strake_electron_window_on(this.__strakeWindowId, event, wrapper);
             return this;
         }
         close() {
@@ -223,10 +298,52 @@ const ELECTRON_BOOTSTRAP_JS: &str = r#"
         on(channel, listener) {
             globalThis.__strake_electron_ipc_on(channel, listener);
         },
+        once(channel, listener) {
+            // One-shot `on` (webtorrent waits one-shot on `ipcReady`):
+            // dispatch never removes listeners, so the fired flag is what
+            // makes this one-shot; the native validates the listener
+            // exactly like `on`.
+            let fired = false;
+            const wrapper = function (...args) {
+                if (fired) return undefined;
+                fired = true;
+                return listener.apply(this, args);
+            };
+            globalThis.__strake_electron_ipc_on(channel, wrapper);
+        },
+        emit(channel, ...args) {
+            return globalThis.__strake_electron_ipc_emit(channel, ...args);
+        },
     };
     electron.protocol = {
         registerSchemesAsPrivileged(customSchemes) {
             globalThis.__strake_electron_protocol_register_schemes_as_privileged(customSchemes);
+        },
+    };
+    // Built menus keep the template's item graph as plain JS objects
+    // (webtorrent walks `menu.items[].submenu.items` by label to toggle
+    // `enabled`): click handlers stay attached but never fire headless —
+    // native menu/taskbar rendering rides with the #12 OS seats.
+    let __strakeMenuApplicationMenu = null;
+    electron.Menu = {
+        buildFromTemplate(template) {
+            if (!Array.isArray(template)) {
+                throw new TypeError("Menu.buildFromTemplate: template must be an array");
+            }
+            const toItems = (items) => (items || []).map((entry) => {
+                const item = { ...entry };
+                if (Array.isArray(entry.submenu)) {
+                    item.submenu = { items: toItems(entry.submenu) };
+                }
+                return item;
+            });
+            return { items: toItems(template) };
+        },
+        setApplicationMenu(menu) {
+            __strakeMenuApplicationMenu = menu === undefined ? null : menu;
+        },
+        getApplicationMenu() {
+            return __strakeMenuApplicationMenu;
         },
     };
     // Session wrappers are cached by id so the same underlying session is
@@ -318,6 +435,20 @@ const ELECTRON_BOOTSTRAP_JS: &str = r#"
         },
         isStarted(id) {
             return globalThis.__strake_electron_power_save_blocker_is_started(id);
+        },
+    };
+    electron.crashReporter = {
+        start(options) {
+            globalThis.__strake_electron_crash_reporter_start(options || {});
+        },
+        addExtraParameter(key, value) {
+            globalThis.__strake_electron_crash_reporter_add_extra_parameter(key, value);
+        },
+        removeExtraParameter(key) {
+            globalThis.__strake_electron_crash_reporter_remove_extra_parameter(key);
+        },
+        getParameters() {
+            return globalThis.__strake_electron_crash_reporter_get_parameters();
         },
     };
     globalThis.__strake_electron_module = electron;
@@ -418,11 +549,23 @@ const NODE_STANDIN_BOOTSTRAP_JS: &str = r#"
         if (ext && base.endsWith(ext)) base = base.slice(0, base.length - ext.length);
         return base;
     };
+    // Webtorrent real boot calls `path.extname(posterFileName)` per
+    // default torrent: last dot of the final segment, ignoring trailing
+    // separators; leading-dot names (`.gitignore`) carry no extension.
+    const extname = (p) => {
+        let s = String(p);
+        s = WIN ? s.replace(/[/\\]+$/, "") : s.replace(/\/+$/, "");
+        const base = (WIN ? s.split(/[/\\]/) : s.split("/")).pop() || "";
+        const idx = base.lastIndexOf(".");
+        if (idx <= 0) return "";
+        return base.slice(idx);
+    };
     const pathModule = {
         join,
         normalize: (p) => join(String(p)),
         dirname,
         basename,
+        extname,
         isAbsolute: (p) => {
             const s = String(p);
             if (s.startsWith("/")) return true;
@@ -777,6 +920,72 @@ const NODE_STANDIN_BOOTSTRAP_JS: &str = r#"
             }
             static isBuffer(value) {
                 return value instanceof Buffer;
+            }
+            // `concat` (webtorrent real boot): `bencode` reassembles
+            // buffers at parse time. Accepts any `Uint8Array` entries
+            // (superset of Node's Buffers-only check); `totalLength`
+            // truncates or zero-pads like Node.
+            static concat(list, totalLength) {
+                if (!Array.isArray(list)) {
+                    throw new TypeError("The \"list\" argument must be an Array of Buffers.");
+                }
+                const parts = list.map((item) => {
+                    if (item instanceof Uint8Array) return item;
+                    throw new TypeError("The \"list\" argument must be an Array of Buffers.");
+                });
+                let total = parts.reduce((sum, part) => sum + part.length, 0);
+                if (totalLength !== undefined) {
+                    total = Number(totalLength);
+                    if (!Number.isInteger(total) || total < 0) {
+                        throw new RangeError("The \"totalLength\" argument must be a non-negative integer.");
+                    }
+                }
+                const out = new Buffer(total);
+                let offset = 0;
+                for (const part of parts) {
+                    const room = Math.min(part.length, total - offset);
+                    for (let i = 0; i < room; i++) out[offset + i] = part[i];
+                    offset += room;
+                    if (offset >= total) break;
+                }
+                return out;
+            }
+            // `byteLength` (webtorrent real boot): `bencode` measures
+            // strings before encoding. Strings encode per `encoding`
+            // (`utf8` default); Buffers, views, and `ArrayBuffer`s report
+            // their length; anything else throws like Node.
+            static byteLength(value, encoding) {
+                if (typeof value === "string") {
+                    const name = normalizeEncoding(encoding);
+                    if (name === "utf16le" || name === "ucs2") return value.length * 2;
+                    return encodeString(value, encoding).length;
+                }
+                if (value instanceof ArrayBuffer) return value.byteLength;
+                if (value && ArrayBuffer.isView(value)) return value.byteLength;
+                throw new TypeError("The \"string\" argument must be of type string or an instance of Buffer or ArrayBuffer.");
+            }
+            // `copy` (webtorrent real boot): `bencode` copies into
+            // pre-sized targets. Out-of-range ends clamp; negative
+            // starts throw like Node. Returns bytes copied.
+            copy(target, targetStart, sourceStart, sourceEnd) {
+                if (!(target instanceof Uint8Array)) {
+                    throw new TypeError("The \"target\" argument must be an instance of Buffer or Uint8Array.");
+                }
+                const toIndex = (value, fallback) => {
+                    if (value === undefined) return fallback;
+                    const n = Math.trunc(Number(value));
+                    if (Number.isNaN(n)) return fallback;
+                    if (n < 0) {
+                        throw new RangeError("Out of range index.");
+                    }
+                    return n;
+                };
+                const tStart = toIndex(targetStart, 0);
+                const sStart = toIndex(sourceStart, 0);
+                const sEnd = Math.min(toIndex(sourceEnd, this.length), this.length);
+                const count = Math.max(0, Math.min(sEnd - sStart, target.length - tStart));
+                for (let i = 0; i < count; i++) target[tStart + i] = this[sStart + i];
+                return count;
             }
             toString(encoding, start, end) {
                 const name = normalizeEncoding(encoding || "utf8");
@@ -1315,6 +1524,162 @@ const NODE_STANDIN_BOOTSTRAP_JS: &str = r#"
             promisify,
             TextEncoder: globalThis.TextEncoder,
             TextDecoder: globalThis.TextDecoder,
+        };
+    })();
+    // `querystring` (webtorrent real boot): `simple-get` (via
+    // `parse-torrent`) requires it at import time. Semantics verified
+    // against Node: `parse` decodes `+` as space (only there —
+    // `unescape` preserves it), non-string `parse` input yields `{}`,
+    // `stringify` takes own enumerable keys of objects only (strings
+    // yield `""`), and results use a null prototype like Node's.
+    const querystringModule = (() => {
+        const encodeChar = (code) => {
+            if (
+                (code >= 0x41 && code <= 0x5a) || // A-Z
+                (code >= 0x61 && code <= 0x7a) || // a-z
+                (code >= 0x30 && code <= 0x39) || // 0-9
+                code === 0x2d || // -
+                code === 0x5f || // _
+                code === 0x2e || // .
+                code === 0x7e || // ~
+                code === 0x21 || // !
+                code === 0x27 || // '
+                code === 0x28 || // (
+                code === 0x29 || // )
+                code === 0x2a // *
+            ) {
+                return String.fromCharCode(code);
+            }
+            return null;
+        };
+        // `escape`: UTF-8 percent-encoding with uppercase hex, matching
+        // `encodeURIComponent`'s output (verified: `!` stays bare).
+        const escape = (str) => {
+            const text = String(str);
+            let out = "";
+            for (let i = 0; i < text.length; i++) {
+                const plain = encodeChar(text.charCodeAt(i));
+                if (plain !== null) {
+                    out += plain;
+                    continue;
+                }
+                const code = text.charCodeAt(i);
+                let point = code;
+                if (code >= 0xd800 && code <= 0xdbff && i + 1 < text.length) {
+                    const next = text.charCodeAt(i + 1);
+                    if (next >= 0xdc00 && next <= 0xdfff) {
+                        point = 0x10000 + ((code - 0xd800) << 10) + (next - 0xdc00);
+                        i++;
+                    }
+                }
+                if (point >= 0xd800 && point <= 0xdfff) {
+                    throw new URIError("lone surrogate in querystring.escape");
+                }
+                const bytes = [];
+                if (point < 0x80) {
+                    bytes.push(point);
+                } else if (point < 0x800) {
+                    bytes.push(0xc0 | (point >> 6), 0x80 | (point & 0x3f));
+                } else if (point < 0x10000) {
+                    bytes.push(0xe0 | (point >> 12), 0x80 | ((point >> 6) & 0x3f), 0x80 | (point & 0x3f));
+                } else {
+                    bytes.push(
+                        0xf0 | (point >> 18),
+                        0x80 | ((point >> 12) & 0x3f),
+                        0x80 | ((point >> 6) & 0x3f),
+                        0x80 | (point & 0x3f),
+                    );
+                }
+                for (const byte of bytes) {
+                    out += "%" + byte.toString(16).toUpperCase().padStart(2, "0");
+                }
+            }
+            return out;
+        };
+        // `unescape`: `decodeURIComponent`, falling back to lenient
+        // per-run decoding (valid `%XX` runs decode, strays stay
+        // literal), matching Node on malformed input.
+        const unescape = (str) => {
+            const text = String(str);
+            try {
+                return decodeURIComponent(text);
+            } catch (e) {
+                return text.replace(/(%[0-9a-fA-F]{2})+/g, (run) => {
+                    try {
+                        return decodeURIComponent(run);
+                    } catch (ignored) {
+                        return run;
+                    }
+                });
+            }
+        };
+        const parse = (str, sep, eq, options) => {
+            const result = Object.create(null);
+            if (typeof str !== "string" || str.length === 0) return result;
+            const separator = sep === undefined ? "&" : String(sep);
+            const equals = eq === undefined ? "=" : String(eq);
+            const maxKeys =
+                options && typeof options.maxKeys === "number" && options.maxKeys > 0
+                    ? Math.floor(options.maxKeys)
+                    : Infinity;
+            const pairs = str.split(separator);
+            const limit = Math.min(pairs.length, maxKeys);
+            for (let i = 0; i < limit; i++) {
+                const pair = pairs[i];
+                if (pair.length === 0) continue;
+                const idx = pair.indexOf(equals);
+                const rawKey = idx < 0 ? pair : pair.slice(0, idx);
+                const rawValue = idx < 0 ? "" : pair.slice(idx + equals.length);
+                const key = unescape(rawKey.replace(/\+/g, " "));
+                const value = unescape(rawValue.replace(/\+/g, " "));
+                if (Object.prototype.hasOwnProperty.call(result, key)) {
+                    const current = result[key];
+                    if (Array.isArray(current)) current.push(value);
+                    else result[key] = [current, value];
+                } else {
+                    result[key] = value;
+                }
+            }
+            return result;
+        };
+        const stringifyPrimitive = (value) => {
+            switch (typeof value) {
+                case "string":
+                    return value;
+                case "number":
+                    return Number.isFinite(value) ? String(value) : "";
+                case "boolean":
+                case "bigint":
+                    return String(value);
+                default:
+                    return "";
+            }
+        };
+        const stringify = (obj, sep, eq) => {
+            const separator = sep === undefined ? "&" : String(sep);
+            const equals = eq === undefined ? "=" : String(eq);
+            if (obj === null || typeof obj !== "object") return "";
+            const fields = [];
+            for (const key of Object.keys(obj)) {
+                const encodedKey = escape(stringifyPrimitive(key));
+                const value = obj[key];
+                if (Array.isArray(value)) {
+                    for (const item of value) {
+                        fields.push(encodedKey + equals + escape(stringifyPrimitive(item)));
+                    }
+                } else {
+                    fields.push(encodedKey + equals + escape(stringifyPrimitive(value)));
+                }
+            }
+            return fields.join(separator);
+        };
+        return {
+            parse,
+            decode: parse,
+            stringify,
+            encode: stringify,
+            escape,
+            unescape,
         };
     })();
     // `assert` subset (issue #155): callable assertion plus the comparison
@@ -2644,6 +3009,8 @@ const NODE_STANDIN_BOOTSTRAP_JS: &str = r#"
         tty: ttyModule,
         "node:os": osModule,
         os: osModule,
+        "node:querystring": querystringModule,
+        querystring: querystringModule,
         "node:zlib": zlibModule,
         zlib: zlibModule,
         "node:http": httpModule,
@@ -2970,6 +3337,9 @@ const NODE_FS_BOOTSTRAP_JS: &str = r#"
         mkdirSync(path, options) {
             __strake_fs_mkdir(toPath(path), !!(options && options.recursive));
         },
+        rmdirSync(path, options) {
+            __strake_fs_rmdir(toPath(path), !!(options && options.recursive));
+        },
         readFileSync(path, options) {
             const bytes = __strake_fs_read(toPath(path));
             const encoding = typeof options === "string" ? options : options && options.encoding;
@@ -3221,6 +3591,21 @@ const NODE_FS_BOOTSTRAP_JS: &str = r#"
                 }
             });
         },
+        rmdir(path, options, callback) {
+            if (typeof options === "function") {
+                callback = options;
+                options = undefined;
+            }
+            if (typeof callback !== "function") throw new TypeError("callback must be a function");
+            queueMicrotask(() => {
+                try {
+                    fs.rmdirSync(path, options);
+                    callback(null);
+                } catch (error) {
+                    callback(error);
+                }
+            });
+        },
         copyFile(from, to, callback) {
             if (typeof callback !== "function") throw new TypeError("callback must be a function");
             queueMicrotask(() => {
@@ -3288,6 +3673,7 @@ const NODE_FS_BOOTSTRAP_JS: &str = r#"
         lstat: (path) => Promise.resolve().then(() => fs.lstatSync(path)),
         readdir: (path) => Promise.resolve().then(() => fs.readdirSync(path)),
         mkdir: (path, options) => Promise.resolve().then(() => fs.mkdirSync(path, options)),
+        rmdir: (path, options) => Promise.resolve().then(() => fs.rmdirSync(path, options)),
         unlink: (path) => Promise.resolve().then(() => fs.unlinkSync(path)),
         rename: (from, to) => Promise.resolve().then(() => fs.renameSync(from, to)),
         copyFile: (from, to) => Promise.resolve().then(() => fs.copyFileSync(from, to)),
@@ -3375,6 +3761,9 @@ struct ElectronHostState {
     /// defaults to light until the shell installs the OS scheme via
     /// `note_system_change`.
     native_theme: NativeTheme,
+    /// `crashReporter` recorder (webtorrent real boot): `start` options plus
+    /// the extra-parameter table. Upload stays a fallback-surface follow-up.
+    crash_reporter: CrashReporter,
     /// CommonJS module cache (canonical path -> exports) for the
     /// relative-file / `node_modules` loader (issue #151). Cached before
     /// evaluation so circular requires observe partial exports, matching
@@ -3384,6 +3773,13 @@ struct ElectronHostState {
     /// circular-require detection (issue #151). Empty during the top-level
     /// main-script eval, where `./x` resolves against the app root.
     require_stack: Vec<PathBuf>,
+    /// Defining-module directories for module-scoped `require` (webtorrent
+    /// real boot): each file loaded through [`load_resolved_file`] registers
+    /// its parent dir here and receives a `require` bound to that scope, so
+    /// a `require` deferred inside the module's functions still resolves
+    /// against the defining file. Node binds `require` per module; the stack
+    /// above only ever sees the dynamic caller.
+    module_scope_dirs: Vec<PathBuf>,
     /// Capability grants for the `node:fs` sync primitives (issue #154):
     /// deny-by-default, so a host without an explicit manifest refuses every
     /// filesystem operation (`EACCES`, never an existence oracle).
@@ -3513,10 +3909,12 @@ impl ElectronHost {
                 notification_clicks: HashMap::new(),
                 power: PowerHub::new(),
                 native_theme: NativeTheme::new(false),
+                crash_reporter: CrashReporter::new(),
                 power_listeners: HashMap::new(),
                 safe_storage: SafeStorage::recording(),
                 module_cache: HashMap::new(),
                 require_stack: Vec::new(),
+                module_scope_dirs: Vec::new(),
                 permissions: Enforcer::new(PermissionManifest::default()),
                 fs_fds: HashMap::new(),
                 fs_next_fd: crate::node_fs::FIRST_FD,
@@ -3532,6 +3930,14 @@ impl ElectronHost {
     pub fn with_permissions(self, manifest: PermissionManifest) -> Self {
         self.shared.0.borrow_mut().permissions = Enforcer::new(manifest);
         self
+    }
+
+    /// Seed a core named path without JS (`app.setPath` from the embedder):
+    /// the boot path uses this for Electron's `HOME`-derived known folders.
+    /// Explicit `app.setPath` calls overwrite these defaults, and names
+    /// never seeded keep the fail-closed throw.
+    pub fn set_app_path(&self, path: AppPath, value: PathBuf) {
+        self.shared.0.borrow_mut().app.set_path(path, value);
     }
 
     /// Snapshot the boot main-process state for one headed paint (issue
@@ -3854,9 +4260,14 @@ fn record_callback_error(context: &mut Context, what: &str, error: &JsError) {
 
 /// Call JS callbacks with `undefined` as `this`, recording (not propagating)
 /// each failure so one throwing listener cannot silence its siblings.
-fn call_js_listeners(context: &mut Context, what: &str, listeners: Vec<JsObject>) {
+fn call_js_listeners(
+    context: &mut Context,
+    what: &str,
+    listeners: Vec<JsObject>,
+    args: &[JsValue],
+) {
     for listener in listeners {
-        if let Err(error) = listener.call(&JsValue::undefined(), &[], context) {
+        if let Err(error) = listener.call(&JsValue::undefined(), args, context) {
             record_callback_error(context, what, &error);
         }
     }
@@ -3888,7 +4299,29 @@ fn fire_app_event(context: &mut Context, event: &str) {
                 .extend(listeners.iter().cloned());
         }
     }
-    call_js_listeners(context, &format!("app '{event}' listener"), listeners);
+    call_js_listeners(context, &format!("app '{event}' listener"), listeners, &[]);
+}
+
+/// Dispatch `app` listeners without removal (`app.emit`, webtorrent relays
+/// `ipcReady` this way): true `emit` semantics — listeners survive, unlike
+/// the one-shot internal flows above. Returns whether any listener ran.
+fn emit_app_event(context: &mut Context, event: &str, args: &[JsValue]) -> bool {
+    let listeners = electron_state(context)
+        .map(|shared| {
+            shared
+                .0
+                .borrow()
+                .app_listeners
+                .get(event)
+                .cloned()
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
+    let had = !listeners.is_empty();
+    if had {
+        call_js_listeners(context, &format!("app '{event}' listener"), listeners, args);
+    }
+    had
 }
 
 pub(crate) fn require_string_arg(args: &[JsValue], index: usize, what: &str) -> JsResult<String> {
@@ -4306,10 +4739,29 @@ fn load_resolved_file(
             .ok_or_else(|| {
                 JsError::from(JsNativeError::typ().with_message("module wrapper is not callable"))
             })?;
-        let require_fn = global.get(js_string!("require"), context)?;
+        // Module-scoped `require` (webtorrent real boot): Node binds
+        // `require` to the defining module, so register this file's
+        // directory and hand the wrapper a `require` closed over that scope
+        // id. The closure only captures a `u64`, so `from_copy_closure`
+        // stays safe without `unsafe`.
+        let scope = {
+            let mut state = shared.0.borrow_mut();
+            let scope = state.module_scope_dirs.len() as u64;
+            state.module_scope_dirs.push(parent_dir.clone());
+            scope
+        };
+        let scoped_require = FunctionObjectBuilder::new(
+            context.realm(),
+            NativeFunction::from_copy_closure(move |_, args, context| {
+                e_require_scoped(scope, args, context)
+            }),
+        )
+        .name("require")
+        .length(1)
+        .build();
         let call_args = [
             JsValue::from(exports_obj.clone()),
-            require_fn,
+            JsValue::from(scoped_require),
             JsValue::from(module_obj.clone()),
             filename_js,
             dirname_js,
@@ -4343,6 +4795,12 @@ fn load_resolved_file(
 /// (`node:path`, `node:url`, `node:process`, `node:events`), plus the
 /// relative-file and `node_modules` CommonJS loader (issue #151); anything
 /// else throws Node's "Cannot find module" error.
+///
+/// Dynamically scoped: relative specifiers resolve against the innermost
+/// loading file on `require_stack` (falling back to the app root for the
+/// top-level main-script eval). Files loaded through the loader instead get
+/// a module-scoped `require` (see [`e_require_scoped`]); this global only
+/// serves the entry eval, which has no defining module.
 fn e_require(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let specifier = require_string_arg(args, 0, "require")?;
     if specifier == "electron" {
@@ -4366,6 +4824,59 @@ fn e_require(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<J
         let shared = electron_state(context)?;
         let app_root = app_root_dir(context);
         if let Some(path) = resolve_commonjs(&specifier, &shared, &app_root) {
+            return load_resolved_file(&path, &shared, context);
+        }
+    }
+    Err(cannot_find_module(&specifier))
+}
+
+/// `require(specifier)` bound to one defining module (webtorrent real boot):
+/// the same surface as [`e_require`], but relative and bare specifiers
+/// resolve against the module's own directory instead of the dynamic caller
+/// on top of `require_stack`. Node binds `require` per module, so a call
+/// deferred inside the module's functions (webtorrent's `crash-reporter`
+/// `init()` requiring `./config` after `main` called into it) must still
+/// see the defining file's siblings.
+fn e_require_scoped(scope: u64, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let specifier = require_string_arg(args, 0, "require")?;
+    if specifier == "electron" {
+        let shared = electron_state(context)?;
+        return shared
+            .0
+            .borrow()
+            .module
+            .clone()
+            .map(JsValue::from)
+            .ok_or_else(|| {
+                JsNativeError::error()
+                    .with_message("Electron module not initialised")
+                    .into()
+            });
+    }
+    if let Some(module) = node_standin_module(context, &specifier)? {
+        return Ok(module);
+    }
+    if !is_node_core(&specifier) {
+        let shared = electron_state(context)?;
+        let app_root = app_root_dir(context);
+        let base = shared
+            .0
+            .borrow()
+            .module_scope_dirs
+            .get(scope as usize)
+            .cloned()
+            .unwrap_or_else(|| app_root.clone());
+        let resolved = if specifier.starts_with("./")
+            || specifier.starts_with("../")
+            || specifier.starts_with('/')
+        {
+            resolve_relative(&specifier, &base)
+        } else if specifier.starts_with('.') {
+            None
+        } else {
+            resolve_bare(&specifier, &base, &app_root)
+        };
+        if let Some(path) = resolved {
             return load_resolved_file(&path, &shared, context);
         }
     }
@@ -4414,6 +4925,16 @@ fn e_app_on(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<Js
     Ok(JsValue::undefined())
 }
 
+/// `app.emit(event, ...args)` (webtorrent `ipc.init` relays `ipcReady`
+/// this way): synchronously run the registered listeners with the given
+/// args, `EventEmitter.emit` semantics (listeners survive; returns whether
+/// any ran).
+fn e_app_emit(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let event = require_string_arg(args, 0, "app.emit")?;
+    let rest = args.get(1..).unwrap_or(&[]).to_vec();
+    Ok(JsValue::from(emit_app_event(context, &event, &rest)))
+}
+
 /// `app.quit()`: fire JS `before-quit`/`will-quit` listeners, then run the
 /// compat shutdown (which emits the Rust-side events in the same order).
 fn e_app_quit(_: &JsValue, _: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
@@ -4458,8 +4979,8 @@ enum ElectronPathTarget {
 
 /// Map an `app.getPath`/`setPath` name to its target. `sessionData` aliases
 /// `userData` (its Electron default — the core keeps no separate
-/// session-data slot). `logs`/`music`/`pictures`/`videos`/`crashDumps` are
-/// real Electron names but have no core slot and no OS derivation, so they
+/// session-data slot). `music`/`pictures`/`videos`/`crashDumps` are real
+/// Electron names but have no core slot and no OS derivation, so they
 /// report as unavailable rather than inventing directories.
 fn electron_path_target(name: &str) -> Result<ElectronPathTarget, String> {
     match name {
@@ -4470,9 +4991,10 @@ fn electron_path_target(name: &str) -> Result<ElectronPathTarget, String> {
         "desktop" => Ok(ElectronPathTarget::Core(AppPath::Desktop)),
         "documents" => Ok(ElectronPathTarget::Core(AppPath::Documents)),
         "downloads" => Ok(ElectronPathTarget::Core(AppPath::Downloads)),
+        "logs" => Ok(ElectronPathTarget::Core(AppPath::Logs)),
         "exe" => Ok(ElectronPathTarget::Exe),
         "module" => Ok(ElectronPathTarget::ModuleDir),
-        "logs" | "music" | "pictures" | "videos" | "crashDumps" => Err(format!(
+        "music" | "pictures" | "videos" | "crashDumps" => Err(format!(
             "Path '{name}' is not available in this embedder (no backing store)"
         )),
         _ => Err(format!("Unknown path '{name}'")),
@@ -4511,6 +5033,166 @@ fn e_app_get_path(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsRes
         ElectronPathTarget::ModuleDir => app_root_dir(context),
     };
     Ok(JsValue::from(js_string!(path.to_string_lossy().as_ref())))
+}
+
+/// `app.commandLine.appendSwitch(name[, value])` (webtorrent real boot):
+/// record the switch; enforcement against a real Chromium stays a
+/// fallback-surface follow-up.
+fn e_app_command_line_append_switch(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let name = require_string_arg(args, 0, "app.commandLine.appendSwitch")?;
+    let value = match args.get(1) {
+        None => None,
+        Some(raw) if raw.is_undefined() || raw.is_null() => None,
+        Some(raw) => Some(to_rust_string(raw, context)?),
+    };
+    electron_state(context)?
+        .0
+        .borrow_mut()
+        .app
+        .command_line_mut()
+        .append_switch(name, value);
+    Ok(JsValue::undefined())
+}
+
+/// `app.commandLine.hasSwitch(name)`.
+fn e_app_command_line_has_switch(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let name = require_string_arg(args, 0, "app.commandLine.hasSwitch")?;
+    Ok(JsValue::from(
+        electron_state(context)?
+            .0
+            .borrow()
+            .app
+            .command_line()
+            .has_switch(&name),
+    ))
+}
+
+/// `app.commandLine.getSwitchValue(name)`: empty when valueless or absent.
+fn e_app_command_line_get_switch_value(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let name = require_string_arg(args, 0, "app.commandLine.getSwitchValue")?;
+    let value = electron_state(context)?
+        .0
+        .borrow()
+        .app
+        .command_line()
+        .get_switch_value(&name)
+        .to_string();
+    Ok(JsValue::from(js_string!(value.as_str())))
+}
+
+/// `app.commandLine.removeSwitch(name)`.
+fn e_app_command_line_remove_switch(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let name = require_string_arg(args, 0, "app.commandLine.removeSwitch")?;
+    electron_state(context)?
+        .0
+        .borrow_mut()
+        .app
+        .command_line_mut()
+        .remove_switch(&name);
+    Ok(JsValue::undefined())
+}
+
+/// `app.getLoginItemSettings()`: the recorded login-item snapshot.
+fn e_app_get_login_item_settings(
+    _: &JsValue,
+    _: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let settings = electron_state(context)?
+        .0
+        .borrow()
+        .app
+        .login_item_settings();
+    let mut init = ObjectInitializer::new(context);
+    init.property(
+        js_string!("openAtLogin"),
+        settings.open_at_login,
+        Attribute::all(),
+    );
+    init.property(
+        js_string!("openAsHidden"),
+        settings.open_as_hidden,
+        Attribute::all(),
+    );
+    init.property(
+        js_string!("wasOpenedAsHidden"),
+        settings.was_opened_as_hidden,
+        Attribute::all(),
+    );
+    Ok(JsValue::from(init.build()))
+}
+
+/// `app.setLoginItemSettings(settings)`: record the snapshot.
+fn e_app_set_login_item_settings(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let mut settings = LoginItemSettings::default();
+    if let Some(obj) = args.first().and_then(|value| value.as_object()) {
+        settings.open_at_login = options_bool(&obj, "openAtLogin", false, context)?;
+        settings.open_as_hidden = options_bool(&obj, "openAsHidden", false, context)?;
+        settings.was_opened_as_hidden = options_bool(&obj, "wasOpenedAsHidden", false, context)?;
+    }
+    electron_state(context)?
+        .0
+        .borrow_mut()
+        .app
+        .set_login_item_settings(settings);
+    Ok(JsValue::undefined())
+}
+
+/// `app.setAppLogsPath([path])` (webtorrent real boot): record the log
+/// directory; a missing arg resets to the `userData/logs` default,
+/// matching Electron's no-arg call.
+fn e_app_set_app_logs_path(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let value = match args.first() {
+        None => None,
+        Some(raw) if raw.is_undefined() || raw.is_null() => None,
+        Some(raw) => Some(PathBuf::from(to_rust_string(raw, context)?)),
+    };
+    electron_state(context)?
+        .0
+        .borrow_mut()
+        .app
+        .set_app_logs_path(value);
+    Ok(JsValue::undefined())
+}
+
+/// `app.requestSingleInstanceLock()` (webtorrent real boot): this boot
+/// holds the lock (see [`App::request_single_instance_lock`]).
+fn e_app_request_single_instance_lock(
+    _: &JsValue,
+    _: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    Ok(JsValue::from(
+        electron_state(context)?
+            .0
+            .borrow()
+            .app
+            .request_single_instance_lock(),
+    ))
 }
 
 /// `app.setName(name)`: rename the app (issue #155); later `getName()`
@@ -5382,7 +6064,7 @@ fn e_window_close(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsRes
             .window_closed_listeners
             .remove(&id)
             .unwrap_or_default();
-        call_js_listeners(context, "win 'closed' listener", listeners);
+        call_js_listeners(context, "win 'closed' listener", listeners, &[]);
     }
     if last_closed {
         shared.0.borrow_mut().app.note_window_closed(0);
@@ -5614,6 +6296,98 @@ fn e_power_save_blocker_is_started(
     ))
 }
 
+/// Read one optional string field from an options bag (webtorrent
+/// `crashReporter.start`): absent/nullish reads as empty, anything else
+/// stringifies like Electron's option coercion.
+fn crash_option_string(options: &JsObject, name: &str, context: &mut Context) -> JsResult<String> {
+    let value = options.get(JsString::from(name), context)?;
+    if value.is_undefined() || value.is_null() {
+        return Ok(String::new());
+    }
+    to_rust_string(&value, context)
+}
+
+/// `crashReporter.start(options)` (webtorrent real boot): record the
+/// options on the compat reporter; minidump upload stays a
+/// fallback-surface follow-up, so this succeeds wherever Electron's
+/// synchronous `start` does.
+fn e_crash_reporter_start(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let mut options = CrashOptions::default();
+    if let Some(obj) = args.first().and_then(|value| value.as_object()) {
+        options.product_name = crash_option_string(&obj, "productName", context)?;
+        options.company_name = crash_option_string(&obj, "companyName", context)?;
+        options.submit_url = crash_option_string(&obj, "submitURL", context)?;
+        options.compress = options_bool(&obj, "compress", false, context)?;
+        let extra = obj.get(JsString::from("globalExtra"), context)?;
+        if let Ok(serde_json::Value::Object(map)) = js_to_json(&extra, context) {
+            for (key, value) in map {
+                if let Some(text) = value.as_str() {
+                    options.extra.insert(key, text.to_string());
+                }
+            }
+        }
+    }
+    electron_state(context)?
+        .0
+        .borrow_mut()
+        .crash_reporter
+        .start(options);
+    Ok(JsValue::undefined())
+}
+
+/// `crashReporter.addExtraParameter(key, value)`.
+fn e_crash_reporter_add_extra_parameter(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let key = require_string_arg(args, 0, "crashReporter.addExtraParameter")?;
+    let value = require_string_arg(args, 1, "crashReporter.addExtraParameter")?;
+    electron_state(context)?
+        .0
+        .borrow_mut()
+        .crash_reporter
+        .add_extra_parameter(key, value);
+    Ok(JsValue::undefined())
+}
+
+/// `crashReporter.removeExtraParameter(key)`.
+fn e_crash_reporter_remove_extra_parameter(
+    _: &JsValue,
+    args: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let key = require_string_arg(args, 0, "crashReporter.removeExtraParameter")?;
+    electron_state(context)?
+        .0
+        .borrow_mut()
+        .crash_reporter
+        .remove_extra_parameter(&key);
+    Ok(JsValue::undefined())
+}
+
+/// `crashReporter.getParameters()`: snapshot of the extra table.
+fn e_crash_reporter_get_parameters(
+    _: &JsValue,
+    _: &[JsValue],
+    context: &mut Context,
+) -> JsResult<JsValue> {
+    let shared = electron_state(context)?;
+    let mut init = ObjectInitializer::new(context);
+    for (key, value) in shared.0.borrow().crash_reporter.parameters() {
+        init.property(
+            JsString::from(key.as_str()),
+            JsValue::from(js_string!(value.as_str())),
+            Attribute::all(),
+        );
+    }
+    Ok(JsValue::from(init.build()))
+}
+
 /// `ipcMain.on(channel, listener)`: record a broadcast listener.
 fn e_ipc_on(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
     let channel = require_string_arg(args, 0, "ipcMain.on")?;
@@ -5626,6 +6400,35 @@ fn e_ipc_on(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<Js
         .or_default()
         .push(listener);
     Ok(JsValue::undefined())
+}
+
+/// `ipcMain.emit(channel, ...args)` (webtorrent relays `wt-*` through its
+/// own patched `emit`, and tests drive `once` through this): synchronously
+/// run the channel listeners as `(event, ...args)` with a fresh event
+/// object, `EventEmitter.emit` semantics (listeners survive; returns
+/// whether any ran).
+fn e_ipc_emit(_: &JsValue, args: &[JsValue], context: &mut Context) -> JsResult<JsValue> {
+    let channel = require_string_arg(args, 0, "ipcMain.emit")?;
+    let shared = electron_state(context)?;
+    let listeners = shared
+        .0
+        .borrow()
+        .ipc_listeners
+        .get(&channel)
+        .cloned()
+        .unwrap_or_default();
+    let had = !listeners.is_empty();
+    if had {
+        let mut call_args = Vec::with_capacity(args.len());
+        call_args.push(JsValue::from(ObjectInitializer::new(context).build()));
+        call_args.extend_from_slice(args.get(1..).unwrap_or(&[]));
+        for listener in listeners {
+            if let Err(error) = listener.call(&JsValue::undefined(), &call_args, context) {
+                record_callback_error(context, "ipcMain.emit listener", &error);
+            }
+        }
+    }
+    Ok(JsValue::from(had))
 }
 
 fn register_primitive(
@@ -6241,6 +7044,12 @@ impl crate::runtime::ScriptRuntime {
         register_primitive(&mut self.context, "__strake_electron_app_on", 2, e_app_on);
         register_primitive(
             &mut self.context,
+            "__strake_electron_app_emit",
+            5,
+            e_app_emit,
+        );
+        register_primitive(
+            &mut self.context,
             "__strake_electron_app_quit",
             0,
             e_app_quit,
@@ -6367,6 +7176,54 @@ impl crate::runtime::ScriptRuntime {
         );
         register_primitive(
             &mut self.context,
+            "__strake_electron_app_get_login_item_settings",
+            0,
+            e_app_get_login_item_settings,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_app_set_login_item_settings",
+            1,
+            e_app_set_login_item_settings,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_app_command_line_append_switch",
+            2,
+            e_app_command_line_append_switch,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_app_command_line_has_switch",
+            1,
+            e_app_command_line_has_switch,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_app_command_line_get_switch_value",
+            1,
+            e_app_command_line_get_switch_value,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_app_command_line_remove_switch",
+            1,
+            e_app_command_line_remove_switch,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_app_request_single_instance_lock",
+            0,
+            e_app_request_single_instance_lock,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_app_set_app_logs_path",
+            1,
+            e_app_set_app_logs_path,
+        );
+        register_primitive(
+            &mut self.context,
             "__strake_electron_window_create",
             1,
             e_window_create,
@@ -6488,6 +7345,12 @@ impl crate::runtime::ScriptRuntime {
         register_primitive(&mut self.context, "__strake_electron_ipc_on", 2, e_ipc_on);
         register_primitive(
             &mut self.context,
+            "__strake_electron_ipc_emit",
+            5,
+            e_ipc_emit,
+        );
+        register_primitive(
+            &mut self.context,
             "__strake_electron_clipboard_read_text",
             0,
             e_clipboard_read_text,
@@ -6546,6 +7409,30 @@ impl crate::runtime::ScriptRuntime {
             1,
             e_power_save_blocker_is_started,
         );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_crash_reporter_start",
+            1,
+            e_crash_reporter_start,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_crash_reporter_add_extra_parameter",
+            2,
+            e_crash_reporter_add_extra_parameter,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_crash_reporter_remove_extra_parameter",
+            1,
+            e_crash_reporter_remove_extra_parameter,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_electron_crash_reporter_get_parameters",
+            0,
+            e_crash_reporter_get_parameters,
+        );
 
         self.context.insert_data(shared.clone());
         self.eval(ELECTRON_BOOTSTRAP_JS, "<strake-electron-bootstrap>");
@@ -6583,6 +7470,12 @@ impl crate::runtime::ScriptRuntime {
             "__strake_fs_mkdir",
             2,
             crate::node_fs::fs_mkdir,
+        );
+        register_primitive(
+            &mut self.context,
+            "__strake_fs_rmdir",
+            2,
+            crate::node_fs::fs_rmdir,
         );
         register_primitive(
             &mut self.context,
@@ -6695,7 +7588,12 @@ impl crate::runtime::ScriptRuntime {
             let resolvers = std::mem::take(&mut state.when_ready_resolvers);
             (listeners, resolvers)
         };
-        call_js_listeners(&mut self.context, "app 'ready' listener", ready_listeners);
+        call_js_listeners(
+            &mut self.context,
+            "app 'ready' listener",
+            ready_listeners,
+            &[],
+        );
         for resolve in resolvers {
             if let Err(error) = resolve.call(&JsValue::undefined(), &[], &mut self.context) {
                 record_callback_error(&mut self.context, "app.whenReady() resolver", &error);
