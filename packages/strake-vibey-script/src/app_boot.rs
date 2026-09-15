@@ -22,6 +22,7 @@ use strake_html::{DocumentHtmlParser, HtmlProvider};
 use strake_traits::shell::{ColorScheme, Viewport};
 
 use crate::{ElectronHost, ScriptDocument};
+use strake_dom::Document as _;
 
 /// One window the app's `main` script created, with its entry page loaded.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -179,13 +180,35 @@ impl IpcProof {
 /// loads each created window's entry HTML: first paint plus preload execution
 /// in renderer scope. Remote (`http(s)`) targets are recorded, not fetched.
 pub fn boot_app_dir(app_dir: &Path) -> Result<AppBootReport, BootError> {
-    boot_inner(app_dir, false).map(|(report, _)| report)
+    boot_inner(app_dir, false, &[]).map(|(report, _)| report)
+}
+
+/// Knobs for [`boot_app_dir_with_options`].
+#[derive(Debug, Clone, Default)]
+pub struct BootOptions {
+    /// Extra filesystem roots the booted app may read and write (issue
+    /// #155): portable profiles live outside the app dir, so the launcher
+    /// grants them explicitly. Each entry covers its subtree, read+write.
+    pub extra_fs_grants: Vec<PathBuf>,
+    /// Drive one IPC round-trip through the first window's renderer, as in
+    /// [`boot_app_dir_with_ipc_proof`].
+    pub prove_ipc: bool,
+}
+
+/// [`boot_app_dir`], plus an [`IpcProof`] and launcher-granted filesystem
+/// roots: `options.extra_fs_grants` extends the boot manifest past the app
+/// dir (portable profiles), and `options.prove_ipc` adds the round-trip.
+pub fn boot_app_dir_with_options(
+    app_dir: &Path,
+    options: &BootOptions,
+) -> Result<(AppBootReport, IpcProof), BootError> {
+    boot_inner(app_dir, options.prove_ipc, &options.extra_fs_grants)
 }
 
 /// [`boot_app_dir`], plus an [`IpcProof`] round-trip through the first
 /// window's renderer (issue #84).
 pub fn boot_app_dir_with_ipc_proof(app_dir: &Path) -> Result<(AppBootReport, IpcProof), BootError> {
-    boot_inner(app_dir, true)
+    boot_inner(app_dir, true, &[])
 }
 
 /// [`boot_app_dir`], plus the boot main-process host for headed paint
@@ -193,17 +216,47 @@ pub fn boot_app_dir_with_ipc_proof(app_dir: &Path) -> Result<(AppBootReport, Ipc
 /// see [`ElectronHost::snapshot_for_paint`]), safe to hand to
 /// [`crate::paint_app_window`].
 pub fn boot_app_dir_with_host(app_dir: &Path) -> Result<(AppBootReport, ElectronHost), BootError> {
-    let (report, _, host) = boot_inner_with_host(app_dir, false)?;
+    let (report, _, host) = boot_inner_with_host(app_dir, false, &[])?;
     Ok((report, host))
 }
 
-fn boot_inner(app_dir: &Path, prove_ipc: bool) -> Result<(AppBootReport, IpcProof), BootError> {
-    boot_inner_with_host(app_dir, prove_ipc).map(|(report, proof, _)| (report, proof))
+fn boot_inner(
+    app_dir: &Path,
+    prove_ipc: bool,
+    extra_fs_grants: &[PathBuf],
+) -> Result<(AppBootReport, IpcProof), BootError> {
+    boot_inner_with_host(app_dir, prove_ipc, extra_fs_grants)
+        .map(|(report, proof, _)| (report, proof))
+}
+
+/// Timer steps the boot settle loop may consume (issue #155).
+const SETTLE_TIMER_BUDGET: u32 = 64;
+
+/// Drive virtual timers to settle async boot (issue #155). Real bundles
+/// gate window creation behind timer-polled readiness (`setInterval`
+/// watching `app.isReady()`), which never fires on a stopped virtual
+/// clock — so jump the clock deadline-to-deadline and poll until no timers
+/// remain, a window appears, or the budget is spent. Bounded because
+/// recurring housekeeping intervals (update checks, log rotation) never
+/// drain on their own; stopping at the first window keeps long-delay
+/// callbacks (which may do real network I/O) from firing during boot.
+fn settle_boot_timers(doc: &mut ScriptDocument, host: &ElectronHost) {
+    for _ in 0..SETTLE_TIMER_BUDGET {
+        if !host.live_window_ids().is_empty() {
+            break;
+        }
+        let Some(deadline) = doc.next_timer_deadline() else {
+            break;
+        };
+        doc.advance_clock_to(deadline);
+        doc.poll(None);
+    }
 }
 
 fn boot_inner_with_host(
     app_dir: &Path,
     prove_ipc: bool,
+    extra_fs_grants: &[PathBuf],
 ) -> Result<(AppBootReport, IpcProof, ElectronHost), BootError> {
     let manifest_path = app_dir.join("package.json");
     if !manifest_path.is_file() {
@@ -245,7 +298,31 @@ fn boot_inner_with_host(
     let main_path = app_dir.join(main_entry);
     let main_source = read_file(&main_path)?;
 
-    let host = ElectronHost::new(&app_name, app_version);
+    // An app can always touch its own dir through `node:fs` (issues
+    // #154/#155): the boot grants the canonicalized app dir read+write,
+    // everything else stays deny-by-default. Broader grants (userData,
+    // home, removable media) ride with the #16 permission UX, not the
+    // boot path.
+    let grant_root = std::fs::canonicalize(app_dir).unwrap_or_else(|_| app_dir.to_path_buf());
+    let grant_scope = format!("{}/*", grant_root.to_string_lossy().replace('\\', "/"));
+    // Launcher-granted roots past the app dir (portable profiles, issue
+    // #155): canonicalized like the app dir so symlinked temp dirs match
+    // the canonical access spelling the fs gate checks.
+    let mut fs_read = vec![strake_electron_compat::PathScope::new(&grant_scope)];
+    let mut fs_write = vec![strake_electron_compat::PathScope::new(&grant_scope)];
+    for extra in extra_fs_grants {
+        let root = std::fs::canonicalize(extra).unwrap_or_else(|_| extra.clone());
+        let scope = format!("{}/*", root.to_string_lossy().replace('\\', "/"));
+        fs_read.push(strake_electron_compat::PathScope::new(&scope));
+        fs_write.push(strake_electron_compat::PathScope::new(&scope));
+    }
+    let host = ElectronHost::new(&app_name, app_version).with_permissions(
+        strake_electron_compat::PermissionManifest {
+            fs_read,
+            fs_write,
+            ..Default::default()
+        },
+    );
     let mut doc =
         ScriptDocument::from_html("<html><body></body></html>", DocumentConfig::default())
             .without_timer_thread()
@@ -258,6 +335,8 @@ fn boot_inner_with_host(
     doc.eval(&main_source);
     js_errors.extend(doc.take_js_errors());
     doc.mark_electron_ready();
+    js_errors.extend(doc.take_js_errors());
+    settle_boot_timers(&mut doc, &host);
     js_errors.extend(doc.take_js_errors());
 
     let mut windows = Vec::new();

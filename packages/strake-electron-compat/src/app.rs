@@ -35,18 +35,44 @@ pub enum AppEventKind {
 /// (= `userData`), `temp`, `exe`, `module`, `desktop`, `documents`,
 /// `downloads`, `music`, `pictures`, `videos`, `recent` (Windows-only),
 /// `logs`, `crashDumps`; unknown names throw. This MVP maps the seven
-/// variants below. Only [`AppPath::Temp`] has an OS default
-/// ([`std::env::temp_dir`]); every other variant returns `None` from
-/// [`App::get_path`] until the embedder calls [`App::set_path`]. The
-/// remaining OS folders (`$HOME`, `%APPDATA%`, XDG known-folders, …) have
+/// variants below. [`AppPath::Temp`] ([`std::env::temp_dir`]),
+/// [`AppPath::AppData`] (OS env), and [`AppPath::UserData`]
+/// (`appData/<name>`) have OS defaults; every other variant returns `None`
+/// from [`App::get_path`] until the embedder calls [`App::set_path`]. The
+/// remaining OS folders (known-folder documents/downloads/desktop, …) have
 /// no sound `std`-only derivation (`std::env::home_dir` is deprecated and
 /// env-var guessing diverges from the OS known-folder APIs Electron uses),
 /// so they stay explicit rather than guessed — no new crates for this MVP.
+/// OS default for [`AppPath::AppData`] (issue #155): the same env Electron
+/// reads — `%APPDATA%` on Windows, `~/Library/Application Support` on
+/// macOS, `$XDG_CONFIG_HOME` (else `~/.config`) elsewhere. `None` when the
+/// env is absent, so sandboxes without a home keep the explicit-`set_path`
+/// stance instead of inventing a location.
+fn default_app_data() -> Option<PathBuf> {
+    #[cfg(windows)]
+    {
+        std::env::var_os("APPDATA").map(PathBuf::from)
+    }
+    #[cfg(target_os = "macos")]
+    {
+        std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library/Application Support"))
+    }
+    #[cfg(not(any(windows, target_os = "macos")))]
+    {
+        if let Some(config) = std::env::var_os("XDG_CONFIG_HOME") {
+            return Some(PathBuf::from(config));
+        }
+        std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".config"))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum AppPath {
-    /// Per-app profile data (Electron `userData`; requires [`App::set_path`]).
+    /// Per-app profile data (Electron `userData`; defaults to
+    /// `appData/<name>`, [`App::set_path`] overrides).
     UserData,
-    /// Roaming app data (Electron `appData`; requires [`App::set_path`]).
+    /// Roaming app data (Electron `appData`; OS env default,
+    /// [`App::set_path`] overrides).
     AppData,
     /// Desktop directory (requires [`App::set_path`]).
     Desktop,
@@ -80,6 +106,8 @@ pub struct App {
     listeners: HashMap<AppEventKind, Vec<Listener>>,
     paths: HashMap<AppPath, PathBuf>,
     last_window_count: Option<usize>,
+    default_protocol_client: Option<String>,
+    app_user_model_id: Option<String>,
 }
 
 impl App {
@@ -94,12 +122,36 @@ impl App {
             listeners: HashMap::new(),
             paths: HashMap::from([(AppPath::Temp, std::env::temp_dir())]),
             last_window_count: None,
+            default_protocol_client: None,
+            app_user_model_id: None,
         }
     }
 
     /// Application name (`app.getName`).
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    /// Override the application name (`app.setName`, issue #155): real
+    /// bundles rename themselves at load (`app.setName("Joplin")`).
+    pub fn set_name(&mut self, name: &str) {
+        self.name = name.to_string();
+    }
+
+    /// Record a default-protocol-client registration
+    /// (`app.setAsDefaultProtocolClient`, issue #155). The OS handler
+    /// effect stays deferred (see coverage); the recording is real so the
+    /// call reports success like Electron does.
+    pub fn set_as_default_protocol_client(&mut self, protocol: &str) {
+        self.default_protocol_client = Some(protocol.to_string());
+    }
+
+    /// Record the Windows application user model id
+    /// (`app.setAppUserModelId`, issue #155). Headless has no taskbar
+    /// integration, so like Electron off-Windows this records the id with
+    /// no further effect.
+    pub fn set_app_user_model_id(&mut self, id: &str) {
+        self.app_user_model_id = Some(id.to_string());
     }
 
     /// Application version (`app.getVersion`).
@@ -170,15 +222,27 @@ impl App {
         }
     }
 
-    /// Resolve a named path (`app.getPath`); `None` until set, except `Temp`.
+    /// Resolve a named path (`app.getPath`); explicit [`App::set_path`]
+    /// values win, then OS defaults.
     ///
-    /// Only [`AppPath::Temp`] resolves out of the box. `UserData`,
-    /// `AppData`, `Desktop`, `Documents`, `Downloads`, and `Home` all
-    /// require [`App::set_path`] first — the Day-1 TS shim must define its
-    /// `None` mapping (e.g. fall back to `Temp` or throw like Electron
-    /// does for unknown names) rather than unwrapping.
+    /// [`AppPath::Temp`], [`AppPath::AppData`], and [`AppPath::UserData`]
+    /// resolve out of the box: `UserData` is Electron's `appData/<name>`
+    /// default (dynamic, so a load-time `setName` is reflected),
+    /// `AppData` comes from the OS env. `Desktop`, `Documents`,
+    /// `Downloads`, and `Home` still require [`App::set_path`] first —
+    /// the Day-1 TS shim throws like Electron does for unknown names
+    /// rather than unwrapping.
     pub fn get_path(&self, path: AppPath) -> Option<PathBuf> {
-        self.paths.get(&path).cloned()
+        if let Some(explicit) = self.paths.get(&path) {
+            return Some(explicit.clone());
+        }
+        match path {
+            AppPath::AppData => default_app_data(),
+            AppPath::UserData => self
+                .get_path(AppPath::AppData)
+                .map(|base| base.join(&self.name)),
+            _ => None,
+        }
     }
 
     /// Override a named path (`app.setPath`).
@@ -195,9 +259,13 @@ impl App {
     }
 }
 
+/// Shared event log plus its push closure (test helper).
+#[cfg(test)]
+type EventLog = (Rc<RefCell<Vec<String>>>, Rc<dyn Fn(&str)>);
+
 /// Test helper: shared event log.
 #[cfg(test)]
-fn log() -> (Rc<RefCell<Vec<String>>>, Rc<dyn Fn(&str)>) {
+fn log() -> EventLog {
     let events = Rc::new(RefCell::new(Vec::new()));
     let sink = Rc::clone(&events);
     let push: Rc<dyn Fn(&str)> =
@@ -258,10 +326,38 @@ fn quit_on_all_windows_closed_is_opt_out() {
 fn paths_default_temp_and_accept_overrides() {
     let mut app = App::new("QuickStart", "1.0.0");
     assert_eq!(app.get_path(AppPath::Temp), Some(std::env::temp_dir()));
-    assert_eq!(app.get_path(AppPath::UserData), None);
+    // Electron's default: `userData` is `appData/<name>` until overridden.
+    assert_eq!(
+        app.get_path(AppPath::UserData),
+        app.get_path(AppPath::AppData)
+            .map(|base| base.join("QuickStart")),
+        "userData defaults under appData, whatever the OS env provides"
+    );
     let custom = std::path::PathBuf::from("/tmp/strake-test-profile");
     app.set_path(AppPath::UserData, custom.clone());
     assert_eq!(app.get_path(AppPath::UserData), Some(custom));
+}
+
+#[test]
+fn user_data_default_follows_name_and_app_data_override() {
+    let mut app = App::new("QuickStart", "1.0.0");
+    // Real bundles rename at load (`app.setName("Joplin")`) before any
+    // `getPath`: the default follows the current name.
+    app.set_name("Joplin");
+    assert_eq!(
+        app.get_path(AppPath::UserData),
+        app.get_path(AppPath::AppData)
+            .map(|base| base.join("Joplin")),
+    );
+    app.set_path(
+        AppPath::AppData,
+        std::path::PathBuf::from("/tmp/strake-appdata"),
+    );
+    assert_eq!(
+        app.get_path(AppPath::UserData),
+        Some(std::path::PathBuf::from("/tmp/strake-appdata/Joplin")),
+        "an appData override moves the userData default with it"
+    );
 }
 
 #[test]
@@ -269,6 +365,32 @@ fn name_and_version_are_reported() {
     let app = App::new("QuickStart", "1.0.0");
     assert_eq!(app.name(), "QuickStart");
     assert_eq!(app.version(), "1.0.0");
+}
+
+#[test]
+fn set_name_updates_reported_name() {
+    let mut app = App::new("QuickStart", "1.0.0");
+    app.set_name("Joplin");
+    assert_eq!(app.name(), "Joplin");
+}
+
+#[test]
+fn default_protocol_client_is_recorded() {
+    let mut app = App::new("QuickStart", "1.0.0");
+    assert_eq!(app.default_protocol_client, None);
+    app.set_as_default_protocol_client("joplin");
+    assert_eq!(app.default_protocol_client, Some(String::from("joplin")));
+}
+
+#[test]
+fn app_user_model_id_is_recorded() {
+    let mut app = App::new("QuickStart", "1.0.0");
+    assert_eq!(app.app_user_model_id, None);
+    app.set_app_user_model_id("net.cozic.joplin-desktop");
+    assert_eq!(
+        app.app_user_model_id,
+        Some(String::from("net.cozic.joplin-desktop"))
+    );
 }
 
 // PIN (review PR #79): `ready` must not fire after `quit()`. A quit during
@@ -314,16 +436,21 @@ fn window_all_closed_fires_once_per_transition_to_zero() {
     );
 }
 
-// PIN (review PR #79): contract lock — only `Temp` has an OS default; every
-// other `AppPath` is `None` until `set_path`. If a sound `std`-only default
-// is ever added for a name, this test names the place to update.
+// PIN (review PR #79, updated for issue #155): contract lock — `Temp`,
+// `AppData`, and `UserData` have sound `std`-only OS defaults (env-based,
+// the same source Electron reads); every other `AppPath` is `None` until
+// `set_path`.
 #[test]
-fn only_temp_resolves_without_set_path() {
+fn only_defaulted_paths_resolve_without_set_path() {
     let app = App::new("QuickStart", "1.0.0");
     assert_eq!(app.get_path(AppPath::Temp), Some(std::env::temp_dir()));
+    assert_eq!(
+        app.get_path(AppPath::UserData),
+        app.get_path(AppPath::AppData)
+            .map(|base| base.join("QuickStart")),
+        "userData defaults under appData"
+    );
     for path in [
-        AppPath::UserData,
-        AppPath::AppData,
         AppPath::Desktop,
         AppPath::Documents,
         AppPath::Downloads,

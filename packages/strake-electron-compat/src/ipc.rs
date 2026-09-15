@@ -202,10 +202,10 @@ fn send_fans_out_to_all_listeners() {
 #[test]
 fn duplicate_handler_registration_errors() {
     let mut bus = IpcBus::new();
-    bus.handle("get-data", |args| Ok(args))
+    bus.handle("get-data", Ok)
         .expect("first registration succeeds");
     let err = bus
-        .handle("get-data", |args| Ok(args))
+        .handle("get-data", Ok)
         .expect_err("second registration must error");
     assert_eq!(err, IpcError::DuplicateHandler(String::from("get-data")));
 }
@@ -246,8 +246,7 @@ fn single_listener_removal_keeps_siblings() {
 #[test]
 fn removed_routes_go_quiet() {
     let mut bus = IpcBus::new();
-    bus.handle("get-data", |args| Ok(args))
-        .expect("first registration");
+    bus.handle("get-data", Ok).expect("first registration");
     bus.on("tick", |_| panic!("must not fire after removal"));
     bus.remove_handler("get-data");
     bus.remove_all_listeners("tick");

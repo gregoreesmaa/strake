@@ -1,0 +1,10 @@
+{
+  "name": "interval-app",
+  "version": "1.0.0",
+  "description": "Fixture Electron app whose window creation waits behind a timer-polled readiness gate (issue #155, Joplin's waitForElectronAppReady pattern)",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "license": "CC0-1.0"
+}

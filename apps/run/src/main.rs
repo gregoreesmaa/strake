@@ -15,13 +15,15 @@
 
 use std::path::PathBuf;
 
-use strake_vibey_script::{IpcProof, boot_app_dir, boot_app_dir_with_ipc_proof};
+use strake_vibey_script::{BootOptions, IpcProof, boot_app_dir_with_options};
 
 #[cfg(feature = "headed")]
 mod headed;
 
 fn usage() -> ! {
-    eprintln!("usage: strake-run [--prove-ipc] [--prove-headed [--headed-secs N]] <app-dir>");
+    eprintln!(
+        "usage: strake-run [--prove-ipc] [--grant-fs <dir>...] [--prove-headed [--headed-secs N]] <app-dir>"
+    );
     std::process::exit(2);
 }
 
@@ -31,6 +33,7 @@ fn main() {
     // `while let ... = args.next()` trips `clippy::while_let_on_iterator`.
     let args: Vec<String> = std::env::args().skip(1).collect();
     let mut prove_ipc = false;
+    let mut extra_fs_grants: Vec<PathBuf> = Vec::new();
     #[cfg(feature = "headed")]
     let mut prove_headed = false;
     #[cfg(feature = "headed")]
@@ -41,6 +44,12 @@ fn main() {
         let arg = &args[i];
         if arg == "--prove-ipc" {
             prove_ipc = true;
+        } else if arg == "--grant-fs" {
+            i += 1;
+            match args.get(i) {
+                Some(granted) => extra_fs_grants.push(PathBuf::from(granted)),
+                None => usage(),
+            }
         } else if arg == "--prove-headed" {
             #[cfg(feature = "headed")]
             {
@@ -86,20 +95,21 @@ fn main() {
     }
     let Some(dir) = dir else { usage() };
     let mut ipc_proof = IpcProof::default();
-    let report = match if prove_ipc {
-        boot_app_dir_with_ipc_proof(&PathBuf::from(&dir)).map(|(report, proof)| {
+    let options = BootOptions {
+        extra_fs_grants,
+        prove_ipc,
+    };
+    let report =
+        match boot_app_dir_with_options(&PathBuf::from(&dir), &options).map(|(report, proof)| {
             ipc_proof = proof;
             report
-        })
-    } else {
-        boot_app_dir(&PathBuf::from(&dir))
-    } {
-        Ok(report) => report,
-        Err(error) => {
-            eprintln!("strake-run: {error}");
-            std::process::exit(1);
-        }
-    };
+        }) {
+            Ok(report) => report,
+            Err(error) => {
+                eprintln!("strake-run: {error}");
+                std::process::exit(1);
+            }
+        };
 
     println!("app: {} (main: {})", report.app_name, report.main_entry);
     if report.js_errors.is_empty() {

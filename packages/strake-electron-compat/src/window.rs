@@ -12,6 +12,7 @@ use std::collections::{HashMap, VecDeque};
 use serde_json::Value;
 
 use crate::IpcBus;
+use crate::SessionId;
 
 /// Content rectangle (`Electron.Rectangle`): `{ x, y, width, height }`, in
 /// device-independent pixels (DIP), matching Electron's DIP rectangles. The
@@ -98,6 +99,11 @@ pub struct BrowserWindowOptions {
     /// `webPreferences` subset (issue #109): `preload` is recorded, every
     /// other sub-key is accepted and ignored.
     pub web_preferences: WebPreferences,
+    /// Owning session (`webPreferences.session`, issue #155): the
+    /// [`SessionId`](crate::SessionId) from `session.fromPath` /
+    /// `fromPartition`, or `0` (the default session) when the bundle passes
+    /// no session.
+    pub session: SessionId,
 }
 
 impl Default for BrowserWindowOptions {
@@ -116,6 +122,7 @@ impl Default for BrowserWindowOptions {
             show: true,
             title: String::new(),
             web_preferences: WebPreferences::default(),
+            session: 0,
         }
     }
 }
@@ -831,12 +838,12 @@ fn web_contents_records_navigation_and_sends_ipc() {
     let win = manager.get_mut(id).unwrap();
     win.web_contents_mut().load_url("https://example.com/app");
     assert_eq!(
-        win.web_contents().pending_url().as_deref(),
+        win.web_contents().pending_url(),
         Some("https://example.com/app")
     );
     win.web_contents_mut().load_file("/app/index.html");
     assert_eq!(
-        win.web_contents().pending_url().as_deref(),
+        win.web_contents().pending_url(),
         Some("file:///app/index.html")
     );
     let received = std::rc::Rc::new(std::cell::RefCell::new(None));
